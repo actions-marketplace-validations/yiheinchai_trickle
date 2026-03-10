@@ -191,6 +191,23 @@ export async function getTypeDiff(functionId: number, opts?: GetTypeDiffOpts): P
   });
 }
 
+export interface CodegenOpts {
+  functionName?: string;
+  env?: string;
+  language?: string;
+}
+
+export async function fetchCodegen(opts?: CodegenOpts): Promise<{ types: string }> {
+  const pathStr = opts?.functionName
+    ? `/api/codegen/${encodeURIComponent(opts.functionName)}`
+    : "/api/codegen";
+
+  return fetchJson(pathStr, {
+    env: opts?.env,
+    language: opts?.language,
+  });
+}
+
 export function tailEvents(
   onEvent: (event: TailEvent) => void,
   filter?: string

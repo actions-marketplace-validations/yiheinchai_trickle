@@ -6,6 +6,7 @@ import { functionsCommand } from "./commands/functions";
 import { typesCommand } from "./commands/types";
 import { errorsCommand } from "./commands/errors";
 import { tailCommand } from "./commands/tail";
+import { codegenCommand } from "./commands/codegen";
 
 const program = new Command();
 
@@ -56,6 +57,18 @@ program
   .option("--filter <pattern>", "Filter by function name pattern")
   .action(async (opts) => {
     await tailCommand(opts);
+  });
+
+// trickle codegen [function-name]
+program
+  .command("codegen [function-name]")
+  .description("Generate TypeScript (or Python) type definitions from observed runtime types")
+  .option("-o, --out <path>", "Write output to a file instead of stdout")
+  .option("--env <env>", "Filter by environment")
+  .option("--python", "Generate Python type stubs (.pyi) instead of TypeScript")
+  .option("--watch", "Watch mode: re-generate when new types are observed")
+  .action(async (functionName: string | undefined, opts) => {
+    await codegenCommand(functionName, opts);
   });
 
 // Handle unhandled rejections

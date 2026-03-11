@@ -16,6 +16,7 @@ import { devCommand } from "./commands/dev";
 import { testGenCommand } from "./commands/test-gen";
 import { dashboardCommand } from "./commands/dashboard";
 import { proxyCommand } from "./commands/proxy";
+import { exportCommand } from "./commands/export";
 
 const program = new Command();
 
@@ -183,6 +184,16 @@ program
   .option("-p, --port <port>", "Port for the proxy server", "4000")
   .action(async (opts) => {
     await proxyCommand(opts);
+  });
+
+// trickle export
+program
+  .command("export")
+  .description("Generate all output formats into a .trickle/ directory at once")
+  .option("-d, --dir <path>", "Output directory (default: .trickle)")
+  .option("--env <env>", "Filter by environment")
+  .action(async (opts) => {
+    await exportCommand(opts);
   });
 
 // Handle unhandled rejections

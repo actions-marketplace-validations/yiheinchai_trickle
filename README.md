@@ -30,6 +30,7 @@ trickle dev
 - [API Test Generation](#api-test-generation)
 - [Breaking Change Detection](#breaking-change-detection)
 - [Web Dashboard](#web-dashboard)
+- [Export All](#export-all)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1150,6 +1151,47 @@ node test-dashboard-e2e.js
 
 ---
 
+## Export All
+
+Generate every output format into a single `.trickle/` directory with one command — types, client, handlers, schemas, hooks, OpenAPI spec, and test scaffolds.
+
+```bash
+# Generate everything into .trickle/
+npx trickle export
+
+# Custom output directory
+npx trickle export --dir generated/
+
+# Filter by environment
+npx trickle export --env production
+```
+
+This creates 7 files at once:
+
+| File | Contents |
+|------|----------|
+| `types.d.ts` | TypeScript type declarations for all observed functions |
+| `api-client.ts` | Typed fetch-based API client with `createTrickleClient()` |
+| `handlers.d.ts` | Express `RequestHandler` type aliases for route handlers |
+| `schemas.ts` | Zod validation schemas inferred from runtime types |
+| `hooks.ts` | TanStack React Query hooks (`useQuery`/`useMutation`) |
+| `openapi.json` | OpenAPI 3.0 specification |
+| `api.test.ts` | Vitest test scaffolds with shape assertions |
+
+Instead of running 7 separate `trickle codegen` commands, `trickle export` gives you everything in one shot — ideal for CI pipelines or project setup scripts.
+
+```bash
+# Typical workflow
+trickle dev "node app.js"    # Run your app, observe types
+trickle export               # Generate everything
+# .trickle/types.d.ts, api-client.ts, handlers.d.ts, schemas.ts, hooks.ts, openapi.json, api.test.ts
+
+# Run the dedicated E2E test (starts its own backend):
+node test-export-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1370,6 +1412,21 @@ npx trickle proxy --target http://localhost:3000 --port 8080  # Custom proxy por
 |------|-------------|
 | `-t, --target <url>` | Target server URL (required) |
 | `-p, --port <port>` | Proxy server port (default: 4000) |
+
+### `trickle export`
+
+Generate all output formats into a directory at once.
+
+```bash
+npx trickle export                  # Output to .trickle/
+npx trickle export --dir generated/ # Custom directory
+npx trickle export --env production # Filter by environment
+```
+
+| Flag | Description |
+|------|-------------|
+| `-d, --dir <path>` | Output directory (default: `.trickle`) |
+| `--env <env>` | Filter by environment |
 
 ### `trickle dashboard`
 
@@ -1642,6 +1699,7 @@ trickle/
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
 ├── test-proxy-e2e.js       # Transparent proxy type capture test
+├── test-export-e2e.js      # Export all formats test
 ├── test-dashboard-e2e.js   # Web dashboard test
 ├── test-test-gen-e2e.js    # API test generation test
 ├── test-react-query-e2e.js # React Query hook generation test
@@ -1685,6 +1743,7 @@ node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
 node test-proxy-e2e.js       # Transparent proxy type capture
 node test-dashboard-e2e.js   # Web dashboard
+node test-export-e2e.js      # Export all formats
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
 node test-zod-e2e.js         # Zod schema generation

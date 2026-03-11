@@ -34,6 +34,7 @@ import { packCommand } from "./commands/pack";
 import { unpackCommand } from "./commands/unpack";
 import { runCommand } from "./commands/run";
 import { annotateCommand } from "./commands/annotate";
+import { stubsCommand } from "./commands/stubs";
 
 const program = new Command();
 
@@ -400,6 +401,16 @@ program
   .option("--dry-run", "List contents without importing")
   .action(async (file: string, opts) => {
     await unpackCommand(file, opts);
+  });
+
+// trickle stubs <dir>
+program
+  .command("stubs <dir>")
+  .description("Generate .d.ts and .pyi sidecar type stubs next to source files — IDEs pick them up automatically")
+  .option("--env <env>", "Filter by environment")
+  .option("--dry-run", "Preview which files would be created without writing them")
+  .action(async (dir: string, opts) => {
+    await stubsCommand(dir, opts);
   });
 
 // trickle annotate <file>

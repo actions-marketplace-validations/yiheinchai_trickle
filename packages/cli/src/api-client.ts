@@ -231,6 +231,19 @@ export async function fetchAnnotations(opts?: {
   });
 }
 
+export interface StubsResponse {
+  stubs: Record<string, { ts: string; python: string }>;
+}
+
+export async function fetchStubs(opts?: {
+  env?: string;
+}): Promise<StubsResponse> {
+  return fetchJson("/api/codegen", {
+    env: opts?.env,
+    format: "stubs",
+  });
+}
+
 export interface MockRoute {
   method: string;
   path: string;

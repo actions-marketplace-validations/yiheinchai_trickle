@@ -58,6 +58,7 @@ trickle dev
 - [Portable Type Bundles](#portable-type-bundles)
 - [Universal Function Observation](#universal-function-observation)
 - [Source Code Annotation](#source-code-annotation)
+- [Sidecar Type Stubs](#sidecar-type-stubs)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2820,7 +2821,66 @@ node test-annotate-e2e.js
 
 ---
 
+## Sidecar Type Stubs
+
+Generate `.d.ts` and `.pyi` files next to your source files — IDEs pick them up automatically for autocomplete and type checking, without modifying your source code.
+
+```bash
+# 1. Observe your code
+trickle run "node app.js"
+
+# 2. Generate stubs next to source files
+trickle stubs src/
+```
+
+This creates:
+- `src/helpers.d.ts` next to `src/helpers.js` — TypeScript/VS Code picks it up
+- `src/utils.pyi` next to `src/utils.py` — Pylance/mypy/pyright picks it up
+
+```
+src/
+  helpers.js        ← your code (unchanged)
+  helpers.d.ts      ← auto-generated type stubs
+  utils.py          ← your code (unchanged)
+  utils.pyi         ← auto-generated type stubs
+```
+
+The stubs contain full type declarations:
+```typescript
+// helpers.d.ts (auto-generated)
+export interface ParseConfigInput { host: string; port: number; debug: boolean; }
+export interface ParseConfigOutput { host: string; port: number; debug: boolean; }
+export declare function parseConfig(input: ParseConfigInput): ParseConfigOutput;
+```
+
+Use `--dry-run` to preview what would be created:
+```bash
+trickle stubs src/ --dry-run
+```
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/backend && npm run build --workspace=packages/cli
+node test-stubs-e2e.js
+```
+
+---
+
 ## CLI Reference
+
+### `trickle stubs <dir>`
+
+Generate `.d.ts` and `.pyi` sidecar type stubs next to source files.
+
+```bash
+trickle stubs src/                # Generate stubs for all matched files
+trickle stubs . --dry-run         # Preview without writing
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Filter by environment |
+| `--dry-run` | Preview which files would be created without writing them |
 
 ### `trickle annotate <file>`
 

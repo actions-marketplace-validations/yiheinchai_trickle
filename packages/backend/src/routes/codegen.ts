@@ -173,6 +173,24 @@ router.get("/", (req: Request, res: Response) => {
       const annotations = generateInlineAnnotations(functions, lang as "typescript" | "python");
       res.json({ annotations });
       return;
+    } else if (format === "stubs") {
+      // Group functions by module and return per-module type stubs
+      const byModule: Record<string, typeof functions> = {};
+      for (const fn of functions) {
+        const mod = fn.module || "_default";
+        if (!byModule[mod]) byModule[mod] = [];
+        byModule[mod].push(fn);
+      }
+
+      const stubs: Record<string, { ts: string; python: string }> = {};
+      for (const [mod, fns] of Object.entries(byModule)) {
+        stubs[mod] = {
+          ts: generateAllTypes(fns),
+          python: generatePythonTypes(fns),
+        };
+      }
+      res.json({ stubs });
+      return;
     } else if (format === "client") {
       types = generateApiClient(functions);
     } else if (isPython) {

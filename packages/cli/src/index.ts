@@ -106,6 +106,7 @@ program
   .option("--zod", "Generate Zod validation schemas with inferred types")
   .option("--react-query", "Generate typed TanStack React Query hooks")
   .option("--guards", "Generate runtime type guard functions")
+  .option("--middleware", "Generate Express request validation middleware")
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);

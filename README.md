@@ -36,6 +36,7 @@ trickle dev
 - [API Replay Testing](#api-replay-testing)
 - [API Documentation Generation](#api-documentation-generation)
 - [Test Fixtures](#test-fixtures)
+- [Request Validation Middleware](#request-validation-middleware)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -96,6 +97,7 @@ npx trickle codegen --client     # Generate a typed API client
 npx trickle codegen --handlers   # Generate typed Express handlers
 npx trickle codegen --zod        # Generate Zod validation schemas
 npx trickle codegen --react-query # Generate React Query hooks
+npx trickle codegen --middleware  # Generate Express validation middleware
 npx trickle test --generate      # Generate API test files
 npx trickle mock                 # Start a mock API server
 npx trickle proxy -t http://localhost:3000  # Zero-change type capture
@@ -1467,6 +1469,63 @@ node test-sample-e2e.js
 
 ---
 
+## Request Validation Middleware
+
+Generate Express request validation middleware from observed runtime types — zero dependencies, no Zod required.
+
+```bash
+npx trickle codegen --middleware
+npx trickle codegen --middleware --out .trickle/middleware.ts
+```
+
+trickle observes the actual request bodies your POST/PUT/PATCH routes receive, then generates middleware functions that validate incoming requests match those shapes:
+
+```typescript
+// Auto-generated — validates POST /api/users request body
+export function validatePostApiUsers(req: Request, res: Response, next: NextFunction): void {
+  const errors: string[] = [];
+  const body = req.body;
+  if (!("name" in body)) errors.push("name is required");
+  else if (typeof body["name"] !== "string") errors.push("name must be a string");
+  if (!("email" in body)) errors.push("email is required");
+  else if (typeof body["email"] !== "string") errors.push("email must be a string");
+  if (!("age" in body)) errors.push("age is required");
+  else if (typeof body["age"] !== "number") errors.push("age must be a number");
+  if (errors.length > 0) { res.status(400).json({ error: "Validation failed", errors }); return; }
+  next();
+}
+
+// Route → middleware map for easy wiring
+export const validators: Record<string, (req: Request, res: Response, next: NextFunction) => void> = {
+  "POST /api/users": validatePostApiUsers,
+  "PUT /api/users/:id": validatePutApiUsersId,
+};
+```
+
+Wire it up in one line:
+
+```typescript
+import { validatePostApiUsers } from "./.trickle/middleware";
+
+app.post("/api/users", validatePostApiUsers, (req, res) => {
+  // req.body is guaranteed to have name (string), email (string), age (number)
+});
+```
+
+Key behaviors:
+- Only generates middleware for POST, PUT, and PATCH routes (GET/DELETE have no body)
+- Validates field existence and primitive types (`string`, `number`, `boolean`)
+- Returns 400 with all validation errors collected (not just the first)
+- Calls `next()` on success so your handler runs normally
+- Exports a `validators` map for programmatic route wiring
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-middleware-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1574,6 +1633,7 @@ npx trickle codegen --handlers --out .trickle/handlers.d.ts  # Express handler t
 npx trickle codegen --zod --out .trickle/schemas.ts          # Zod validation schemas
 npx trickle codegen --react-query --out .trickle/hooks.ts    # React Query hooks
 npx trickle codegen --guards --out .trickle/guards.ts       # Runtime type guards
+npx trickle codegen --middleware --out .trickle/middleware.ts # Express validation middleware
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -1587,6 +1647,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--handlers` | Generate typed Express handler types |
 | `--zod` | Generate Zod validation schemas with inferred types |
 | `--guards` | Generate runtime type guard functions |
+| `--middleware` | Generate Express request validation middleware |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2047,6 +2108,7 @@ trickle/
 ├── test-proxy-e2e.js       # Transparent proxy type capture test
 ├── test-sample-e2e.js      # Test fixture generation test
 ├── test-guards-e2e.js      # Type guard generation test
+├── test-middleware-e2e.js   # Express validation middleware test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2099,6 +2161,7 @@ node test-coverage-e2e.js    # Type coverage report
 node test-replay-e2e.js      # API replay regression tests
 node test-sample-e2e.js      # Test fixture generation
 node test-guards-e2e.js      # Type guard generation
+node test-middleware-e2e.js   # Express validation middleware
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

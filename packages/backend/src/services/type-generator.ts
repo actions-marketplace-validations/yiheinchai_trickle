@@ -1899,5 +1899,215 @@ function generateGuardInterface(name: string, node: TypeNode): string | null {
   return [...subInterfaces, lines.join("\n")].join("\n\n") + "\n";
 }
 
+// ── Express validation middleware generation ──
+
+/**
+ * Generate a validation expression that returns an array of error strings.
+ * `varName` is the variable being checked.
+ */
+function typeNodeToValidation(node: TypeNode, varName: string, path: string, depth: number = 0): string[] {
+  if (depth > 3) return [];
+  const checks: string[] = [];
+
+  switch (node.kind) {
+    case "primitive": {
+      if (node.name === "null") {
+        checks.push(`if (${varName} !== null) errors.push(\`${path} must be null\`);`);
+      } else if (node.name === "undefined") {
+        // Don't validate undefined — field just shouldn't be required
+      } else {
+        checks.push(`if (typeof ${varName} !== "${node.name}") errors.push(\`${path} must be a ${node.name}\`);`);
+      }
+      break;
+    }
+
+    case "array": {
+      checks.push(`if (!Array.isArray(${varName})) errors.push(\`${path} must be an array\`);`);
+      if (node.element.kind !== "unknown" && depth < 3) {
+        checks.push(`else if (${varName}.length > 0) {`);
+        checks.push(...typeNodeToValidation(node.element, `${varName}[0]`, `${path}[0]`, depth + 1).map(l => "  " + l));
+        checks.push(`}`);
+      }
+      break;
+    }
+
+    case "object": {
+      const keys = Object.keys(node.properties);
+      checks.push(`if (typeof ${varName} !== "object" || ${varName} === null) errors.push(\`${path} must be an object\`);`);
+      if (keys.length > 0 && depth < 3) {
+        checks.push(`else {`);
+        for (const key of keys) {
+          const propPath = path ? `${path}.${key}` : key;
+          const propAccess = `${varName}["${key}"]`;
+          // Check key existence
+          checks.push(`  if (!("${key}" in ${varName})) errors.push(\`${propPath} is required\`);`);
+          // Type check if present
+          const innerChecks = typeNodeToValidation(node.properties[key], propAccess, propPath, depth + 1);
+          if (innerChecks.length > 0) {
+            checks.push(`  else {`);
+            checks.push(...innerChecks.map(l => "    " + l));
+            checks.push(`  }`);
+          }
+        }
+        checks.push(`}`);
+      }
+      break;
+    }
+
+    case "union": {
+      // For unions, value must match at least one member — skip detailed validation
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  return checks;
+}
+
+/**
+ * Generate Express validation middleware from runtime-observed types.
+ *
+ * For each POST/PUT/PATCH route, generates middleware that:
+ * - Validates request body structure and types
+ * - Returns 400 with structured errors on failure
+ * - Passes through to next() on success
+ *
+ * Self-contained — no external validation library required.
+ */
+export function generateMiddleware(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  // Filter to routes with request bodies
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+    bodyNode: TypeNode;
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (!parsed) continue;
+    if (!["POST", "PUT", "PATCH"].includes(parsed.method)) continue;
+
+    let bodyNode: TypeNode | undefined;
+    if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+      bodyNode = fn.argsType.properties["body"];
+    }
+    if (!bodyNode || bodyNode.kind === "unknown") continue;
+    if (bodyNode.kind === "object" && Object.keys(bodyNode.properties).length === 0) continue;
+
+    routes.push({ parsed, fn, bodyNode });
+  }
+
+  if (routes.length === 0) {
+    return "// No POST/PUT/PATCH routes with request bodies found.\n// Instrument your app and make some requests first.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated Express validation middleware by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --middleware` to update");
+  sections.push("");
+  sections.push('import { Request, Response, NextFunction } from "express";');
+  sections.push("");
+
+  // Generate interfaces for request body types
+  const extracted: ExtractedInterface[] = [];
+
+  for (const { parsed, bodyNode } of routes) {
+    const typeName = `${parsed.typeName}Body`;
+
+    if (bodyNode.kind === "object") {
+      sections.push(renderInterface(typeName, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+    } else {
+      const tsType = typeNodeToTS(bodyNode, extracted, typeName, undefined, 0);
+      sections.push(`export type ${typeName} = ${tsType};`);
+    }
+    sections.push("");
+  }
+
+  // Render any extracted sub-interfaces
+  for (const ext of extracted) {
+    if (ext.node.kind === "object") {
+      sections.push(renderInterface(ext.name, ext.node, extracted));
+      sections.push("");
+    }
+  }
+
+  // Generate validation middleware for each route
+  for (const { parsed, bodyNode } of routes) {
+    const middlewareName = `validate${parsed.typeName}`;
+    const typeName = `${parsed.typeName}Body`;
+
+    sections.push(`/**`);
+    sections.push(` * Validates request body for ${parsed.method} ${parsed.path}`);
+    sections.push(` * Returns 400 with structured errors if validation fails.`);
+    sections.push(` */`);
+    sections.push(`export function ${middlewareName}(req: Request, res: Response, next: NextFunction): void {`);
+    sections.push(`  const errors: string[] = [];`);
+    sections.push(`  const body = req.body;`);
+    sections.push("");
+
+    // Null/undefined check
+    sections.push(`  if (body === null || body === undefined || typeof body !== "object") {`);
+    sections.push(`    res.status(400).json({ error: "Request body is required", errors: ["body must be an object"] });`);
+    sections.push(`    return;`);
+    sections.push(`  }`);
+    sections.push("");
+
+    // Generate field validations
+    if (bodyNode.kind === "object") {
+      const keys = Object.keys(bodyNode.properties);
+      for (const key of keys) {
+        const propNode = bodyNode.properties[key];
+        sections.push(`  // Validate ${key}`);
+        sections.push(`  if (!("${key}" in body)) {`);
+        sections.push(`    errors.push("${key} is required");`);
+        sections.push(`  }`);
+
+        const innerChecks = typeNodeToValidation(propNode, `body["${key}"]`, key, 1);
+        if (innerChecks.length > 0) {
+          sections.push(`  else {`);
+          for (const check of innerChecks) {
+            sections.push(`    ${check}`);
+          }
+          sections.push(`  }`);
+        }
+        sections.push("");
+      }
+    }
+
+    sections.push(`  if (errors.length > 0) {`);
+    sections.push(`    res.status(400).json({ error: "Validation failed", errors });`);
+    sections.push(`    return;`);
+    sections.push(`  }`);
+    sections.push("");
+    sections.push(`  next();`);
+    sections.push(`}`);
+    sections.push("");
+  }
+
+  // Export a combined middleware map for convenience
+  sections.push("/** Map of route patterns to their validation middleware */");
+  sections.push("export const validators = {");
+  for (const { parsed } of routes) {
+    const middlewareName = `validate${parsed.typeName}`;
+    sections.push(`  "${parsed.method} ${parsed.path}": ${middlewareName},`);
+  }
+  sections.push("} as const;");
+  sections.push("");
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

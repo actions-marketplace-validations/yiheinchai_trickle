@@ -8,7 +8,8 @@
     ".": "./dist/index.js",
     "./register": "./register.js",
     "./observe": "./observe.js",
-    "./observe-esm": "./observe-esm.mjs"
+    "./observe-esm": "./observe-esm.mjs",
+    "./auto": "./auto.js"
   },
   "scripts": {
     "build": "tsc",

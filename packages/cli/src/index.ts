@@ -29,6 +29,7 @@ import { validateCommand } from "./commands/validate";
 import { watchCommand } from "./commands/watch";
 import { inferCommand } from "./commands/infer";
 import { overviewCommand } from "./commands/overview";
+import { traceCommand } from "./commands/trace";
 
 const program = new Command();
 
@@ -351,6 +352,19 @@ program
   .option("--json", "Output raw JSON")
   .action(async (opts) => {
     await overviewCommand(opts);
+  });
+
+// trickle trace <method> <url>
+program
+  .command("trace <method> <url>")
+  .description("Make an HTTP request and show the response with inline type annotations")
+  .option("-H, --header <header...>", "HTTP headers")
+  .option("-d, --body <body>", "Request body (JSON string)")
+  .option("--save", "Save inferred types to the backend")
+  .option("--env <env>", "Environment label (default: development)")
+  .option("--module <module>", "Module label (default: trace)")
+  .action(async (method: string, url: string, opts) => {
+    await traceCommand(method, url, opts);
   });
 
 // Handle unhandled rejections

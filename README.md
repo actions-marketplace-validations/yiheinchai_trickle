@@ -53,6 +53,7 @@ trickle dev
 - [Live Watch Mode](#live-watch-mode)
 - [Type Inference from JSON](#type-inference-from-json)
 - [API Overview](#api-overview)
+- [Type-Annotated API Tracing](#type-annotated-api-tracing)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2492,6 +2493,64 @@ node test-overview-e2e.js
 
 ---
 
+## Type-Annotated API Tracing
+
+Make an HTTP request and see the response with inline type annotations on every field. Like `curl` but type-aware — the perfect tool for exploring unfamiliar APIs.
+
+```bash
+trickle trace GET https://api.example.com/users
+
+#   trickle trace
+#   ──────────────────────────────────────────────────
+#   GET https://api.example.com/users
+#   Status: 200 OK (142ms)
+#   Type:   application/json
+#   ──────────────────────────────────────────────────
+#
+#   {
+#     "users":                                // {id, name, email}[]
+#     [
+#       {
+#         "id": 1,                            // number
+#         "name": "Alice",                    // string
+#         "email": "alice@test.com"           // string
+#       }
+#       // ... +1 more items
+#     ]
+#     "total": 2,                             // number
+#     "page": 1                               // number
+#   }
+#
+#   ──────────────────────────────────────────────────
+#   5 fields, 2 unique types, 3 depth
+```
+
+Every field gets a type annotation comment. Arrays show their element type. Objects show their field names. Complex responses are automatically truncated for readability.
+
+```bash
+# POST with body
+trickle trace POST https://api.example.com/users \
+  -d '{"name":"Alice","email":"alice@test.com"}'
+
+# Save types to backend while tracing (combines trace + capture)
+trickle trace GET https://api.example.com/users --save
+
+# With custom headers
+trickle trace GET https://api.example.com/users \
+  -H "Authorization: Bearer token" --save --env staging
+```
+
+The `--save` flag makes trace double as a capture tool — explore the API AND record types in one command.
+
+**Test:**
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-trace-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2893,6 +2952,24 @@ npx trickle overview --env prod   # Filter by environment
 | `--env <env>` | Filter by environment |
 | `--json` | Output raw JSON |
 
+### `trickle trace <method> <url>`
+
+Make an HTTP request and show the response with inline type annotations.
+
+```bash
+npx trickle trace GET https://api.example.com/users
+npx trickle trace POST https://api.example.com/users -d '{"name":"Alice"}'
+npx trickle trace GET https://api.example.com/users --save
+```
+
+| Flag | Description |
+|------|-------------|
+| `-H, --header <header...>` | HTTP headers |
+| `-d, --body <body>` | Request body (JSON string) |
+| `--save` | Save inferred types to the backend |
+| `--env <env>` | Environment label (default: development) |
+| `--module <module>` | Module label (default: trace) |
+
 ### `trickle replay`
 
 Replay captured API requests as regression tests.
@@ -3234,6 +3311,7 @@ trickle/
 ├── test-watch-e2e.js       # Live watch mode test
 ├── test-infer-e2e.js       # JSON type inference test
 ├── test-overview-e2e.js    # API overview test
+├── test-trace-e2e.js       # Type-annotated tracing test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -3303,6 +3381,7 @@ node test-validate-e2e.js    # API validation
 node test-watch-e2e.js       # Live watch mode
 node test-infer-e2e.js       # JSON type inference
 node test-overview-e2e.js    # API overview
+node test-trace-e2e.js       # Type-annotated tracing
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

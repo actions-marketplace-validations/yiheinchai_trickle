@@ -223,7 +223,12 @@ export async function runCommand(
   let localMode = false;
   const backendRunning = await checkBackend(backendUrl);
   if (!backendRunning) {
-    backendProc = await autoStartBackend();
+    // Only try auto-start if using default URL (custom URL means user manages their own backend)
+    const isCustomUrl = !!process.env.TRICKLE_BACKEND_URL &&
+      process.env.TRICKLE_BACKEND_URL !== "http://localhost:4888";
+    if (!isCustomUrl) {
+      backendProc = await autoStartBackend();
+    }
     if (!backendProc) {
       // Fall back to local/offline mode instead of exiting
       localMode = true;
@@ -290,6 +295,10 @@ export async function runCommand(
   // In local mode, set TRICKLE_LOCAL=1 so the client writes to JSONL
   if (localMode) {
     runEnv.TRICKLE_LOCAL = "1";
+    // Forward TRICKLE_LOCAL_DIR if set
+    if (process.env.TRICKLE_LOCAL_DIR) {
+      runEnv.TRICKLE_LOCAL_DIR = process.env.TRICKLE_LOCAL_DIR;
+    }
   }
 
   // Execute the single-run flow
@@ -339,8 +348,17 @@ async function executeSingleRun(
       // Backend might not have data yet
     }
 
+    // Start live type generation for backend mode
+    let liveStop: (() => void) | null = null;
+    if (singleFile && !opts.stubs) {
+      liveStop = startLiveBackendTypes(singleFile);
+    }
+
     // Run the instrumented command
     const exitCode = await runProcess(instrumentedCommand, env);
+
+    // Stop live watcher
+    if (liveStop) liveStop();
 
     // Wait for transport to flush
     console.log(chalk.gray("\n  Waiting for type data to flush..."));
@@ -370,23 +388,34 @@ async function executeSingleRun(
 
   // ── Local/offline mode ──
 
+  const localDir = env.TRICKLE_LOCAL_DIR || process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle");
+  const jsonlPath = path.join(localDir, "observations.jsonl");
+
+  const { generateLocalStubs, generateFromJsonl } = await import("../local-codegen");
+
+  // Start live type generation — types update while the process runs
+  let liveTypesStop: (() => void) | null = null;
+  if (singleFile) {
+    liveTypesStop = startLiveLocalTypes(singleFile, jsonlPath, generateLocalStubs);
+  }
+
   // Run the instrumented command
   const exitCode = await runProcess(instrumentedCommand, env);
+
+  // Stop live watcher
+  if (liveTypesStop) liveTypesStop();
 
   // Brief pause for any async file writes to complete
   await sleep(500);
 
-  // Generate types from local JSONL
-  const jsonlPath = path.join(
-    env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle"),
-    "observations.jsonl",
-  );
-
-  const { generateLocalStubs, generateFromJsonl } = await import("../local-codegen");
-
   if (!fs.existsSync(jsonlPath)) {
     console.log(chalk.gray("\n  No observations captured."));
     return exitCode;
+  }
+
+  // Final type generation (catches any remaining observations)
+  if (singleFile) {
+    generateLocalStubs(singleFile, jsonlPath);
   }
 
   // Show local summary
@@ -404,14 +433,15 @@ async function executeSingleRun(
   console.log(`  Functions observed: ${chalk.bold(String(totalFunctions))}`);
   console.log(`  Data saved to: ${chalk.gray(jsonlPath)}`);
 
-  // Auto-generate sidecar type file
   if (singleFile) {
-    const { written } = generateLocalStubs(singleFile, jsonlPath);
-    if (written.length > 0) {
-      for (const w of written) {
-        const relPath = path.relative(process.cwd(), w);
-        console.log(chalk.green(`  Types written to ${chalk.bold(relPath)}`));
-      }
+    const ext = path.extname(singleFile).toLowerCase();
+    const isPython = ext === ".py";
+    const baseName = path.basename(singleFile, ext);
+    const stubExt = isPython ? ".pyi" : ".d.ts";
+    const stubFile = path.join(path.dirname(singleFile), `${baseName}${stubExt}`);
+    if (fs.existsSync(stubFile)) {
+      const relPath = path.relative(process.cwd(), stubFile);
+      console.log(chalk.green(`  Types written to ${chalk.bold(relPath)}`));
     }
   }
 
@@ -419,6 +449,128 @@ async function executeSingleRun(
   console.log("");
 
   return exitCode;
+}
+
+// ── Live type generation ──
+
+/**
+ * Start a background watcher that regenerates type stubs whenever the
+ * JSONL file changes. Returns a stop function.
+ *
+ * Uses polling (fs.watchFile) because the file is being appended to by
+ * the child process and fs.watch can be unreliable with rapid appends.
+ */
+function startLiveLocalTypes(
+  sourceFile: string,
+  jsonlPath: string,
+  generateLocalStubs: (sourceFile: string, jsonlPath: string) => { written: string[]; functionCount: number },
+): () => void {
+  let lastSize = 0;
+  let lastFunctionCount = 0;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+
+  const regenerate = () => {
+    if (stopped) return;
+    try {
+      if (!fs.existsSync(jsonlPath)) return;
+
+      const stat = fs.statSync(jsonlPath);
+      if (stat.size === lastSize) return; // no new data
+      lastSize = stat.size;
+
+      const { written, functionCount } = generateLocalStubs(sourceFile, jsonlPath);
+      if (written.length > 0 && functionCount > lastFunctionCount) {
+        const newCount = functionCount - lastFunctionCount;
+        const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+        const relPath = path.relative(process.cwd(), written[0]);
+        console.log(
+          chalk.gray(`  [${ts}]`) +
+          chalk.green(` +${newCount} type(s)`) +
+          chalk.gray(` → ${relPath}`) +
+          chalk.gray(` (${functionCount} total)`),
+        );
+        lastFunctionCount = functionCount;
+      }
+    } catch {
+      // Never crash — this is a background helper
+    }
+  };
+
+  // Do an initial check after a short delay (catch fast-running scripts)
+  const initialTimer = setTimeout(regenerate, 800);
+
+  // Poll every 2 seconds
+  const interval = setInterval(regenerate, 2000);
+
+  // Also try fs.watchFile for faster response on changes
+  try {
+    fs.watchFile(jsonlPath, { interval: 1000 }, () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(regenerate, 200);
+    });
+  } catch {
+    // watchFile may fail if file doesn't exist yet — polling handles it
+  }
+
+  return () => {
+    stopped = true;
+    clearTimeout(initialTimer);
+    clearInterval(interval);
+    if (debounceTimer) clearTimeout(debounceTimer);
+    try { fs.unwatchFile(jsonlPath); } catch {}
+  };
+}
+
+/**
+ * Start a background poller that fetches stubs from the backend and
+ * writes sidecar type files while the process runs. Returns a stop function.
+ */
+function startLiveBackendTypes(sourceFile: string): () => void {
+  let lastFunctionCount = 0;
+  let stopped = false;
+
+  const ext = path.extname(sourceFile).toLowerCase();
+  const isPython = ext === ".py";
+  const dir = path.dirname(sourceFile);
+  const baseName = path.basename(sourceFile, ext);
+  const sidecarName = isPython ? `${baseName}.pyi` : `${baseName}.d.ts`;
+  const sidecarPath = path.join(dir, sidecarName);
+
+  const poll = async () => {
+    if (stopped) return;
+    try {
+      const { stubsCommand } = await import("./stubs");
+      await stubsCommand(dir, { silent: true });
+
+      if (fs.existsSync(sidecarPath)) {
+        const content = fs.readFileSync(sidecarPath, "utf-8");
+        const funcCount = (content.match(/export declare function/g) || []).length;
+
+        if (funcCount > lastFunctionCount) {
+          const newCount = funcCount - lastFunctionCount;
+          const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+          console.log(
+            chalk.gray(`  [${ts}]`) +
+            chalk.green(` +${newCount} type(s)`) +
+            chalk.gray(` → ${sidecarName}`) +
+            chalk.gray(` (${funcCount} total)`),
+          );
+          lastFunctionCount = funcCount;
+        }
+      }
+    } catch {
+      // Never crash — background helper
+    }
+  };
+
+  // Poll every 3 seconds (backend mode has higher overhead)
+  const interval = setInterval(poll, 3000);
+
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+  };
 }
 
 // ── Auto-generate sidecar type file ──

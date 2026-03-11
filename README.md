@@ -60,6 +60,7 @@ trickle dev
 - [Source Code Annotation](#source-code-annotation)
 - [Sidecar Type Stubs](#sidecar-type-stubs)
 - [Local/Offline Mode](#localoffline-mode) (with type accumulation across runs)
+- [Continuous Type Generation](#continuous-type-generation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3084,6 +3085,54 @@ Each line in `observations.jsonl` is a JSON object:
 ```bash
 npm run build && node test-local-mode-e2e.js     # basic local mode
 npm run build && node test-accumulate-e2e.js      # type accumulation across runs
+```
+
+---
+
+## Continuous Type Generation
+
+Types update in real-time while your process runs. No need to stop your server to get types — they appear in your IDE as new function calls are observed.
+
+### How it works
+
+When you run `trickle run server.js`, trickle:
+1. Starts your process with type observation
+2. Monitors the observations file in the background
+3. Regenerates `.d.ts` / `.pyi` files whenever new types are captured
+4. Your IDE picks up the updated types automatically
+
+This works in both **local mode** (watching JSONL file) and **backend mode** (polling the API).
+
+### Example workflow
+
+```bash
+# Terminal 1: start your server with trickle
+trickle run server.js
+```
+
+```
+  trickle run
+  ──────────────────────────────────────────────────
+  File:      server.js
+  Resolved:  node server.js
+  Mode:      local (offline)
+  ──────────────────────────────────────────────────
+
+  Server running on port 3000
+  [14:30:01] +1 type(s) → server.d.ts (1 total)    # GET /api/users
+  [14:30:03] +1 type(s) → server.d.ts (2 total)    # POST /api/orders
+  [14:30:05] +1 type(s) → server.d.ts (3 total)    # GET /api/search
+```
+
+As you make requests in Terminal 2 (or a browser), types appear live in your IDE. Each `+N type(s)` line means new function types were written to the sidecar file.
+
+### No configuration needed
+
+Live type generation is **automatic** — it activates whenever `trickle run` is used with a single file. No flags required. Types are regenerated every ~2 seconds when new observations appear.
+
+**E2E test:**
+```bash
+npm run build && node test-live-types-e2e.js
 ```
 
 ---

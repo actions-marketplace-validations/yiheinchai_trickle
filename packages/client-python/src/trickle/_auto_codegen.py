@@ -924,3 +924,189 @@ def generate_coverage_report() -> Optional[str]:
     report_lines.append(f"  Total: {typed_all}/{total_all} functions ({total_pct}%)")
 
     return "\n".join(report_lines)
+
+
+# ── Type summary with change detection ──
+
+def _type_to_compact(node: Dict[str, Any], depth: int = 0) -> str:
+    """Convert a TypeNode to a compact inline string for terminal display."""
+    if depth > 2:
+        return "..."
+    kind = node.get("kind", "unknown")
+    if kind == "primitive":
+        name = node.get("name", "unknown")
+        mapping = {"string": "str", "number": "float", "boolean": "bool", "null": "None", "undefined": "None", "bigint": "int"}
+        return mapping.get(name, "Any")
+    if kind == "unknown":
+        return "Any"
+    if kind == "array":
+        inner = _type_to_compact(node.get("element", {}), depth + 1)
+        return f"list[{inner}]"
+    if kind == "tuple":
+        els = [_type_to_compact(e, depth + 1) for e in node.get("elements", [])]
+        return f"tuple[{', '.join(els)}]"
+    if kind == "union":
+        members = [_type_to_compact(m, depth) for m in node.get("members", [])]
+        non_none = [m for m in members if m != "None"]
+        if len(members) == 2 and "None" in members and non_none:
+            return f"{non_none[0]} | None"
+        return " | ".join(members)
+    if kind == "object":
+        props = node.get("properties", {})
+        keys = list(props.keys())
+        if not keys:
+            return "dict"
+        if len(keys) > 4:
+            shown = [f"{k}: {_type_to_compact(props[k], depth + 1)}" for k in keys[:3]]
+            return "{ " + ", ".join(shown) + ", ... }"
+        return "{ " + ", ".join(f"{k}: {_type_to_compact(props[k], depth + 1)}" for k in keys) + " }"
+    if kind == "function":
+        return "Callable"
+    if kind == "set":
+        inner = _type_to_compact(node.get("element", {}), depth + 1)
+        return f"set[{inner}]"
+    return "Any"
+
+
+def _build_py_signature(fn: Dict[str, Any]) -> str:
+    """Build a one-line function signature string."""
+    name = _to_snake_case(fn["name"])
+    param_names = fn.get("paramNames", [])
+    args_type = fn["argsType"]
+    return_type = fn["returnType"]
+
+    params_str = ""
+    if args_type.get("kind") == "tuple":
+        elements = args_type.get("elements", [])
+        parts: List[str] = []
+        for i, el in enumerate(elements):
+            pname = param_names[i] if i < len(param_names) else f"arg{i}"
+            parts.append(f"{pname}: {_type_to_compact(el)}")
+        params_str = ", ".join(parts)
+
+    ret = _type_to_compact(return_type)
+    return f"{name}({params_str}) \u2192 {ret}"
+
+
+_SNAPSHOT_FILENAME = "type-snapshot.json"
+
+
+def generate_type_summary() -> Optional[str]:
+    """Generate a type summary showing discovered function signatures.
+
+    When a previous snapshot exists, highlights new and changed functions.
+    Only runs when TRICKLE_SUMMARY=1.
+    """
+    if os.environ.get("TRICKLE_SUMMARY") != "1":
+        return None
+
+    local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+    jsonl_path = os.path.join(local_dir, "observations.jsonl")
+    if not os.path.exists(jsonl_path):
+        return None
+
+    try:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return None
+
+    lines_raw = [l for l in content.strip().split("\n") if l.strip()]
+
+    # Group by function
+    by_function: Dict[str, List[Dict[str, Any]]] = {}
+    for line in lines_raw:
+        try:
+            payload = json.loads(line)
+            fn_name = payload.get("functionName")
+            if fn_name and payload.get("argsType") and payload.get("returnType"):
+                by_function.setdefault(fn_name, []).append(payload)
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    if not by_function:
+        return None
+
+    # Merge types
+    functions: List[Dict[str, Any]] = []
+    for fn_name, payloads in by_function.items():
+        merged_args = payloads[0]["argsType"]
+        merged_return = payloads[0]["returnType"]
+        first_hash = payloads[0].get("typeHash", "")
+        for p in payloads[1:]:
+            if p.get("typeHash", "") != first_hash:
+                merged_args = _merge_type_nodes(merged_args, p["argsType"])
+                merged_return = _merge_type_nodes(merged_return, p["returnType"])
+        param_names = None
+        for p in payloads:
+            if p.get("paramNames"):
+                param_names = p["paramNames"]
+        entry: Dict[str, Any] = {
+            "name": fn_name,
+            "argsType": merged_args,
+            "returnType": merged_return,
+            "module": payloads[-1].get("module", ""),
+        }
+        if param_names:
+            entry["paramNames"] = param_names
+        functions.append(entry)
+
+    if not functions:
+        return None
+
+    # Build current signatures
+    current_sigs: Dict[str, str] = {}
+    for fn in functions:
+        current_sigs[fn["name"]] = _build_py_signature(fn)
+
+    # Load previous snapshot
+    snapshot_path = os.path.join(local_dir, _SNAPSHOT_FILENAME)
+    prev_sigs: Dict[str, str] = {}
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as f:
+            prev_data = json.load(f)
+            prev_sigs = prev_data.get("functions", {})
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    # Compute diff
+    new_count = 0
+    changed_count = 0
+    entries_out: List[Dict[str, str]] = []
+
+    sorted_fns = sorted(functions, key=lambda fn: (fn.get("module", ""), fn["name"]))
+    for fn in sorted_fns:
+        sig = current_sigs[fn["name"]]
+        if fn["name"] not in prev_sigs:
+            entries_out.append({"sig": sig, "status": "new"})
+            new_count += 1
+        elif prev_sigs[fn["name"]] != sig:
+            entries_out.append({"sig": sig, "status": "changed"})
+            changed_count += 1
+        else:
+            entries_out.append({"sig": sig, "status": "same"})
+
+    # Save snapshot
+    try:
+        os.makedirs(local_dir, exist_ok=True)
+        with open(snapshot_path, "w", encoding="utf-8") as f:
+            json.dump({"functions": current_sigs}, f, indent=2)
+    except OSError:
+        pass
+
+    # Build output
+    if new_count > 0 or changed_count > 0:
+        header = f"[trickle.auto] Discovered types ({new_count} new, {changed_count} changed):"
+    else:
+        header = "[trickle.auto] Discovered types:"
+
+    result_lines: List[str] = [header]
+    for entry in entries_out:
+        if entry["status"] == "new":
+            result_lines.append(f"  + {entry['sig']}  NEW")
+        elif entry["status"] == "changed":
+            result_lines.append(f"  ~ {entry['sig']}  CHANGED")
+        else:
+            result_lines.append(f"    {entry['sig']}")
+
+    return "\n".join(result_lines)

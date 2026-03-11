@@ -720,6 +720,150 @@ export function generateCoverageReport(): string | null {
   return lines.join('\n');
 }
 
+// ── Type summary with change detection ──
+
+const SNAPSHOT_FILE = '.trickle/type-snapshot.json';
+
+function typeToCompact(node: TypeNode, depth = 0): string {
+  if (depth > 2) return '...';
+  switch (node.kind) {
+    case 'primitive': return node.name || 'unknown';
+    case 'unknown': return 'unknown';
+    case 'array': return `${typeToCompact(node.element!, depth + 1)}[]`;
+    case 'tuple': return `[${(node.elements || []).map(e => typeToCompact(e, depth + 1)).join(', ')}]`;
+    case 'union': return (node.members || []).map(m => typeToCompact(m, depth)).join(' | ');
+    case 'promise': return `Promise<${typeToCompact(node.resolved!, depth + 1)}>`;
+    case 'map': return `Map<${typeToCompact(node.key!, depth + 1)}, ${typeToCompact(node.value!, depth + 1)}>`;
+    case 'set': return `Set<${typeToCompact(node.element!, depth + 1)}>`;
+    case 'function': return `(...) => ${typeToCompact(node.returnType!, depth + 1)}`;
+    case 'object': {
+      const props = node.properties || {};
+      const keys = Object.keys(props);
+      if (keys.length === 0) return '{}';
+      if (keys.length > 4) {
+        const shown = keys.slice(0, 3).map(k => `${k}: ${typeToCompact(props[k], depth + 1)}`);
+        return `{ ${shown.join(', ')}, ... }`;
+      }
+      return `{ ${keys.map(k => `${k}: ${typeToCompact(props[k], depth + 1)}`).join(', ')} }`;
+    }
+    default: return 'unknown';
+  }
+}
+
+function buildSignature(fn: FunctionData): string {
+  const paramNames = fn.paramNames || [];
+  let params = '';
+
+  if (fn.argsType.kind === 'tuple') {
+    const elements = fn.argsType.elements || [];
+    params = elements.map((el, i) => {
+      const name = paramNames[i] || `arg${i}`;
+      return `${name}: ${typeToCompact(el)}`;
+    }).join(', ');
+  }
+
+  const ret = typeToCompact(fn.returnType);
+  return `${fn.name}(${params}) → ${ret}`;
+}
+
+interface TypeSnapshot {
+  functions: Record<string, string>; // name -> signature
+}
+
+function loadSnapshot(): TypeSnapshot | null {
+  const trickleDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  const snapshotPath = path.join(trickleDir, SNAPSHOT_FILE.split('/').pop()!);
+  try {
+    const content = fs.readFileSync(snapshotPath, 'utf-8');
+    return JSON.parse(content);
+  } catch {
+    return null;
+  }
+}
+
+function saveSnapshot(snapshot: TypeSnapshot): void {
+  const trickleDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  const snapshotPath = path.join(trickleDir, SNAPSHOT_FILE.split('/').pop()!);
+  try {
+    fs.mkdirSync(trickleDir, { recursive: true });
+    fs.writeFileSync(snapshotPath, JSON.stringify(snapshot, null, 2), 'utf-8');
+  } catch { /* don't crash */ }
+}
+
+/**
+ * Generate a type summary showing discovered function signatures.
+ * When a previous snapshot exists, highlights new and changed functions.
+ * Only runs when TRICKLE_SUMMARY=1.
+ */
+export function generateTypeSummary(): string | null {
+  if (process.env.TRICKLE_SUMMARY !== '1') return null;
+
+  const trickleDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  const jsonlPath = path.join(trickleDir, 'observations.jsonl');
+  if (!fs.existsSync(jsonlPath)) return null;
+
+  const functions = readAndMerge(jsonlPath);
+  if (functions.length === 0) return null;
+
+  // Filter out HTTP route observations
+  const userFunctions = functions.filter(fn => {
+    const mod = fn.module || '';
+    return !(mod.includes('.') && !mod.includes('/') && !mod.includes('\\'));
+  });
+  if (userFunctions.length === 0) return null;
+
+  // Build current signatures
+  const currentSigs: Record<string, string> = {};
+  for (const fn of userFunctions) {
+    currentSigs[fn.name] = buildSignature(fn);
+  }
+
+  // Load previous snapshot for diff
+  const prevSnapshot = loadSnapshot();
+  const prevSigs = prevSnapshot?.functions || {};
+
+  // Compute diff
+  let newCount = 0;
+  let changedCount = 0;
+  const entries: Array<{ sig: string; status: 'new' | 'changed' | 'same' }> = [];
+
+  // Sort functions by module then name for clean output
+  const sorted = [...userFunctions].sort((a, b) => {
+    if (a.module !== b.module) return a.module.localeCompare(b.module);
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const fn of sorted) {
+    const sig = currentSigs[fn.name];
+    if (!(fn.name in prevSigs)) {
+      entries.push({ sig, status: 'new' });
+      newCount++;
+    } else if (prevSigs[fn.name] !== sig) {
+      entries.push({ sig, status: 'changed' });
+      changedCount++;
+    } else {
+      entries.push({ sig, status: 'same' });
+    }
+  }
+
+  // Save new snapshot
+  saveSnapshot({ functions: currentSigs });
+
+  // Build output
+  const header = newCount > 0 || changedCount > 0
+    ? `[trickle/auto] Discovered types (${newCount} new, ${changedCount} changed):`
+    : `[trickle/auto] Discovered types:`;
+
+  const lines: string[] = [header];
+  for (const entry of entries) {
+    const prefix = entry.status === 'new' ? '  + ' : entry.status === 'changed' ? '  ~ ' : '    ';
+    const suffix = entry.status === 'new' ? '  NEW' : entry.status === 'changed' ? '  CHANGED' : '';
+    lines.push(`${prefix}${entry.sig}${suffix}`);
+  }
+
+  return lines.join('\n');
+}
+
 /**
  * Try to find the source file for a given module name.
  */

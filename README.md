@@ -65,6 +65,7 @@ trickle dev
   - [Zero-Code Activation (no source changes)](#zero-code-activation-no-source-changes-at-all)
   - [Auto Type Injection (`TRICKLE_INJECT=1`)](#auto-type-injection-trickle_inject1)
   - [Type Coverage Report (`TRICKLE_COVERAGE=1`)](#type-coverage-report-trickle_coverage1)
+  - [Type Summary (`TRICKLE_SUMMARY=1`)](#type-summary-trickle_summary1)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3400,6 +3401,41 @@ This tells you exactly which code paths to exercise to get complete types. Run m
 **E2E test:**
 ```bash
 npm run build --workspace=packages/client-js && node test-auto-coverage-e2e.js
+```
+
+### Type Summary (`TRICKLE_SUMMARY=1`)
+
+Print discovered type signatures directly to the terminal on exit — see your types instantly without opening any files. On subsequent runs, highlights what changed:
+
+```bash
+# JavaScript
+TRICKLE_SUMMARY=1 node -r trickle/auto app.js
+
+# Python
+TRICKLE_SUMMARY=1 python -c "import trickle.auto" && python app.py
+```
+
+First run output:
+```
+[trickle/auto] Discovered types (3 new, 0 changed):
+  + calculateTax(amount: number, rate: number) → { amount: number, tax: number, total: number }  NEW
+  + formatUser(user: { firstName: string, ... }) → { display: string, email: string }              NEW
+  + filterItems(items: number[], minValue: number) → { results: number[], count: number }           NEW
+```
+
+On subsequent runs with the same types, no markers appear. If a type changes, it's marked `CHANGED`:
+```
+[trickle/auto] Discovered types (0 new, 1 changed):
+  ~ calculateTax(amount: number, rate: number) → { ..., discount: number }  CHANGED
+    formatUser(user: { firstName: string, ... }) → { display: string, email: string }
+    filterItems(items: number[], minValue: number) → { results: number[], count: number }
+```
+
+Type signatures use a compact inline format showing parameter names, types, and return types. Change detection is powered by a `.trickle/type-snapshot.json` file that persists between runs.
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-summary-e2e.js
 ```
 
 ---

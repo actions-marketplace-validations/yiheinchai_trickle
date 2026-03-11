@@ -31,7 +31,7 @@ from trickle._observe_auto import install as _install_observe_hook  # noqa: E402
 _install_observe_hook()
 
 # Import the codegen
-from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report  # noqa: E402
+from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 
 _debug = os.environ.get("TRICKLE_DEBUG", "").lower() in ("1", "true", "yes")
 _last_function_count = 0
@@ -69,6 +69,13 @@ def _run_generation(is_final: bool) -> None:
                 report = generate_coverage_report()
                 if report:
                     print(report)
+            except Exception:
+                pass
+            # Print type summary if TRICKLE_SUMMARY=1
+            try:
+                summary = generate_type_summary()
+                if summary:
+                    print(summary)
             except Exception:
                 pass
     except Exception:

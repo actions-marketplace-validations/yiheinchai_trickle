@@ -60,7 +60,7 @@ configure({
 });
 
 // Start background codegen
-const { generateTypes, injectTypes, generateCoverageReport } = require(join(__dirname, 'dist', 'auto-codegen.js'));
+const { generateTypes, injectTypes, generateCoverageReport, generateTypeSummary } = require(join(__dirname, 'dist', 'auto-codegen.js'));
 
 let lastFunctionCount = 0;
 let generationCount = 0;
@@ -92,6 +92,10 @@ function runGeneration(isFinal) {
       try {
         const report = generateCoverageReport();
         if (report) console.log(report);
+      } catch { /* don't crash */ }
+      try {
+        const summary = generateTypeSummary();
+        if (summary) console.log(summary);
       } catch { /* don't crash */ }
     }
   } catch {

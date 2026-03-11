@@ -23,6 +23,7 @@ npm run trickle:dev
 - [Manual Instrumentation](#manual-instrumentation)
 - [Code Generation](#code-generation)
 - [Mock Server](#mock-server)
+- [Type Drift Report](#type-drift-report)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -77,6 +78,7 @@ npx trickle functions            # List all instrumented functions
 npx trickle errors               # See what's failing
 npx trickle errors 1             # Inspect error with full type context
 npx trickle types processOrder   # See captured runtime types
+npx trickle diff                 # What types changed recently?
 npx trickle codegen --client     # Generate a typed API client
 npx trickle mock                 # Start a mock API server
 npx trickle tail                 # Live stream of events
@@ -431,6 +433,72 @@ node test-mock-e2e.js
 
 ---
 
+## Type Drift Report
+
+See what types changed across all your functions at a glance. Useful for catching breaking API changes, comparing environments, or auditing type evolution.
+
+### What changed recently?
+
+```bash
+npx trickle diff                    # All type changes
+npx trickle diff --since 1h         # Changes in the last hour
+npx trickle diff --since 2d         # Changes in the last 2 days
+npx trickle diff --env production   # Only production changes
+```
+
+Output:
+
+```
+  Type drift: changes in the last 1h
+  ──────────────────────────────────────────────────
+  2 functions with type changes
+
+  GET /api/products (express)
+    from:  development   2m ago
+    to:    development   30s ago
+
+    + added   return.products[].rating: number
+    + added   return.products[].inStock: boolean
+    + added   return.hasMore: boolean
+    ~ changed return.products[].name -> return.products[].title: string
+    - removed return.products[].name: string
+
+  GET /api/users (express)
+    from:  development   5m ago
+    to:    development   30s ago
+
+    + added   return.users[].roles: string[]
+    + added   return.users[].verified: boolean
+```
+
+### Compare environments
+
+```bash
+npx trickle diff --env1 staging --env2 production
+```
+
+Shows what's different between staging and production — useful before deploying.
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-diff-e2e.js
+
+# Or manually:
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Populate types
+node test-express-e2e.js
+
+# Terminal 3: See drift
+npx trickle diff
+npx trickle diff --since 1h
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle init`
@@ -528,6 +596,24 @@ npx trickle codegen --env prod                         # Filter by env
 | `--python` | Generate Python TypedDict stubs |
 | `--client` | Generate typed fetch-based API client |
 | `--watch` | Re-generate when new types are observed |
+
+### `trickle diff`
+
+Show type drift across all functions — what changed and where.
+
+```bash
+npx trickle diff                                    # All type changes
+npx trickle diff --since 1h                         # Changes in the last hour
+npx trickle diff --env production                   # Filter by environment
+npx trickle diff --env1 staging --env2 production   # Cross-env comparison
+```
+
+| Flag | Description |
+|------|-------------|
+| `--since <timeframe>` | Time filter: `30s`, `5m`, `2h`, `3d`, `1w` |
+| `--env <env>` | Filter by environment |
+| `--env1 <env>` | First environment for cross-env comparison |
+| `--env2 <env>` | Second environment for cross-env comparison |
 
 ### `trickle mock`
 
@@ -647,6 +733,7 @@ SQLite database: `~/.trickle/trickle.db` (WAL mode, created automatically).
 | `GET` | `/api/errors` | List errors |
 | `GET` | `/api/errors/:id` | Get error with type context |
 | `GET` | `/api/codegen` | Generate type definitions |
+| `GET` | `/api/diff` | Cross-function type drift report |
 | `GET` | `/api/mock-config` | Get mock server configuration |
 | `GET` | `/api/tail` | SSE stream of real-time events |
 | `GET` | `/api/health` | Health check |
@@ -732,6 +819,7 @@ TypeNode =
 │  init            │  project setup                          │
 │  codegen         │  TypeScript/Python/client generation    │
 │  mock            │  mock API server from observed types    │
+│  diff            │  cross-function type drift report       │
 │  functions       │  list observed functions                │
 │  types           │  inspect runtime types                  │
 │  errors          │  debug errors with type context         │
@@ -747,7 +835,7 @@ trickle/
 │   ├── backend/            # Express API + SQLite storage
 │   │   └── src/
 │   │       ├── db/         # Connection, migrations, queries
-│   │       ├── routes/     # ingest, functions, types, errors, tail, codegen, mock
+│   │       ├── routes/     # ingest, functions, types, errors, tail, codegen, mock, diff
 │   │       └── services/   # SSE broker, type differ, type generator
 │   │
 │   ├── client-js/          # JavaScript instrumentation library
@@ -781,7 +869,7 @@ trickle/
 │   └── cli/                # Developer CLI tool
 │       └── src/
 │           ├── index.ts        # Commander setup
-│           ├── commands/       # init, functions, types, errors, codegen, mock, tail
+│           ├── commands/       # init, functions, types, errors, codegen, mock, diff, tail
 │           ├── formatters/     # Type and diff formatting
 │           └── ui/             # Badges, helpers
 │
@@ -793,6 +881,7 @@ trickle/
 ├── test-register-app.js    # Plain Express app (no trickle code) for register test
 ├── test-mock-e2e.js        # Mock server test
 ├── test-init-e2e.js        # trickle init test
+├── test-diff-e2e.js        # Type drift report test
 ├── package.json            # npm workspace root
 └── tsconfig.base.json      # Shared TypeScript config
 ```
@@ -825,6 +914,7 @@ node test-express-e2e.js     # Express auto-instrumentation
 node test-client-e2e.js      # Typed API client generation
 node test-mock-e2e.js        # Mock server
 node test-init-e2e.js        # trickle init (creates temp project)
+node test-diff-e2e.js        # Type drift report
 
 # Self-contained tests (start their own backend):
 node test-register-e2e.js    # Zero-code register hook

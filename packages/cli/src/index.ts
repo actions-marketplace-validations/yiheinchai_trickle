@@ -9,6 +9,7 @@ import { tailCommand } from "./commands/tail";
 import { codegenCommand } from "./commands/codegen";
 import { mockCommand } from "./commands/mock";
 import { initCommand } from "./commands/init";
+import { diffCommand } from "./commands/diff";
 
 const program = new Command();
 
@@ -82,6 +83,18 @@ program
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);
+  });
+
+// trickle diff
+program
+  .command("diff")
+  .description("Show type drift across all functions — what changed and where")
+  .option("--since <timeframe>", "Show changes since (e.g., 1h, 2d, 1w)")
+  .option("--env <env>", "Filter by environment")
+  .option("--env1 <env>", "First environment for cross-env comparison")
+  .option("--env2 <env>", "Second environment for cross-env comparison")
+  .action(async (opts) => {
+    await diffCommand(opts);
   });
 
 // trickle mock

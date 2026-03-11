@@ -224,6 +224,43 @@ export async function fetchMockConfig(): Promise<{ routes: MockRoute[] }> {
   return fetchJson("/api/mock-config");
 }
 
+// ── Diff Report ──
+
+export interface DiffReportEntry {
+  functionName: string;
+  module: string;
+  language: string;
+  from: { id: number; env: string; observed_at: string; type_hash: string };
+  to: { id: number; env: string; observed_at: string; type_hash: string };
+  diffs: TypeDiff[];
+}
+
+export interface DiffReportResponse {
+  mode: "temporal" | "cross-env";
+  entries: DiffReportEntry[];
+  total: number;
+  since?: string | null;
+  env?: string | null;
+  env1?: string;
+  env2?: string;
+}
+
+export interface DiffReportOpts {
+  since?: string;
+  env?: string;
+  env1?: string;
+  env2?: string;
+}
+
+export async function fetchDiffReport(opts?: DiffReportOpts): Promise<DiffReportResponse> {
+  return fetchJson("/api/diff", {
+    since: opts?.since,
+    env: opts?.env,
+    env1: opts?.env1,
+    env2: opts?.env2,
+  });
+}
+
 export function tailEvents(
   onEvent: (event: TailEvent) => void,
   filter?: string

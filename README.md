@@ -45,6 +45,7 @@ trickle dev
 - [NestJS DTOs (class-validator)](#nestjs-dtos-class-validator)
 - [API Capture](#api-capture)
 - [GraphQL Schema Generation](#graphql-schema-generation)
+- [tRPC Router Generation](#trpc-router-generation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2064,6 +2065,70 @@ node test-graphql-e2e.js
 
 ---
 
+## tRPC Router Generation
+
+Generate a fully-typed tRPC router from runtime-observed REST API types. GET routes become `query` procedures, POST/PUT/PATCH/DELETE become `mutation` procedures with Zod input validation schemas. Exports `AppRouter` for client-side type inference.
+
+```bash
+# Generate tRPC router to stdout
+trickle codegen --trpc
+
+# Write to a file
+trickle codegen --trpc -o server/trpc/router.ts
+```
+
+Example output:
+
+```typescript
+import { initTRPC } from "@trpc/server";
+import { z } from "zod";
+
+const t = initTRPC.create();
+
+// Response types
+export interface PostApiUsersResponse {
+  id: number;
+  created: boolean;
+}
+
+// Input validation schemas
+const postApiUsersInput = z.object({
+  name: z.string(),
+  email: z.string(),
+  age: z.number(),
+});
+
+// Router
+export const appRouter = t.router({
+  getApiUsers: t.procedure
+    .query(async () => {
+      // GET /api/users
+      throw new Error("Not implemented — replace with your logic");
+    }),
+
+  postApiUsers: t.procedure
+    .input(postApiUsersInput)
+    .mutation(async ({ input }) => {
+      // POST /api/users
+      throw new Error("Not implemented — replace with your logic");
+    }),
+});
+
+export type AppRouter = typeof appRouter;
+```
+
+This gives you:
+- **Instant end-to-end type safety**: Export `AppRouter` and use it with `@trpc/client` for full-stack types
+- **REST-to-tRPC migration**: Auto-generate the router skeleton, then fill in your business logic
+- **Zod validation included**: Request bodies become Zod schemas for runtime validation
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-trpc-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2197,6 +2262,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--pydantic` | Generate Pydantic BaseModel classes (Python) |
 | `--class-validator` | Generate class-validator DTOs for NestJS |
 | `--graphql` | Generate GraphQL SDL schema |
+| `--trpc` | Generate typed tRPC router |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2701,6 +2767,7 @@ trickle/
 ├── test-class-validator-e2e.js # NestJS class-validator DTO test
 ├── test-capture-e2e.js     # API capture (live endpoint) test
 ├── test-graphql-e2e.js     # GraphQL schema generation test
+├── test-trpc-e2e.js        # tRPC router generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2762,6 +2829,7 @@ node test-pydantic-e2e.js     # Pydantic model generation
 node test-class-validator-e2e.js # NestJS class-validator DTOs
 node test-capture-e2e.js     # API capture (live endpoint)
 node test-graphql-e2e.js     # GraphQL schema generation
+node test-trpc-e2e.js        # tRPC router generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

@@ -3335,5 +3335,167 @@ function typeNodeToGraphQLInput(
   }
 }
 
+// ── tRPC Router Generation ──
+
+/**
+ * Generate a fully-typed tRPC router from runtime-observed API routes.
+ *
+ * - GET routes → t.procedure.query()
+ * - POST/PUT/PATCH/DELETE routes → t.procedure.input(zodSchema).mutation()
+ * - Includes Zod input schemas for request body validation
+ * - Includes TypeScript return type annotations from observed responses
+ * - Exports AppRouter type for client-side type inference
+ */
+export function generateTrpcRouter(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  if (functions.length === 0) {
+    return "// No API routes found. Instrument your app to generate a tRPC router.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated tRPC router by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --trpc` to update");
+  sections.push("");
+  sections.push('import { initTRPC } from "@trpc/server";');
+  sections.push('import { z } from "zod";');
+  sections.push("");
+  sections.push("const t = initTRPC.create();");
+  sections.push("");
+
+  // Collect route procedures
+  const inputSchemas: string[] = [];
+  const procedures: string[] = [];
+  const returnTypes: string[] = [];
+
+  for (const fn of functions) {
+    const route = parseRouteName(fn.name);
+    if (!route) continue;
+
+    const procedureName = toCamelCase(route.typeName);
+    const typeName = route.typeName;
+
+    // Generate return type interface
+    const extracted: ExtractedInterface[] = [];
+    const returnTypeStr = typeNodeToTS(fn.returnType, extracted, typeName + "Response", undefined, 0);
+    returnTypes.push(`export interface ${typeName}Response ${returnTypeStr.startsWith("{") ? returnTypeStr : `{ data: ${returnTypeStr} }`}`);
+    // Also include any extracted nested interfaces
+    for (const ext of extracted) {
+      returnTypes.push(renderInterface(ext.name, ext.node, []));
+    }
+
+    // Check for body input (POST/PUT/PATCH/DELETE)
+    let hasInput = false;
+    let bodyNode: TypeNode | undefined;
+
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(route.method)) {
+      if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+        bodyNode = fn.argsType.properties["body"];
+      }
+      if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+        hasInput = true;
+        const schemaName = `${procedureName}Input`;
+        inputSchemas.push(`const ${schemaName} = ${typeNodeToZod(bodyNode, 0)};`);
+      }
+    }
+
+    // Check for query params input (GET)
+    let hasQueryInput = false;
+    let queryNode: TypeNode | undefined;
+    if (fn.argsType.kind === "object" && fn.argsType.properties["query"]) {
+      queryNode = fn.argsType.properties["query"];
+      if (queryNode.kind === "object" && Object.keys(queryNode.properties).length > 0) {
+        hasQueryInput = true;
+        const schemaName = `${procedureName}Input`;
+        if (!hasInput) {
+          inputSchemas.push(`const ${schemaName} = ${typeNodeToZod(queryNode, 0)};`);
+        }
+      }
+    }
+
+    // Check for path params
+    const hasPathParams = route.pathParams.length > 0;
+    let pathParamSchema = "";
+    if (hasPathParams && !hasInput && !hasQueryInput) {
+      const pathProps: Record<string, TypeNode> = {};
+      for (const param of route.pathParams) {
+        pathProps[param] = { kind: "primitive", name: "string" } as TypeNode;
+      }
+      const pathNode: TypeNode = { kind: "object", properties: pathProps };
+      const schemaName = `${procedureName}Input`;
+      inputSchemas.push(`const ${schemaName} = ${typeNodeToZod(pathNode, 0)};`);
+      pathParamSchema = schemaName;
+    }
+
+    const inputName = `${procedureName}Input`;
+    const hasAnyInput = hasInput || hasQueryInput || (hasPathParams && pathParamSchema);
+
+    // Build procedure
+    const isQuery = route.method === "GET";
+    let proc = `  ${procedureName}: t.procedure`;
+
+    if (hasAnyInput) {
+      proc += `\n    .input(${inputName})`;
+    }
+
+    if (isQuery) {
+      proc += `\n    .query(async (${hasAnyInput ? "{ input }" : ""}) => {`;
+      proc += `\n      // ${route.method} ${route.path}`;
+      proc += `\n      // Return type: ${typeName}Response`;
+      proc += `\n      throw new Error("Not implemented — replace with your logic");`;
+      proc += `\n    })`;
+    } else {
+      proc += `\n    .mutation(async (${hasAnyInput ? "{ input }" : ""}) => {`;
+      proc += `\n      // ${route.method} ${route.path}`;
+      proc += `\n      // Return type: ${typeName}Response`;
+      proc += `\n      throw new Error("Not implemented — replace with your logic");`;
+      proc += `\n    })`;
+    }
+
+    procedures.push(proc);
+  }
+
+  if (procedures.length === 0) {
+    return "// No API routes found. Instrument your app to generate a tRPC router.\n";
+  }
+
+  // Emit return type interfaces
+  sections.push("// ── Response types ──");
+  sections.push("");
+  for (const rt of returnTypes) {
+    sections.push(rt);
+    sections.push("");
+  }
+
+  // Emit input schemas
+  if (inputSchemas.length > 0) {
+    sections.push("// ── Input validation schemas ──");
+    sections.push("");
+    for (const schema of inputSchemas) {
+      sections.push(schema);
+      sections.push("");
+    }
+  }
+
+  // Emit router
+  sections.push("// ── Router ──");
+  sections.push("");
+  sections.push("export const appRouter = t.router({");
+  sections.push(procedures.join(",\n\n"));
+  sections.push("});");
+  sections.push("");
+  sections.push("export type AppRouter = typeof appRouter;");
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

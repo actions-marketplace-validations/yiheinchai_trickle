@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/connection";
 import { listFunctions, getFunctionByName, getLatestSnapshot } from "../db/queries";
-import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes, generateZodSchemas, generateReactQueryHooks, generateTypeGuards, generateMiddleware, generateMswHandlers, generateJsonSchemas, generateSwrHooks, generatePydanticModels, generateClassValidatorDtos, generateGraphqlSchema } from "../services/type-generator";
+import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes, generateZodSchemas, generateReactQueryHooks, generateTypeGuards, generateMiddleware, generateMswHandlers, generateJsonSchemas, generateSwrHooks, generatePydanticModels, generateClassValidatorDtos, generateGraphqlSchema, generateTrpcRouter } from "../services/type-generator";
 import { TypeNode } from "../types";
 
 const router = Router();
@@ -158,6 +158,10 @@ router.get("/", (req: Request, res: Response) => {
       return;
     } else if (format === "graphql") {
       types = generateGraphqlSchema(functions);
+      res.json({ types });
+      return;
+    } else if (format === "trpc") {
+      types = generateTrpcRouter(functions);
       res.json({ types });
       return;
     } else if (format === "client") {

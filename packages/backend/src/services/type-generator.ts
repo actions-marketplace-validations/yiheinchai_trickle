@@ -1380,5 +1380,286 @@ export function generateZodSchemas(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── React Query hooks generation ──
+
+/**
+ * Generate fully-typed TanStack Query (React Query) hooks from runtime-observed routes.
+ *
+ * For each route:
+ * - GET → useQuery hook with typed response and query keys
+ * - POST/PUT/PATCH/DELETE → useMutation hook with typed input/output
+ * - Query key factory for cache invalidation
+ * - All request/response interfaces included
+ */
+export function generateReactQueryHooks(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  // Filter to route-style functions only
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (parsed) {
+      routes.push({ parsed, fn });
+    }
+  }
+
+  if (routes.length === 0) {
+    return "// No API routes found. Instrument your Express/FastAPI app to generate React Query hooks.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated React Query hooks by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --react-query` to update");
+  sections.push("");
+  sections.push('import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";');
+  sections.push('import type { UseQueryOptions, UseMutationOptions } from "@tanstack/react-query";');
+  sections.push("");
+
+  // --- Generate interfaces ---
+  const extracted: ExtractedInterface[] = [];
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+
+    // Response type
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      sections.push(renderInterface(`${baseName}Response`, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+      sections.push("");
+    } else {
+      const retStr = typeNodeToTS(fn.returnType, extracted, baseName, undefined, 0);
+      sections.push(`export type ${baseName}Response = ${retStr};`);
+      sections.push("");
+    }
+
+    // Request body type (POST/PUT/PATCH)
+    if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+      let bodyNode: TypeNode | undefined;
+      if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+        bodyNode = fn.argsType.properties["body"];
+      } else if (fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1) {
+        const el = fn.argsType.elements[0];
+        if (el.kind === "object" && el.properties["body"]) {
+          bodyNode = el.properties["body"];
+        }
+      }
+      if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+        sections.push(renderInterface(`${baseName}Input`, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+      }
+    }
+  }
+
+  // Emit extracted sub-interfaces
+  const emitted = new Set<string>();
+  const extractedLines: string[] = [];
+  let cursor = 0;
+  while (cursor < extracted.length) {
+    const iface = extracted[cursor];
+    cursor++;
+    if (emitted.has(iface.name)) continue;
+    emitted.add(iface.name);
+    extractedLines.push(renderInterface(iface.name, iface.node, extracted));
+    extractedLines.push("");
+  }
+  if (extractedLines.length > 0) {
+    sections.push(...extractedLines);
+  }
+
+  // --- Internal fetch helper ---
+  sections.push("// ── Internal fetch helper ──");
+  sections.push("");
+  sections.push("let _baseUrl = \"\";");
+  sections.push("");
+  sections.push("/** Set the base URL for all API requests. Call once at app startup. */");
+  sections.push("export function configureTrickleHooks(baseUrl: string) {");
+  sections.push("  _baseUrl = baseUrl;");
+  sections.push("}");
+  sections.push("");
+  sections.push("async function _fetch<T>(method: string, path: string, body?: unknown): Promise<T> {");
+  sections.push("  const opts: RequestInit = { method, headers: { \"Content-Type\": \"application/json\" } };");
+  sections.push("  if (body !== undefined) opts.body = JSON.stringify(body);");
+  sections.push("  const res = await fetch(`${_baseUrl}${path}`, opts);");
+  sections.push("  if (!res.ok) throw new Error(`${method} ${path}: HTTP ${res.status}`);");
+  sections.push("  return res.json() as Promise<T>;");
+  sections.push("}");
+  sections.push("");
+
+  // --- Query key factory ---
+  sections.push("// ── Query Keys ──");
+  sections.push("");
+  sections.push("export const queryKeys = {");
+
+  // Group routes by resource (first path segment after /api/)
+  const resources = new Set<string>();
+  for (const { parsed } of routes) {
+    const parts = parsed.path.split("/").filter(Boolean);
+    // /api/users → "users", /products → "products"
+    const resource = parts[0] === "api" && parts.length >= 2 ? parts[1] : parts[0];
+    resources.add(resource);
+  }
+
+  for (const resource of resources) {
+    sections.push(`  ${resource}: {`);
+    sections.push(`    all: ["${resource}"] as const,`);
+
+    // Add specific keys for routes in this resource
+    const resourceRoutes = routes.filter(({ parsed }) => {
+      const parts = parsed.path.split("/").filter(Boolean);
+      const r = parts[0] === "api" && parts.length >= 2 ? parts[1] : parts[0];
+      return r === resource;
+    });
+
+    for (const { parsed } of resourceRoutes) {
+      if (parsed.method === "GET") {
+        if (parsed.pathParams.length > 0) {
+          const paramArgs = parsed.pathParams.map((p) => `${p}: string`).join(", ");
+          const paramKeys = parsed.pathParams.map((p) => p).join(", ");
+          sections.push(`    detail: (${paramArgs}) => ["${resource}", ${paramKeys}] as const,`);
+        } else {
+          sections.push(`    list: () => ["${resource}", "list"] as const,`);
+        }
+      }
+    }
+    sections.push("  },");
+  }
+  sections.push("} as const;");
+  sections.push("");
+
+  // --- Generate hooks ---
+  sections.push("// ── Hooks ──");
+  sections.push("");
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+    const hookName = `use${baseName}`;
+    const responseType = `${baseName}Response`;
+
+    // Determine resource for query keys
+    const parts = parsed.path.split("/").filter(Boolean);
+    const resource = parts[0] === "api" && parts.length >= 2 ? parts[1] : parts[0];
+
+    if (parsed.method === "GET") {
+      // --- useQuery hook ---
+      const hasPathParams = parsed.pathParams.length > 0;
+
+      // Build params
+      const fnParams: string[] = [];
+      if (hasPathParams) {
+        for (const p of parsed.pathParams) {
+          fnParams.push(`${p}: string`);
+        }
+      }
+      fnParams.push(`options?: Omit<UseQueryOptions<${responseType}, Error>, "queryKey" | "queryFn">`);
+
+      // Build path expression
+      let pathExpr: string;
+      if (hasPathParams) {
+        pathExpr = "`" + parsed.path.replace(/:(\w+)/g, (_, param) => `\${${param}}`) + "`";
+      } else {
+        pathExpr = `"${parsed.path}"`;
+      }
+
+      // Build query key
+      let queryKeyExpr: string;
+      if (hasPathParams) {
+        queryKeyExpr = `queryKeys.${resource}.detail(${parsed.pathParams.join(", ")})`;
+      } else {
+        queryKeyExpr = `queryKeys.${resource}.list()`;
+      }
+
+      sections.push(`/** ${parsed.method} ${parsed.path} */`);
+      sections.push(`export function ${hookName}(${fnParams.join(", ")}) {`);
+      sections.push(`  return useQuery({`);
+      sections.push(`    queryKey: ${queryKeyExpr},`);
+      sections.push(`    queryFn: () => _fetch<${responseType}>("GET", ${pathExpr}),`);
+      sections.push(`    ...options,`);
+      sections.push(`  });`);
+      sections.push(`}`);
+      sections.push("");
+    } else {
+      // --- useMutation hook ---
+      const hasBody = ["POST", "PUT", "PATCH"].includes(parsed.method);
+      let inputType = "void";
+
+      // Check if we have a typed input
+      if (hasBody) {
+        let bodyNode: TypeNode | undefined;
+        if (fn.argsType.kind === "object") {
+          bodyNode = fn.argsType.properties["body"];
+        } else if (fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1) {
+          const el = fn.argsType.elements[0];
+          if (el.kind === "object") bodyNode = el.properties["body"];
+        }
+        if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+          inputType = `${baseName}Input`;
+        }
+      }
+
+      // For mutations with path params, create a combined variables type
+      const hasPathParams = parsed.pathParams.length > 0;
+      let variablesType: string;
+      if (hasPathParams && inputType !== "void") {
+        variablesType = `{ ${parsed.pathParams.map((p) => `${p}: string`).join("; ")}; input: ${inputType} }`;
+      } else if (hasPathParams) {
+        variablesType = `{ ${parsed.pathParams.map((p) => `${p}: string`).join("; ")} }`;
+      } else {
+        variablesType = inputType;
+      }
+
+      // Build path expression
+      let pathExpr: string;
+      if (hasPathParams) {
+        pathExpr = "`" + parsed.path.replace(/:(\w+)/g, (_, param) => `\${vars.${param}}`) + "`";
+      } else {
+        pathExpr = `"${parsed.path}"`;
+      }
+
+      // Build body expression
+      let bodyExpr: string;
+      if (hasPathParams && inputType !== "void") {
+        bodyExpr = "vars.input";
+      } else if (inputType !== "void") {
+        bodyExpr = "vars";
+      } else {
+        bodyExpr = "undefined";
+      }
+
+      const optionsType = `UseMutationOptions<${responseType}, Error, ${variablesType}>`;
+
+      sections.push(`/** ${parsed.method} ${parsed.path} */`);
+      sections.push(`export function ${hookName}(options?: Omit<${optionsType}, "mutationFn">) {`);
+      sections.push(`  const queryClient = useQueryClient();`);
+      sections.push(`  return useMutation({`);
+      if (variablesType === "void") {
+        sections.push(`    mutationFn: () => _fetch<${responseType}>("${parsed.method}", ${pathExpr}, ${bodyExpr}),`);
+      } else {
+        sections.push(`    mutationFn: (vars: ${variablesType}) => _fetch<${responseType}>("${parsed.method}", ${pathExpr}, ${bodyExpr}),`);
+      }
+      sections.push(`    onSuccess: (...args) => {`);
+      sections.push(`      queryClient.invalidateQueries({ queryKey: queryKeys.${resource}.all });`);
+      sections.push(`      options?.onSuccess?.(...args);`);
+      sections.push(`    },`);
+      sections.push(`    ...options,`);
+      sections.push(`  });`);
+      sections.push(`}`);
+      sections.push("");
+    }
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

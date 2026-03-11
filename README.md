@@ -23,6 +23,7 @@ trickle dev
 - [Mock Server](#mock-server)
 - [Type Drift Report](#type-drift-report)
 - [OpenAPI Spec Generation](#openapi-spec-generation)
+- [React Query Hooks](#react-query-hooks)
 - [Zod Schema Generation](#zod-schema-generation)
 - [Express Handler Types](#express-handler-types)
 - [Breaking Change Detection](#breaking-change-detection)
@@ -85,6 +86,7 @@ npx trickle openapi              # Generate OpenAPI 3.0 spec
 npx trickle codegen --client     # Generate a typed API client
 npx trickle codegen --handlers   # Generate typed Express handlers
 npx trickle codegen --zod        # Generate Zod validation schemas
+npx trickle codegen --react-query # Generate React Query hooks
 npx trickle mock                 # Start a mock API server
 npx trickle tail                 # Live stream of events
 ```
@@ -621,6 +623,127 @@ cat openapi.json | jq '.paths | keys'
 
 ---
 
+## React Query Hooks
+
+Generate fully-typed [TanStack React Query](https://tanstack.com/query) hooks from runtime-observed routes — `useQuery` for GET endpoints, `useMutation` for POST/PUT/DELETE, with automatic cache invalidation and query keys.
+
+```bash
+# Generate to stdout
+npx trickle codegen --react-query
+
+# Write to file
+npx trickle codegen --react-query --out .trickle/hooks.ts
+```
+
+Output example:
+
+```typescript
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import type { UseQueryOptions, UseMutationOptions } from "@tanstack/react-query";
+
+export interface GetApiUsersResponse {
+  users: GetApiUsersResponseUsers[];
+  total: number;
+}
+
+export interface PostApiUsersInput {
+  name: string;
+  email: string;
+}
+
+// Query key factory for cache management
+export const queryKeys = {
+  users: {
+    all: ["users"] as const,
+    list: () => ["users", "list"] as const,
+    detail: (id: string) => ["users", id] as const,
+  },
+  products: {
+    all: ["products"] as const,
+    list: () => ["products", "list"] as const,
+  },
+} as const;
+
+/** GET /api/users */
+export function useGetApiUsers(options?: ...) {
+  return useQuery({
+    queryKey: queryKeys.users.list(),
+    queryFn: () => _fetch<GetApiUsersResponse>("GET", "/api/users"),
+    ...options,
+  });
+}
+
+/** GET /api/users/:id */
+export function useGetApiUsersId(id: string, options?: ...) {
+  return useQuery({
+    queryKey: queryKeys.users.detail(id),
+    queryFn: () => _fetch<GetApiUsersIdResponse>("GET", `/api/users/${id}`),
+    ...options,
+  });
+}
+
+/** POST /api/users */
+export function usePostApiUsers(options?: ...) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: PostApiUsersInput) =>
+      _fetch<PostApiUsersResponse>("POST", "/api/users", vars),
+    onSuccess: (...args) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
+      options?.onSuccess?.(...args);
+    },
+    ...options,
+  });
+}
+```
+
+### Usage in a React component
+
+```tsx
+import { configureTrickleHooks, useGetApiUsers, usePostApiUsers } from './.trickle/hooks';
+
+// Once at app startup
+configureTrickleHooks('http://localhost:3000');
+
+function UserList() {
+  const { data, isLoading, error } = useGetApiUsers();  // fully typed!
+  const createUser = usePostApiUsers();
+
+  if (isLoading) return <div>Loading...</div>;
+
+  return (
+    <div>
+      {data.users.map(user => (     // user is typed: { id, name, email }
+        <div key={user.id}>{user.name}</div>
+      ))}
+      <button onClick={() => createUser.mutate({
+        name: 'New User',           // autocomplete for input fields!
+        email: 'new@example.com',
+      })}>
+        Add User
+      </button>
+    </div>
+  );
+}
+```
+
+### Features
+
+- **GET routes → `useQuery`** with typed responses and query key factory
+- **POST/PUT/DELETE → `useMutation`** with typed inputs and auto cache invalidation
+- **Query keys** organized by resource for easy `invalidateQueries` calls
+- **Path params** automatically become hook arguments (`useGetApiUsersId(id)`)
+- **`configureTrickleHooks(baseUrl)`** for one-time setup
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-react-query-e2e.js
+```
+
+---
+
 ## Zod Schema Generation
 
 Generate [Zod](https://zod.dev) validation schemas from runtime-observed types — giving you both runtime validation and compile-time types via `z.infer<>`.
@@ -965,6 +1088,7 @@ npx trickle codegen --python --out .trickle/types.pyi  # Python stubs
 npx trickle codegen --client --out .trickle/client.ts  # Typed API client
 npx trickle codegen --handlers --out .trickle/handlers.d.ts  # Express handler types
 npx trickle codegen --zod --out .trickle/schemas.ts          # Zod validation schemas
+npx trickle codegen --react-query --out .trickle/hooks.ts    # React Query hooks
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -1305,6 +1429,7 @@ trickle/
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
+├── test-react-query-e2e.js # React Query hook generation test
 ├── test-zod-e2e.js         # Zod schema generation test
 ├── test-handlers-e2e.js    # Express handler type generation test
 ├── test-dev-e2e.js         # Dev mode (all-in-one) test
@@ -1343,6 +1468,7 @@ node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
+node test-react-query-e2e.js # React Query hook generation
 node test-zod-e2e.js         # Zod schema generation
 node test-handlers-e2e.js    # Express handler type generation
 node test-dev-e2e.js         # Dev mode (all-in-one)

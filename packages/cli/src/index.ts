@@ -96,6 +96,7 @@ program
   .option("--client", "Generate a typed fetch-based API client from observed routes")
   .option("--handlers", "Generate typed Express handler types for route handlers")
   .option("--zod", "Generate Zod validation schemas with inferred types")
+  .option("--react-query", "Generate typed TanStack React Query hooks")
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);

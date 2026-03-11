@@ -8,6 +8,7 @@ import { errorsCommand } from "./commands/errors";
 import { tailCommand } from "./commands/tail";
 import { codegenCommand } from "./commands/codegen";
 import { mockCommand } from "./commands/mock";
+import { initCommand } from "./commands/init";
 
 const program = new Command();
 
@@ -15,6 +16,16 @@ program
   .name("trickle")
   .description("CLI for trickle runtime type observability")
   .version("0.1.0");
+
+// trickle init
+program
+  .command("init")
+  .description("Set up trickle in your project — configures types, tsconfig, and npm scripts")
+  .option("--dir <path>", "Project directory (defaults to current directory)")
+  .option("--python", "Set up for a Python project")
+  .action(async (opts) => {
+    await initCommand(opts);
+  });
 
 // trickle functions
 program

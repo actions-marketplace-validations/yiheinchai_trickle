@@ -138,7 +138,12 @@ npx trickle tail                 # Live stream of events
 Prefix any command with `trickle run` to capture runtime types from all function calls — zero code changes needed. Works with Node.js, Python, test runners, and any script. Auto-detects the runtime from file extensions.
 
 ```bash
-# Just pass a file — trickle auto-detects the runtime
+# Just pass a file — trickle auto-detects everything
+trickle app.js                     # shortest form (no "run" needed!)
+trickle script.py                  # Python — auto-detects and generates .pyi
+trickle app.ts                     # TypeScript — uses tsx/ts-node/bun
+
+# Explicit "run" also works
 trickle run app.js                 # → detects Node.js
 trickle run app.ts                 # → detects TypeScript (uses tsx/ts-node/bun)
 trickle run app.mjs                # → detects ESM
@@ -154,6 +159,13 @@ trickle run "python script.py"
 trickle run "vitest run"
 trickle run "jest --runInBand"
 trickle run "pytest tests/"
+```
+
+**Auto-generated type files** — when you pass a single file, trickle automatically generates a `.d.ts` (JavaScript/TypeScript) or `.pyi` (Python) sidecar file right next to your source. Your IDE picks up the types immediately — no `--stubs` flag needed:
+
+```bash
+trickle app.js          # → runs app.js, generates app.d.ts
+trickle script.py       # → runs script.py, generates script.pyi
 ```
 
 After the command finishes, trickle shows a summary with inline type signatures:
@@ -262,6 +274,7 @@ node test-fetch-e2e.js       # JS HTTP fetch response type capture
 node test-py-http-e2e.js     # Python HTTP requests type capture
 node test-py-deep-e2e.js     # Python entry file deep observation
 node test-run-watch-e2e.js   # Watch mode (auto-rerun on file changes)
+node test-direct-exec-e2e.js # Direct file execution + auto sidecar .d.ts
 ```
 
 ---

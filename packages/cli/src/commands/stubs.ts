@@ -6,6 +6,7 @@ import { fetchStubs } from "../api-client";
 export interface StubsOptions {
   env?: string;
   dryRun?: boolean;
+  silent?: boolean;
 }
 
 /**
@@ -77,11 +78,13 @@ export async function stubsCommand(
   const { stubs } = await fetchStubs({ env: opts.env });
 
   if (!stubs || Object.keys(stubs).length === 0) {
-    console.log(
-      chalk.yellow(
-        "\n  No observed types found. Run your code with trickle first.\n",
-      ),
-    );
+    if (!opts.silent) {
+      console.log(
+        chalk.yellow(
+          "\n  No observed types found. Run your code with trickle first.\n",
+        ),
+      );
+    }
     return;
   }
 
@@ -89,9 +92,11 @@ export async function stubsCommand(
   const sourceFiles = findSourceFiles(targetDir);
 
   if (sourceFiles.length === 0) {
-    console.log(
-      chalk.yellow(`\n  No source files found in ${targetDir}\n`),
-    );
+    if (!opts.silent) {
+      console.log(
+        chalk.yellow(`\n  No source files found in ${targetDir}\n`),
+      );
+    }
     return;
   }
 
@@ -155,6 +160,7 @@ export async function stubsCommand(
   }
 
   // Output summary
+  if (opts.silent) return;
   console.log();
   if (opts.dryRun) {
     console.log(chalk.cyan("  Dry run — no files written.\n"));

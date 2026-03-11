@@ -85,6 +85,24 @@ function mergeConfigWithOpts(opts: RunOptions, config: TrickleConfig | null): Ru
   return merged;
 }
 
+// ── Detect if command is a single source file ──
+
+function detectSingleFile(command: string): string | null {
+  const trimmed = command.trim();
+  // Must be a single token (no spaces unless quoted)
+  if (/\s/.test(trimmed)) return null;
+
+  const ext = path.extname(trimmed).toLowerCase();
+  if (![".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".py"].includes(ext)) {
+    return null;
+  }
+
+  const resolved = path.resolve(trimmed);
+  if (!fs.existsSync(resolved)) return null;
+
+  return resolved;
+}
+
 // ── Auto-detect runtime from file extension ──
 
 function autoDetectCommand(input: string): string {
@@ -192,6 +210,9 @@ export async function runCommand(
   const config = loadProjectConfig();
   opts = mergeConfigWithOpts(opts, config);
 
+  // Detect if command is a single file — if so, auto-generate sidecar types
+  const singleFile = detectSingleFile(command);
+
   // Auto-detect runtime from file extension
   const resolvedCommand = autoDetectCommand(command);
 
@@ -265,11 +286,12 @@ export async function runCommand(
     instrumentedCommand,
     runEnv,
     opts,
+    singleFile,
   );
 
   // If --watch, enter watch loop instead of exiting
   if (opts.watch) {
-    await enterWatchLoop(command, instrumentedCommand, runEnv, opts, backendProc);
+    await enterWatchLoop(command, instrumentedCommand, runEnv, opts, singleFile, backendProc);
     // enterWatchLoop never returns (handles its own exit)
   }
 
@@ -289,6 +311,7 @@ async function executeSingleRun(
   instrumentedCommand: string,
   env: Record<string, string>,
   opts: RunOptions,
+  singleFile?: string | null,
 ): Promise<number> {
   // Snapshot functions before run (to compute delta)
   let functionsBefore: FunctionRow[] = [];
@@ -322,7 +345,44 @@ async function executeSingleRun(
     await autoAnnotateFiles(opts.annotate);
   }
 
+  // Auto-generate sidecar type file when invoked with a single file
+  // (unless --stubs was explicitly specified, which overrides this)
+  if (singleFile && !opts.stubs) {
+    await autoGenerateSidecar(singleFile);
+  }
+
   return exitCode;
+}
+
+// ── Auto-generate sidecar type file ──
+
+async function autoGenerateSidecar(filePath: string): Promise<void> {
+  try {
+    const ext = path.extname(filePath).toLowerCase();
+    const isPython = ext === ".py";
+    const dir = path.dirname(filePath);
+    const baseName = path.basename(filePath, ext);
+
+    // Determine sidecar filename
+    const sidecarName = isPython ? `${baseName}.pyi` : `${baseName}.d.ts`;
+    const sidecarPath = path.join(dir, sidecarName);
+
+    // Use the stubs command to generate stubs for the file's directory
+    const { stubsCommand } = await import("./stubs");
+    await stubsCommand(dir, { silent: true });
+
+    // Check if the sidecar was generated
+    if (fs.existsSync(sidecarPath)) {
+      const stats = fs.statSync(sidecarPath);
+      if (stats.size > 0) {
+        console.log(
+          chalk.green(`\n  Types written to ${chalk.bold(sidecarName)}`),
+        );
+      }
+    }
+  } catch {
+    // Don't fail the run if sidecar generation fails
+  }
 }
 
 // ── Watch mode ──
@@ -359,6 +419,7 @@ async function enterWatchLoop(
   instrumentedCommand: string,
   env: Record<string, string>,
   opts: RunOptions,
+  singleFile: string | null,
   backendProc: ChildProcess | null,
 ): Promise<void> {
   const { dir: watchDir, file: watchFile } = findWatchTargets(originalCommand);
@@ -386,7 +447,7 @@ async function enterWatchLoop(
       console.log(chalk.gray("  " + "─".repeat(50)));
 
       try {
-        await executeSingleRun(instrumentedCommand, env, opts);
+        await executeSingleRun(instrumentedCommand, env, opts, singleFile);
       } catch {
         console.log(chalk.red("  Run failed. Waiting for next change..."));
       }

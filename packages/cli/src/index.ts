@@ -437,4 +437,18 @@ process.on("unhandledRejection", (err) => {
   process.exit(1);
 });
 
+// ── Direct file execution shorthand ──
+// `trickle app.js` → `trickle run app.js`
+// `trickle script.py --watch` → `trickle run script.py --watch`
+const CODE_EXTENSIONS = /\.(js|ts|tsx|jsx|mjs|cjs|mts|py)$/i;
+const firstArg = process.argv[2];
+if (
+  firstArg &&
+  !firstArg.startsWith("-") &&
+  CODE_EXTENSIONS.test(firstArg)
+) {
+  // Inject "run" before the file argument
+  process.argv.splice(2, 0, "run");
+}
+
 program.parse();

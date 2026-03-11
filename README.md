@@ -3243,6 +3243,13 @@ node -r trickle/auto app.js
 
 This installs all hooks BEFORE your app loads, so even the entry file's functions are instrumented (unlike `require('trickle/auto')` from within the file).
 
+**JavaScript (ESM)** — use `--import` for ESM modules (import/export syntax):
+```bash
+node --import trickle/auto-esm app.mjs
+```
+
+Works with `.mjs` files and any ESM modules. Exported functions (`export function`, `export const`, `export default`, `export { }`) are all instrumented automatically. Async exports are handled too.
+
 **Conditional activation** — use `trickle/auto-env` to activate only when `TRICKLE_AUTO=1`:
 ```bash
 # Always loaded, but only activates when TRICKLE_AUTO=1
@@ -3272,6 +3279,9 @@ PYTHONPATH=packages/client-python/src:. python test-auto-py-single-e2e.py
 
 # JavaScript (zero-code — no source changes)
 npm run build --workspace=packages/client-js && node test-zerocode-js-e2e.js
+
+# JavaScript (ESM — import/export syntax)
+npm run build --workspace=packages/client-js && node test-esm-auto-e2e.js
 
 # Python (zero-code — no source changes)
 PYTHONPATH=packages/client-python/src:. python test-zerocode-py-e2e.py

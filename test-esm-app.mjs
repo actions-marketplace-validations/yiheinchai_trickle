@@ -1,18 +1,22 @@
 /**
- * ESM test app — imports from ESM helpers using ES module syntax.
+ * ESM app — uses import/export syntax. NO trickle imports.
+ * Run with: node --import trickle/auto-esm test-esm-app.mjs
  */
-import { parseConfig, processItems, calculateTotal } from './test-esm-helpers.mjs';
 
-const config = parseConfig({ host: 'api.example.com', port: 8080, debug: true });
-console.log('config:', config);
+import { tokenize, buildIndex, fetchAndParse } from './test-esm-lib.mjs';
 
-const items = processItems([
-  { id: 1, name: 'foo' },
-  { id: 2, name: 'bar' },
+// Exercise the functions
+const tokens = tokenize("Hello World this is a test of ESM modules", { lowercase: true });
+console.log(`Tokens: ${tokens.count} (${tokens.unique} unique)`);
+
+const idx = buildIndex([
+  { id: 'doc1', text: 'hello world' },
+  { id: 'doc2', text: 'world of code' },
+  { id: 'doc3', text: 'hello code world' },
 ]);
-console.log('items:', items.length);
+console.log(`Index: ${idx.terms} terms across ${idx.documents} docs`);
 
-const totals = calculateTotal([10.5, 20.0, 5.25], 0.1);
-console.log('totals:', totals);
+const result = await fetchAndParse('https://example.com', d => ({ ...d, parsed: true }));
+console.log(`Fetch: success=${result.success}`);
 
-console.log('Done!');
+console.log("Done!");

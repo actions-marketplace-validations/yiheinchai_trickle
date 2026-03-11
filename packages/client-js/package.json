@@ -10,7 +10,8 @@
     "./observe": "./observe.js",
     "./observe-esm": "./observe-esm.mjs",
     "./auto": "./auto.js",
-    "./auto-env": "./auto-env.js"
+    "./auto-env": "./auto-env.js",
+    "./auto-esm": "./auto-esm.mjs"
   },
   "scripts": {
     "build": "tsc",

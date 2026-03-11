@@ -110,11 +110,29 @@ function moduleNameFromUrl(url) {
  * - export default function(...) { ... }
  * - export { name1, name2 }
  */
+/**
+ * Extract parameter names from a function source snippet (everything after the function name).
+ */
+function extractParamNamesFromSource(source, startIdx) {
+  // Find the opening paren
+  const openParen = source.indexOf('(', startIdx);
+  if (openParen === -1) return [];
+  const closeParen = source.indexOf(')', openParen);
+  if (closeParen === -1) return [];
+  const paramStr = source.slice(openParen + 1, closeParen).trim();
+  if (!paramStr) return [];
+  return paramStr.split(',').map(p => {
+    const trimmed = p.trim().split('=')[0].trim().split(':')[0].trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('...')) return '';
+    return trimmed;
+  }).filter(Boolean);
+}
+
 function transformSource(source, url) {
   const moduleName = moduleNameFromUrl(url);
   const lines = source.split('\n');
-  const exportedFunctions = [];
-  const exportedDefaults = [];
+  const exportedFunctions = []; // { name, paramNames }
+  const exportedDefaults = []; // { name, paramNames }
   const namedExports = []; // from `export { name }` statements
   const result = [];
 
@@ -131,11 +149,11 @@ function transformSource(source, url) {
     // export function name(...)
     const funcMatch = trimmed.match(/^export\s+(async\s+)?function\s+(\w+)\s*\(/);
     if (funcMatch) {
-      const asyncKw = funcMatch[1] || '';
       const name = funcMatch[2];
+      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf(name));
       // Remove 'export ' prefix, keep the function
       result.push(line.replace(/^(\s*)export\s+/, '$1'));
-      exportedFunctions.push(name);
+      exportedFunctions.push({ name, paramNames });
       continue;
     }
 
@@ -143,8 +161,9 @@ function transformSource(source, url) {
     const constFuncMatch = trimmed.match(/^export\s+(const|let)\s+(\w+)\s*=\s*(async\s+)?(\(|function\b)/);
     if (constFuncMatch) {
       const name = constFuncMatch[2];
+      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf('='));
       result.push(line.replace(/^(\s*)export\s+/, '$1'));
-      exportedFunctions.push(name);
+      exportedFunctions.push({ name, paramNames });
       continue;
     }
 
@@ -160,22 +179,23 @@ function transformSource(source, url) {
     const defaultNamedMatch = trimmed.match(/^export\s+default\s+(async\s+)?function\s+(\w+)\s*\(/);
     if (defaultNamedMatch) {
       const name = defaultNamedMatch[2];
+      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf(name));
       // Remove 'export default'
       result.push(line.replace(/^(\s*)export\s+default\s+/, '$1'));
-      exportedDefaults.push(name);
+      exportedDefaults.push({ name, paramNames });
       continue;
     }
 
     // export default function(...)  (anonymous)
     const defaultAnonMatch = trimmed.match(/^export\s+default\s+(async\s+)?function\s*\(/);
     if (defaultAnonMatch) {
-      const asyncKw = defaultAnonMatch[1] || '';
+      const paramNames = extractParamNamesFromSource(trimmed, trimmed.indexOf('function'));
       // Convert to named: const __trickle_default = function(...)
       result.push(line.replace(
         /^(\s*)export\s+default\s+(async\s+)?function\s*\(/,
         '$1const __trickle_default = $2function('
       ));
-      exportedDefaults.push('__trickle_default');
+      exportedDefaults.push({ name: '__trickle_default', paramNames });
       continue;
     }
 
@@ -210,20 +230,21 @@ function transformSource(source, url) {
   result.push(`import { createRequire as __cr } from 'node:module';`);
   result.push(`const __require = __cr(import.meta.url);`);
   result.push(`const { wrapFunction: __tw } = __require('${wrapperPathEscaped}');`);
-  result.push(`const __twOpts = (name) => ({ functionName: name, module: '${moduleName}', trackArgs: true, trackReturn: true, sampleRate: 1, maxDepth: 5, environment: process.env.TRICKLE_ENV || 'development', enabled: true });`);
+  result.push(`const __twOpts = (name, paramNames) => { const o = { functionName: name, module: '${moduleName}', trackArgs: true, trackReturn: true, sampleRate: 1, maxDepth: 5, environment: process.env.TRICKLE_ENV || 'development', enabled: true }; if (paramNames && paramNames.length) o.paramNames = paramNames; return o; };`);
 
   // Wrap and re-export named functions
   const reExports = [];
-  for (const name of exportedFunctions) {
+  for (const { name, paramNames } of exportedFunctions) {
     const wrappedName = `__trickle_${name}`;
-    result.push(`const ${wrappedName} = typeof ${name} === 'function' ? __tw(${name}, __twOpts('${name}')) : ${name};`);
+    const pn = paramNames.length > 0 ? JSON.stringify(paramNames) : 'null';
+    result.push(`const ${wrappedName} = typeof ${name} === 'function' ? __tw(${name}, __twOpts('${name}', ${pn})) : ${name};`);
     reExports.push(`${wrappedName} as ${name}`);
   }
 
   // Handle named exports from export { } statements
   for (const { local, exported } of namedExports) {
     const wrappedName = `__trickle_ne_${exported}`;
-    result.push(`const ${wrappedName} = typeof ${local} === 'function' ? __tw(${local}, __twOpts('${exported}')) : ${local};`);
+    result.push(`const ${wrappedName} = typeof ${local} === 'function' ? __tw(${local}, __twOpts('${exported}', null)) : ${local};`);
     reExports.push(`${wrappedName} as ${exported}`);
   }
 
@@ -232,8 +253,10 @@ function transformSource(source, url) {
   }
 
   // Handle default exports
-  for (const name of exportedDefaults) {
-    result.push(`const __trickle_default_wrapped = typeof ${name} === 'function' ? __tw(${name}, __twOpts('${name === '__trickle_default' ? 'default' : name}')) : ${name};`);
+  for (const { name, paramNames } of exportedDefaults) {
+    const displayName = name === '__trickle_default' ? 'default' : name;
+    const pn = paramNames.length > 0 ? JSON.stringify(paramNames) : 'null';
+    result.push(`const __trickle_default_wrapped = typeof ${name} === 'function' ? __tw(${name}, __twOpts('${displayName}', ${pn})) : ${name};`);
     result.push(`export default __trickle_default_wrapped;`);
   }
 

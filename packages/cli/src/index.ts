@@ -18,6 +18,7 @@ import { dashboardCommand } from "./commands/dashboard";
 import { proxyCommand } from "./commands/proxy";
 import { exportCommand } from "./commands/export";
 import { coverageCommand } from "./commands/coverage";
+import { replayCommand } from "./commands/replay";
 
 const program = new Command();
 
@@ -207,6 +208,18 @@ program
   .option("--stale-hours <hours>", "Hours before a function is considered stale (default: 24)")
   .action(async (opts) => {
     await coverageCommand(opts);
+  });
+
+// trickle replay
+program
+  .command("replay")
+  .description("Replay captured API requests as regression tests — verify response shapes match")
+  .option("-t, --target <url>", "Target server URL (default: http://localhost:3000)")
+  .option("--strict", "Compare exact values instead of just shapes")
+  .option("--json", "Output JSON results (for CI)")
+  .option("--fail-fast", "Stop on first failure")
+  .action(async (opts) => {
+    await replayCommand(opts);
   });
 
 // Handle unhandled rejections

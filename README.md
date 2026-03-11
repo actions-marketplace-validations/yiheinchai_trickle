@@ -32,6 +32,7 @@ trickle dev
 - [Web Dashboard](#web-dashboard)
 - [Export All](#export-all)
 - [Type Coverage Report](#type-coverage-report)
+- [API Replay Testing](#api-replay-testing)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1252,6 +1253,61 @@ node test-coverage-e2e.js
 
 ---
 
+## API Replay Testing
+
+Replay captured API requests as free regression tests. Trickle already records sample inputs and outputs for every route — `trickle replay` sends those requests against a running server and verifies the response shapes still match. No test code required.
+
+```bash
+# Replay against your local server
+npx trickle replay --target http://localhost:3000
+
+# Strict mode (compare exact values, not just shapes)
+npx trickle replay --target http://localhost:3000 --strict
+
+# JSON output for CI
+npx trickle replay --json --target http://localhost:3000
+
+# Stop on first failure
+npx trickle replay --fail-fast --target http://localhost:3000
+```
+
+Example output:
+```
+  trickle replay
+  ──────────────────────────────────────────────────
+  Target:  http://localhost:3000
+  Routes:  3
+  Mode:    shape (structural match)
+  ──────────────────────────────────────────────────
+
+  ✓ GET /api/users [200] 4ms
+  ✓ POST /api/users [200] 14ms
+  ✓ GET /api/products [200] 3ms
+
+  ──────────────────────────────────────────────────
+  3/3 passed — all routes match
+```
+
+When a route's response shape changes, replay detects it:
+```
+  ✗ GET /api/users [200] 5ms — users: missing
+  ✓ POST /api/users [200] 8ms
+  ✗ GET /api/products [200] 3ms — root: expected object, got array
+
+  1 passed, 2 failed out of 3 routes
+```
+
+Two comparison modes:
+- **Shape mode** (default): Verifies structural match — same keys, same types, nested objects and arrays checked recursively
+- **Strict mode** (`--strict`): Verifies exact values match the captured samples
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-replay-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1505,6 +1561,23 @@ npx trickle coverage --env production --stale-hours 48
 | `--json` | Output raw JSON |
 | `--fail-under <score>` | Exit 1 if health is below threshold (0-100) |
 | `--stale-hours <hours>` | Hours before a function is considered stale (default: 24) |
+
+### `trickle replay`
+
+Replay captured API requests as regression tests.
+
+```bash
+npx trickle replay --target http://localhost:3000
+npx trickle replay --target http://localhost:3000 --strict
+npx trickle replay --json --fail-fast
+```
+
+| Flag | Description |
+|------|-------------|
+| `-t, --target <url>` | Target server URL (default: `http://localhost:3000`) |
+| `--strict` | Compare exact values instead of just shapes |
+| `--json` | Output JSON results for CI |
+| `--fail-fast` | Stop on first failure |
 
 ### `trickle dashboard`
 
@@ -1777,6 +1850,7 @@ trickle/
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
 ├── test-proxy-e2e.js       # Transparent proxy type capture test
+├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
 ├── test-export-e2e.js      # Export all formats test
 ├── test-dashboard-e2e.js   # Web dashboard test
@@ -1824,6 +1898,7 @@ node test-proxy-e2e.js       # Transparent proxy type capture
 node test-dashboard-e2e.js   # Web dashboard
 node test-export-e2e.js      # Export all formats
 node test-coverage-e2e.js    # Type coverage report
+node test-replay-e2e.js      # API replay regression tests
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
 node test-zod-e2e.js         # Zod schema generation

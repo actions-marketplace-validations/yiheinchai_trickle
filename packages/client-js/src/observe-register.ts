@@ -33,6 +33,7 @@ import { configure } from './transport';
 import { detectEnvironment } from './env-detect';
 import { wrapFunction } from './wrap';
 import { WrapOptions } from './types';
+import { patchFetch } from './fetch-observer';
 
 const M = Module as any;
 const originalLoad = M._load;
@@ -215,6 +216,9 @@ if (enabled) {
   if (debug) {
     console.log(`[trickle/observe] Auto-observation enabled (backend: ${backendUrl})`);
   }
+
+  // ── Hook 0: Patch global.fetch to capture HTTP response types ──
+  patchFetch(environment, debug);
 
   // ── Hook 1: Module._compile — transform source to wrap function declarations ──
   // This catches ALL functions including entry file and non-exported helpers.

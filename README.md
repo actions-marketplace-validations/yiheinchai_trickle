@@ -23,6 +23,7 @@ trickle dev
 - [Mock Server](#mock-server)
 - [Type Drift Report](#type-drift-report)
 - [OpenAPI Spec Generation](#openapi-spec-generation)
+- [Zod Schema Generation](#zod-schema-generation)
 - [Express Handler Types](#express-handler-types)
 - [Breaking Change Detection](#breaking-change-detection)
 - [CLI Reference](#cli-reference)
@@ -83,6 +84,7 @@ npx trickle check --against b.json  # CI: catch breaking changes
 npx trickle openapi              # Generate OpenAPI 3.0 spec
 npx trickle codegen --client     # Generate a typed API client
 npx trickle codegen --handlers   # Generate typed Express handlers
+npx trickle codegen --zod        # Generate Zod validation schemas
 npx trickle mock                 # Start a mock API server
 npx trickle tail                 # Live stream of events
 ```
@@ -619,6 +621,85 @@ cat openapi.json | jq '.paths | keys'
 
 ---
 
+## Zod Schema Generation
+
+Generate [Zod](https://zod.dev) validation schemas from runtime-observed types — giving you both runtime validation and compile-time types via `z.infer<>`.
+
+```bash
+# Generate to stdout
+npx trickle codegen --zod
+
+# Write to file
+npx trickle codegen --zod --out .trickle/schemas.ts
+```
+
+Output example:
+
+```typescript
+import { z } from "zod";
+
+/** GET /api/users — response */
+export const getApiUsersResponseSchema = z.object({
+  users: z.array(z.object({
+    id: z.number(),
+    name: z.string(),
+    email: z.string(),
+    active: z.boolean(),
+  })),
+  total: z.number(),
+});
+export type GetApiUsersResponse = z.infer<typeof getApiUsersResponseSchema>;
+
+/** POST /api/users — request body */
+export const postApiUsersRequestSchema = z.object({
+  name: z.string(),
+  email: z.string(),
+});
+export type PostApiUsersRequest = z.infer<typeof postApiUsersRequestSchema>;
+
+/** POST /api/users — response */
+export const postApiUsersResponseSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  email: z.string(),
+  created: z.boolean(),
+});
+export type PostApiUsersResponse = z.infer<typeof postApiUsersResponseSchema>;
+```
+
+### Use cases
+
+- **API input validation**: Validate request bodies before processing
+- **Type-safe parsing**: Use `schema.parse(data)` for runtime-checked types
+- **Form validation**: Use with React Hook Form, Formik, or any form library
+- **Config parsing**: Validate environment variables or config files
+- **Type inference**: Use `z.infer<typeof schema>` instead of manually writing types
+
+### Usage
+
+```typescript
+import { postApiUsersRequestSchema, PostApiUsersRequest } from './.trickle/schemas';
+
+// Runtime validation
+app.post('/api/users', (req, res) => {
+  const result = postApiUsersRequestSchema.safeParse(req.body);
+  if (!result.success) {
+    return res.status(400).json({ errors: result.error.issues });
+  }
+  const { name, email } = result.data;  // fully typed!
+  // ...
+});
+```
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-zod-e2e.js
+```
+
+---
+
 ## Express Handler Types
 
 Generate fully-typed Express handler type aliases from runtime-observed routes — so your route handlers have typed `req.body`, `req.params`, `req.query`, and `res.json()` without writing any types.
@@ -883,6 +964,7 @@ npx trickle codegen --out .trickle/types.d.ts          # Write to file
 npx trickle codegen --python --out .trickle/types.pyi  # Python stubs
 npx trickle codegen --client --out .trickle/client.ts  # Typed API client
 npx trickle codegen --handlers --out .trickle/handlers.d.ts  # Express handler types
+npx trickle codegen --zod --out .trickle/schemas.ts          # Zod validation schemas
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -894,6 +976,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--python` | Generate Python TypedDict stubs |
 | `--client` | Generate typed fetch-based API client |
 | `--handlers` | Generate typed Express handler types |
+| `--zod` | Generate Zod validation schemas with inferred types |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -1222,6 +1305,7 @@ trickle/
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
+├── test-zod-e2e.js         # Zod schema generation test
 ├── test-handlers-e2e.js    # Express handler type generation test
 ├── test-dev-e2e.js         # Dev mode (all-in-one) test
 ├── package.json            # npm workspace root
@@ -1259,6 +1343,7 @@ node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
+node test-zod-e2e.js         # Zod schema generation
 node test-handlers-e2e.js    # Express handler type generation
 node test-dev-e2e.js         # Dev mode (all-in-one)
 

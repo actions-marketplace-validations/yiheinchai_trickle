@@ -1194,5 +1194,191 @@ export function generateHandlerTypes(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── Zod schema generation ──
+
+/**
+ * Convert a TypeNode to a Zod schema expression string.
+ */
+function typeNodeToZod(node: TypeNode, indent: number): string {
+  const pad = "  ".repeat(indent);
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string":    return "z.string()";
+        case "number":    return "z.number()";
+        case "boolean":   return "z.boolean()";
+        case "null":      return "z.null()";
+        case "undefined": return "z.undefined()";
+        case "bigint":    return "z.bigint()";
+        case "symbol":    return "z.symbol()";
+        default:          return "z.unknown()";
+      }
+
+    case "unknown":
+      return "z.unknown()";
+
+    case "array":
+      return `z.array(${typeNodeToZod(node.element, indent)})`;
+
+    case "tuple": {
+      if (node.elements.length === 0) return "z.tuple([])";
+      const els = node.elements.map((el) => typeNodeToZod(el, indent));
+      return `z.tuple([${els.join(", ")}])`;
+    }
+
+    case "union": {
+      const members = node.members.map((m) => typeNodeToZod(m, indent));
+      if (members.length === 1) return members[0];
+      return `z.union([${members.join(", ")}])`;
+    }
+
+    case "map": {
+      return `z.map(${typeNodeToZod(node.key, indent)}, ${typeNodeToZod(node.value, indent)})`;
+    }
+
+    case "set": {
+      return `z.set(${typeNodeToZod(node.element, indent)})`;
+    }
+
+    case "promise": {
+      return `z.promise(${typeNodeToZod(node.resolved, indent)})`;
+    }
+
+    case "function": {
+      return "z.function()";
+    }
+
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) return "z.object({})";
+
+      const innerPad = "  ".repeat(indent + 1);
+      const entries = keys.map((key) => {
+        const val = typeNodeToZod(node.properties[key], indent + 1);
+        return `${innerPad}${key}: ${val},`;
+      });
+      return `z.object({\n${entries.join("\n")}\n${pad}})`;
+    }
+  }
+}
+
+/**
+ * Generate Zod validation schemas from runtime-observed types.
+ *
+ * For each function/route, generates a named Zod schema that can be used for:
+ * - Runtime validation of API inputs/outputs
+ * - TypeScript type inference via `z.infer<typeof schema>`
+ * - Form validation, config parsing, etc.
+ */
+export function generateZodSchemas(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  if (functions.length === 0) {
+    return "// No functions found. Instrument your app to generate Zod schemas.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated Zod schemas by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --zod` to update");
+  sections.push("");
+  sections.push('import { z } from "zod";');
+  sections.push("");
+
+  // Check if any are route-style functions
+  const hasRoutes = functions.some((fn) => parseRouteName(fn.name) !== null);
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+
+    if (parsed) {
+      // Route-style: generate Input/Output schemas
+      const baseName = toCamelCase(parsed.typeName);
+      const BaseNamePascal = parsed.typeName;
+
+      // --- Response schema ---
+      sections.push(`/** ${parsed.method} ${parsed.path} — response */`);
+      sections.push(`export const ${baseName}ResponseSchema = ${typeNodeToZod(fn.returnType, 0)};`);
+      sections.push(`export type ${BaseNamePascal}Response = z.infer<typeof ${baseName}ResponseSchema>;`);
+      sections.push("");
+
+      // --- Request body schema (for POST/PUT/PATCH) ---
+      if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+        let bodyNode: TypeNode | undefined;
+        if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+          bodyNode = fn.argsType.properties["body"];
+        } else if (fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1) {
+          const el = fn.argsType.elements[0];
+          if (el.kind === "object" && el.properties["body"]) {
+            bodyNode = el.properties["body"];
+          }
+        }
+        if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+          sections.push(`/** ${parsed.method} ${parsed.path} — request body */`);
+          sections.push(`export const ${baseName}RequestSchema = ${typeNodeToZod(bodyNode, 0)};`);
+          sections.push(`export type ${BaseNamePascal}Request = z.infer<typeof ${baseName}RequestSchema>;`);
+          sections.push("");
+        }
+      }
+
+      // --- Path params schema (if route has :params) ---
+      if (parsed.pathParams.length > 0) {
+        let paramsNode: TypeNode | undefined;
+        if (fn.argsType.kind === "object" && fn.argsType.properties["params"]) {
+          paramsNode = fn.argsType.properties["params"];
+        }
+        if (paramsNode && paramsNode.kind === "object" && Object.keys(paramsNode.properties).length > 0) {
+          sections.push(`/** ${parsed.method} ${parsed.path} — path params */`);
+          sections.push(`export const ${baseName}ParamsSchema = ${typeNodeToZod(paramsNode, 0)};`);
+          sections.push(`export type ${BaseNamePascal}Params = z.infer<typeof ${baseName}ParamsSchema>;`);
+          sections.push("");
+        }
+      }
+
+      // --- Query params schema ---
+      if (fn.argsType.kind === "object" && fn.argsType.properties["query"]) {
+        const queryNode = fn.argsType.properties["query"];
+        if (queryNode.kind === "object" && Object.keys(queryNode.properties).length > 0) {
+          sections.push(`/** ${parsed.method} ${parsed.path} — query params */`);
+          sections.push(`export const ${baseName}QuerySchema = ${typeNodeToZod(queryNode, 0)};`);
+          sections.push(`export type ${BaseNamePascal}Query = z.infer<typeof ${baseName}QuerySchema>;`);
+          sections.push("");
+        }
+      }
+    } else {
+      // Non-route function: generate Input/Output schemas
+      const baseName = toCamelCase(toPascalCase(fn.name));
+      const BaseNamePascal = toPascalCase(fn.name);
+
+      // Input schema
+      if (fn.argsType.kind !== "unknown") {
+        sections.push(`/** ${fn.name} — input */`);
+        if (fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1) {
+          sections.push(`export const ${baseName}InputSchema = ${typeNodeToZod(fn.argsType.elements[0], 0)};`);
+        } else {
+          sections.push(`export const ${baseName}InputSchema = ${typeNodeToZod(fn.argsType, 0)};`);
+        }
+        sections.push(`export type ${BaseNamePascal}Input = z.infer<typeof ${baseName}InputSchema>;`);
+        sections.push("");
+      }
+
+      // Output schema
+      sections.push(`/** ${fn.name} — output */`);
+      sections.push(`export const ${baseName}OutputSchema = ${typeNodeToZod(fn.returnType, 0)};`);
+      sections.push(`export type ${BaseNamePascal}Output = z.infer<typeof ${baseName}OutputSchema>;`);
+      sections.push("");
+    }
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

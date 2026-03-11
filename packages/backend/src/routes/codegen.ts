@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/connection";
 import { listFunctions, getFunctionByName, getLatestSnapshot } from "../db/queries";
-import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes } from "../services/type-generator";
+import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes, generateZodSchemas } from "../services/type-generator";
 import { TypeNode } from "../types";
 
 const router = Router();
@@ -118,6 +118,10 @@ router.get("/", (req: Request, res: Response) => {
     let types: string;
     if (format === "handlers") {
       types = generateHandlerTypes(functions);
+      res.json({ types });
+      return;
+    } else if (format === "zod") {
+      types = generateZodSchemas(functions);
       res.json({ types });
       return;
     } else if (format === "client") {

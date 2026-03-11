@@ -39,6 +39,7 @@ trickle dev
 - [Request Validation Middleware](#request-validation-middleware)
 - [MSW Mock Handlers](#msw-mock-handlers)
 - [JSON Schema Generation](#json-schema-generation)
+- [SWR Hooks](#swr-hooks)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -102,6 +103,7 @@ npx trickle codegen --react-query # Generate React Query hooks
 npx trickle codegen --middleware  # Generate Express validation middleware
 npx trickle codegen --msw        # Generate MSW mock handlers
 npx trickle codegen --json-schema # Generate JSON Schema definitions
+npx trickle codegen --swr        # Generate typed SWR hooks
 npx trickle test --generate      # Generate API test files
 npx trickle mock                 # Start a mock API server
 npx trickle proxy -t http://localhost:3000  # Zero-change type capture
@@ -1671,6 +1673,90 @@ node test-json-schema-e2e.js
 
 ---
 
+## SWR Hooks
+
+Generate typed [SWR](https://swr.vercel.app/) data-fetching hooks from observed runtime types — perfect for Next.js and React apps using Vercel's stale-while-revalidate library.
+
+```bash
+npx trickle codegen --swr
+npx trickle codegen --swr --out .trickle/hooks.ts
+```
+
+trickle observes your API routes and generates type-safe SWR hooks with `useSWR` for queries and `useSWRMutation` for mutations:
+
+```typescript
+import useSWR from "swr";
+import useSWRMutation from "swr/mutation";
+
+export interface GetApiUsersResponse {
+  users: { id: number; name: string }[];
+  total: number;
+}
+
+export interface PostApiUsersInput {
+  name: string;
+  email: string;
+}
+
+// GET hook — useSWR with typed response
+export function useGetApiUsers(config?: SWRConfiguration<GetApiUsersResponse, Error>) {
+  return useSWR<GetApiUsersResponse, Error>("/api/users", fetcher, config);
+}
+
+// GET with path params — typed parameter
+export function useGetApiUsersId(id: string, config?: SWRConfiguration) {
+  return useSWR<GetApiUsersIdResponse, Error>(`/api/users/${id}`, fetcher, config);
+}
+
+// POST mutation — useSWRMutation with typed input
+export function usePostApiUsers(config?: SWRMutationConfiguration) {
+  return useSWRMutation<PostApiUsersResponse, Error, string, PostApiUsersInput>(
+    "/api/users",
+    (url, { arg }) => mutationFetcher(url, { arg: { method: "POST", body: arg } }),
+    config,
+  );
+}
+
+// DELETE mutation — void trigger (no body needed)
+export function useDeleteApiUsersId(id: string, config?: SWRMutationConfiguration) {
+  return useSWRMutation<DeleteApiUsersIdResponse, Error, string, void>(
+    `/api/users/${id}`,
+    (url) => mutationFetcher(url, { arg: { method: "DELETE" } }),
+    config,
+  );
+}
+```
+
+Use in your components:
+
+```typescript
+import { useGetApiUsers, usePostApiUsers, configureSwrHooks } from "./.trickle/hooks";
+
+configureSwrHooks("http://localhost:3000"); // call once at startup
+
+function UserList() {
+  const { data, error, isLoading } = useGetApiUsers();
+  const { trigger: createUser } = usePostApiUsers();
+
+  // data is typed as GetApiUsersResponse
+  // createUser accepts PostApiUsersInput
+}
+```
+
+Key behaviors:
+- `useSWR` hooks for all GET routes with typed responses
+- `useSWRMutation` hooks for POST/PUT/PATCH/DELETE with typed inputs
+- Path parameters become function arguments (`:id` → `id: string`)
+- Configurable base URL via `configureSwrHooks()`
+- Full SWR configuration passthrough (`SWRConfiguration`, `SWRMutationConfiguration`)
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-swr-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1781,6 +1867,7 @@ npx trickle codegen --guards --out .trickle/guards.ts       # Runtime type guard
 npx trickle codegen --middleware --out .trickle/middleware.ts # Express validation middleware
 npx trickle codegen --msw --out .trickle/handlers.ts         # MSW mock handlers
 npx trickle codegen --json-schema --out .trickle/schemas.json # JSON Schema definitions
+npx trickle codegen --swr --out .trickle/hooks.ts             # SWR data-fetching hooks
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -1797,6 +1884,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--middleware` | Generate Express request validation middleware |
 | `--msw` | Generate Mock Service Worker (MSW) request handlers |
 | `--json-schema` | Generate JSON Schema definitions from observed types |
+| `--swr` | Generate typed SWR data-fetching hooks |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2260,6 +2348,7 @@ trickle/
 ├── test-middleware-e2e.js   # Express validation middleware test
 ├── test-msw-e2e.js          # MSW mock handler generation test
 ├── test-json-schema-e2e.js  # JSON Schema generation test
+├── test-swr-e2e.js          # SWR hook generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2315,6 +2404,7 @@ node test-guards-e2e.js      # Type guard generation
 node test-middleware-e2e.js   # Express validation middleware
 node test-msw-e2e.js          # MSW mock handler generation
 node test-json-schema-e2e.js  # JSON Schema generation
+node test-swr-e2e.js          # SWR hook generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

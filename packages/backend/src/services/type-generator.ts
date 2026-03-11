@@ -2439,5 +2439,213 @@ export function generateJsonSchemas(
   return JSON.stringify(schema, null, 2) + "\n";
 }
 
+// ── SWR Hook Generation ──
+
+/**
+ * Generate typed SWR hooks from observed API routes.
+ *
+ * Output:
+ * - Import from 'swr' and 'swr/mutation'
+ * - Response/input type interfaces
+ * - A configurable fetcher
+ * - useSWR hooks for GET routes
+ * - useSWRMutation hooks for POST/PUT/PATCH/DELETE routes
+ */
+export function generateSwrHooks(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (parsed) {
+      routes.push({ parsed, fn });
+    }
+  }
+
+  if (routes.length === 0) {
+    return "// No API routes found. Instrument your Express/FastAPI app to generate SWR hooks.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated SWR hooks by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --swr` to update");
+  sections.push("");
+  sections.push('import useSWR from "swr";');
+  sections.push('import useSWRMutation from "swr/mutation";');
+  sections.push('import type { SWRConfiguration, SWRResponse } from "swr";');
+  sections.push('import type { SWRMutationConfiguration, SWRMutationResponse } from "swr/mutation";');
+  sections.push("");
+
+  // Generate interfaces
+  const extracted: ExtractedInterface[] = [];
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+
+    // Response type
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      sections.push(renderInterface(`${baseName}Response`, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+    } else {
+      const retStr = typeNodeToTS(fn.returnType, extracted, baseName, undefined, 0);
+      sections.push(`export type ${baseName}Response = ${retStr};`);
+    }
+    sections.push("");
+
+    // Request body type (POST/PUT/PATCH)
+    if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+      let bodyNode: TypeNode | undefined;
+      if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+        bodyNode = fn.argsType.properties["body"];
+      }
+      if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+        sections.push(renderInterface(`${baseName}Input`, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+      }
+    }
+  }
+
+  // Emit extracted sub-interfaces
+  const emitted = new Set<string>();
+  let cursor = 0;
+  while (cursor < extracted.length) {
+    const iface = extracted[cursor];
+    cursor++;
+    if (emitted.has(iface.name)) continue;
+    emitted.add(iface.name);
+    sections.push(renderInterface(iface.name, iface.node, extracted));
+    sections.push("");
+  }
+
+  // Fetcher setup
+  sections.push("// ── Fetcher ──");
+  sections.push("");
+  sections.push("let _baseUrl = \"\";");
+  sections.push("");
+  sections.push("/** Set the base URL for all API requests. Call once at app startup. */");
+  sections.push("export function configureSwrHooks(baseUrl: string) {");
+  sections.push("  _baseUrl = baseUrl;");
+  sections.push("}");
+  sections.push("");
+  sections.push("const fetcher = <T>(path: string): Promise<T> =>");
+  sections.push("  fetch(`${_baseUrl}${path}`).then((res) => {");
+  sections.push("    if (!res.ok) throw new Error(`GET ${path}: HTTP ${res.status}`);");
+  sections.push("    return res.json() as Promise<T>;");
+  sections.push("  });");
+  sections.push("");
+  sections.push("async function mutationFetcher<T>(");
+  sections.push("  url: string,");
+  sections.push("  { arg }: { arg: { method: string; body?: unknown } },");
+  sections.push("): Promise<T> {");
+  sections.push("  const opts: RequestInit = {");
+  sections.push("    method: arg.method,");
+  sections.push('    headers: { "Content-Type": "application/json" },');
+  sections.push("  };");
+  sections.push("  if (arg.body !== undefined) opts.body = JSON.stringify(arg.body);");
+  sections.push("  const res = await fetch(`${_baseUrl}${url}`, opts);");
+  sections.push("  if (!res.ok) throw new Error(`${arg.method} ${url}: HTTP ${res.status}`);");
+  sections.push("  return res.json() as Promise<T>;");
+  sections.push("}");
+  sections.push("");
+
+  // Generate hooks
+  sections.push("// ── Hooks ──");
+  sections.push("");
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+    const hookName = `use${baseName}`;
+    const responseType = `${baseName}Response`;
+
+    if (parsed.method === "GET") {
+      // useSWR hook
+      const hasPathParams = parsed.pathParams.length > 0;
+      const fnParams: string[] = [];
+
+      if (hasPathParams) {
+        for (const p of parsed.pathParams) {
+          fnParams.push(`${p}: string`);
+        }
+      }
+      fnParams.push(`config?: SWRConfiguration<${responseType}, Error>`);
+
+      let pathExpr: string;
+      if (hasPathParams) {
+        pathExpr = "`" + parsed.path.replace(/:(\w+)/g, (_, param: string) => `\${${param}}`) + "`";
+      } else {
+        pathExpr = `"${parsed.path}"`;
+      }
+
+      sections.push(`/** ${parsed.method} ${parsed.path} */`);
+      sections.push(`export function ${hookName}(${fnParams.join(", ")}): SWRResponse<${responseType}, Error> {`);
+      sections.push(`  return useSWR<${responseType}, Error>(${pathExpr}, fetcher<${responseType}>, config);`);
+      sections.push("}");
+      sections.push("");
+    } else {
+      // useSWRMutation hook for POST/PUT/PATCH/DELETE
+      const method = parsed.method;
+      const hasPathParams = parsed.pathParams.length > 0;
+      const fnParams: string[] = [];
+
+      if (hasPathParams) {
+        for (const p of parsed.pathParams) {
+          fnParams.push(`${p}: string`);
+        }
+      }
+
+      // Check if route has input body
+      let inputType: string | undefined;
+      if (["POST", "PUT", "PATCH"].includes(method)) {
+        let bodyNode: TypeNode | undefined;
+        if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+          bodyNode = fn.argsType.properties["body"];
+        }
+        if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+          inputType = `${baseName}Input`;
+        }
+      }
+
+      const triggerArgType = inputType || "void";
+      fnParams.push(`config?: SWRMutationConfiguration<${responseType}, Error, string, ${triggerArgType}>`);
+
+      let pathExpr: string;
+      if (hasPathParams) {
+        pathExpr = "`" + parsed.path.replace(/:(\w+)/g, (_, param: string) => `\${${param}}`) + "`";
+      } else {
+        pathExpr = `"${parsed.path}"`;
+      }
+
+      sections.push(`/** ${method} ${parsed.path} */`);
+      sections.push(`export function ${hookName}(${fnParams.join(", ")}): SWRMutationResponse<${responseType}, Error, string, ${triggerArgType}> {`);
+      sections.push(`  return useSWRMutation<${responseType}, Error, string, ${triggerArgType}>(`);
+      sections.push(`    ${pathExpr},`);
+
+      if (inputType) {
+        sections.push(`    (url, { arg }) => mutationFetcher<${responseType}>(url, { arg: { method: "${method}", body: arg } }),`);
+      } else {
+        sections.push(`    (url) => mutationFetcher<${responseType}>(url, { arg: { method: "${method}" } }),`);
+      }
+
+      sections.push("    config,");
+      sections.push("  );");
+      sections.push("}");
+      sections.push("");
+    }
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

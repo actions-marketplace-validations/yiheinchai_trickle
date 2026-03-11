@@ -109,6 +109,7 @@ program
   .option("--middleware", "Generate Express request validation middleware")
   .option("--msw", "Generate Mock Service Worker (MSW) request handlers")
   .option("--json-schema", "Generate JSON Schema definitions from observed types")
+  .option("--swr", "Generate typed SWR data-fetching hooks")
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);

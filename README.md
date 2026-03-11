@@ -50,6 +50,7 @@ trickle dev
 - [Axios Client](#axios-client)
 - [Auto-Detect & Generate](#auto-detect--generate)
 - [API Validation](#api-validation)
+- [Live Watch Mode](#live-watch-mode)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2355,6 +2356,48 @@ node test-validate-e2e.js
 
 ---
 
+## Live Watch Mode
+
+Auto-regenerate type files whenever new runtime types are observed. Run `trickle watch` alongside your dev server, and your IDE types update in real-time as requests flow through your app.
+
+```bash
+# Start watching — types regenerate automatically
+trickle watch
+
+# [14:23:01] Performing initial type generation...
+# [14:23:01] Generated 4 files: types.d.ts, api-client.ts, guards.ts, schemas.ts
+# Watching for type changes... (Ctrl+C to stop)
+#
+# [14:23:15] New: GET /api/users
+# [14:23:15] Regenerated 4 files: types.d.ts, api-client.ts, guards.ts, schemas.ts
+# [14:24:02] Updated: GET /api/users
+# [14:24:02] Regenerated 4 files: types.d.ts, api-client.ts, guards.ts, schemas.ts
+```
+
+Works with **any** instrumentation method — proxy mode, client-js, capture, or manual. Unlike `trickle dev` (which wraps your app process), `watch` is a standalone watcher that monitors the backend for new observations.
+
+```bash
+# Custom poll interval
+trickle watch --interval 500ms
+
+# Custom output directory
+trickle watch -d src/generated
+
+# Filter by environment
+trickle watch --env production
+```
+
+Formats are auto-detected from your `package.json` — same logic as `trickle auto`. If you have `zod`, you get schemas. If you have `axios`, you get an Axios client. If you have `@tanstack/react-query`, you get hooks. All automatically, all live.
+
+**Test:**
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-watch-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2708,6 +2751,22 @@ npx trickle validate POST https://api.example.com/users -d '{"name":"test"}'
 | `--env <env>` | Filter by environment |
 | `--strict` | Treat extra fields as errors (not just warnings) |
 
+### `trickle watch`
+
+Watch for new type observations and auto-regenerate type files.
+
+```bash
+npx trickle watch                    # Default 3s poll interval
+npx trickle watch --interval 500ms   # Faster polling
+npx trickle watch -d src/generated   # Custom output directory
+```
+
+| Flag | Description |
+|------|-------------|
+| `-d, --dir <path>` | Output directory (default: .trickle) |
+| `--env <env>` | Filter by environment |
+| `--interval <interval>` | Poll interval (e.g., 3s, 500ms, 1m) |
+
 ### `trickle replay`
 
 Replay captured API requests as regression tests.
@@ -3046,6 +3105,7 @@ trickle/
 ├── test-axios-e2e.js       # Axios client generation test
 ├── test-auto-e2e.js        # Auto-detect & generate test
 ├── test-validate-e2e.js    # API validation test
+├── test-watch-e2e.js       # Live watch mode test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -3112,6 +3172,7 @@ node test-search-e2e.js      # Type search
 node test-axios-e2e.js       # Axios client generation
 node test-auto-e2e.js        # Auto-detect & generate
 node test-validate-e2e.js    # API validation
+node test-watch-e2e.js       # Live watch mode
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

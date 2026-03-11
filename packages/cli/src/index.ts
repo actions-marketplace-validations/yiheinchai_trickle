@@ -26,6 +26,7 @@ import { captureCommand } from "./commands/capture";
 import { searchCommand } from "./commands/search";
 import { autoCommand } from "./commands/auto";
 import { validateCommand } from "./commands/validate";
+import { watchCommand } from "./commands/watch";
 
 const program = new Command();
 
@@ -315,6 +316,17 @@ program
   .option("--strict", "Treat extra fields as errors (not just warnings)")
   .action(async (method: string, url: string, opts) => {
     await validateCommand(method, url, opts);
+  });
+
+// trickle watch
+program
+  .command("watch")
+  .description("Watch for new type observations and auto-regenerate type files")
+  .option("-d, --dir <path>", "Output directory (default: .trickle)")
+  .option("--env <env>", "Filter by environment")
+  .option("--interval <interval>", "Poll interval (e.g., 3s, 500ms, 1m)", "3s")
+  .action(async (opts) => {
+    await watchCommand(opts);
   });
 
 // Handle unhandled rejections

@@ -195,3 +195,5 @@ function inferModule(): string {
 export type { TypeNode, GlobalOpts, TrickleOpts, IngestPayload } from './types';
 export { flush } from './transport';
 export { instrumentExpress, trickleMiddleware } from './express';
+export { observe, observeFn } from './observe';
+export type { ObserveOpts } from './observe';

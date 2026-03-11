@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./register": "./register.js"
+    "./register": "./register.js",
+    "./observe": "./observe.js"
   },
   "scripts": {
     "build": "tsc",

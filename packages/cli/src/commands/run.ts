@@ -111,6 +111,48 @@ export async function runCommand(
 }
 
 /**
+ * Detect if a script file uses ES modules.
+ */
+function isEsmFile(command: string): boolean {
+  // Extract the script file from the command
+  const parts = command.split(/\s+/);
+  // Find the first .js/.mjs/.ts file in the command
+  for (const part of parts) {
+    if (part.endsWith('.mjs') || part.endsWith('.mts')) return true;
+
+    if (part.endsWith('.js') || part.endsWith('.ts') || part.endsWith('.tsx') || part.endsWith('.jsx')) {
+      const filePath = path.resolve(part);
+      // Check if the file uses import/export
+      try {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        if (/^\s*(import|export)\s/m.test(content)) return true;
+      } catch {
+        // File might not exist at this path
+      }
+
+      // Check package.json for "type": "module"
+      try {
+        let dir = path.dirname(filePath);
+        for (let i = 0; i < 10; i++) {
+          const pkgPath = path.join(dir, 'package.json');
+          if (fs.existsSync(pkgPath)) {
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+            if (pkg.type === 'module') return true;
+            break;
+          }
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          dir = parent;
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Detect the language and inject the appropriate auto-observation mechanism.
  */
 function injectObservation(
@@ -129,28 +171,44 @@ function injectObservation(
     return { instrumentedCommand: command, env };
   }
 
-  // Resolve the observe entry point path
+  // Resolve the observe entry point paths
   const observePath = resolveObservePath();
+  const observeEsmPath = resolveObserveEsmPath();
 
   // Set observe config via env vars
   if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
   if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
 
-  // Node.js commands: inject -r directly
+  // Node.js commands: detect CJS vs ESM and inject accordingly
   const nodeMatch = command.match(/^(node|ts-node|tsx|nodemon)\s/);
   if (nodeMatch) {
     const runner = nodeMatch[1];
-    const modified = command.replace(
-      new RegExp(`^${runner}\\s`),
-      `${runner} -r ${observePath} `
-    );
-    return { instrumentedCommand: modified, env };
+    const useEsm = isEsmFile(command) && observeEsmPath;
+
+    if (useEsm) {
+      const modified = command.replace(
+        new RegExp(`^${runner}\\s`),
+        `${runner} --import ${observeEsmPath} `
+      );
+      return { instrumentedCommand: modified, env };
+    } else {
+      const modified = command.replace(
+        new RegExp(`^${runner}\\s`),
+        `${runner} -r ${observePath} `
+      );
+      return { instrumentedCommand: modified, env };
+    }
   }
 
   // JS test runners / npx commands: use NODE_OPTIONS
   if (/^(vitest|jest|mocha|npx|bunx|bun)\b/.test(command)) {
     const existing = process.env.NODE_OPTIONS || "";
-    env.NODE_OPTIONS = `${existing} -r ${observePath}`.trim();
+    // Use both -r (CJS) and --import (ESM) for test runners
+    if (observeEsmPath) {
+      env.NODE_OPTIONS = `${existing} -r ${observePath} --import ${observeEsmPath}`.trim();
+    } else {
+      env.NODE_OPTIONS = `${existing} -r ${observePath}`.trim();
+    }
     return { instrumentedCommand: command, env };
   }
 
@@ -189,7 +247,7 @@ function injectObservation(
 }
 
 /**
- * Resolve the absolute path to the observe entry point.
+ * Resolve the absolute path to the CJS observe entry point.
  */
 function resolveObservePath(): string {
   // Try to find trickle/observe in node_modules
@@ -215,6 +273,35 @@ function resolveObservePath(): string {
 
   // Fallback: assume trickle is installed
   return "trickle/observe";
+}
+
+/**
+ * Resolve the absolute path to the ESM observe entry point.
+ * Returns null if ESM hooks are not available.
+ */
+function resolveObserveEsmPath(): string | null {
+  // Try to find trickle/observe-esm in node_modules
+  try {
+    const resolved = require.resolve("trickle/observe-esm");
+    return resolved;
+  } catch {
+    // Not in node_modules
+  }
+
+  // Try relative to this CLI package (monorepo)
+  const monorepoPath = path.resolve(
+    __dirname,
+    "..",
+    "..",
+    "..",
+    "client-js",
+    "observe-esm.mjs"
+  );
+  if (fs.existsSync(monorepoPath)) {
+    return monorepoPath;
+  }
+
+  return null;
 }
 
 /**

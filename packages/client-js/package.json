@@ -7,7 +7,8 @@
   "exports": {
     ".": "./dist/index.js",
     "./register": "./register.js",
-    "./observe": "./observe.js"
+    "./observe": "./observe.js",
+    "./observe-esm": "./observe-esm.mjs"
   },
   "scripts": {
     "build": "tsc",

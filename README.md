@@ -138,8 +138,9 @@ npx trickle tail                 # Live stream of events
 Prefix any command with `trickle run` to capture runtime types from all function calls — zero code changes needed. Works with Node.js, Python, test runners, and any script.
 
 ```bash
-# Node.js scripts
-trickle run "node app.js"
+# Node.js (CJS and ESM — both work automatically)
+trickle run "node app.js"          # CommonJS
+trickle run "node app.mjs"         # ES Modules
 
 # Test runners
 trickle run "vitest run"
@@ -174,7 +175,7 @@ After the command finishes, trickle shows a summary of what was captured:
   ──────────────────────────────────────────────────
 ```
 
-**How it works:** For JS, injects `-r trickle/observe` which patches `Module._load` to wrap all exported functions from user modules. For Python, uses `python -m trickle` to install import hooks. Auto-starts the backend if not running.
+**How it works:** Auto-detects CJS vs ESM. For CJS, injects `-r trickle/observe` (patches `Module._load`). For ESM, injects `--import trickle/observe-esm` (uses Node.js loader hooks to transform exports). For Python, uses `python -m trickle` to install import hooks. Auto-starts the backend if not running.
 
 | Flag | Description |
 |------|-------------|
@@ -184,7 +185,8 @@ After the command finishes, trickle shows a summary of what was captured:
 **Test:**
 
 ```bash
-node test-run-e2e.js
+node test-run-e2e.js   # CJS test
+node test-esm-e2e.js   # ESM test
 ```
 
 ---
@@ -2921,10 +2923,11 @@ trickle annotate src/helpers.js --dry-run  # Preview without writing
 
 ### `trickle run <command>`
 
-Run any command with universal type observation — zero code changes needed.
+Run any command with universal type observation — zero code changes needed. Auto-detects CJS vs ESM for Node.js.
 
 ```bash
-trickle run "node app.js"         # Node.js
+trickle run "node app.js"         # Node.js (CJS)
+trickle run "node app.mjs"        # Node.js (ESM)
 trickle run "vitest run"          # Test runners
 trickle run "python script.py"    # Python
 ```

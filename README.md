@@ -26,6 +26,7 @@ trickle dev
 - [React Query Hooks](#react-query-hooks)
 - [Zod Schema Generation](#zod-schema-generation)
 - [Express Handler Types](#express-handler-types)
+- [API Test Generation](#api-test-generation)
 - [Breaking Change Detection](#breaking-change-detection)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
@@ -87,6 +88,7 @@ npx trickle codegen --client     # Generate a typed API client
 npx trickle codegen --handlers   # Generate typed Express handlers
 npx trickle codegen --zod        # Generate Zod validation schemas
 npx trickle codegen --react-query # Generate React Query hooks
+npx trickle test --generate      # Generate API test files
 npx trickle mock                 # Start a mock API server
 npx trickle tail                 # Live stream of events
 ```
@@ -902,6 +904,87 @@ node test-handlers-e2e.js
 
 ---
 
+## API Test Generation
+
+Generate ready-to-run API test files from runtime-observed routes and real sample data. No more writing boilerplate fetch calls and assertions manually.
+
+```bash
+# Generate to stdout (vitest)
+npx trickle test --generate
+
+# Write to file
+npx trickle test --generate --out tests/api.test.ts
+
+# Use Jest instead of Vitest
+npx trickle test --generate --framework jest --out tests/api.test.ts
+
+# Custom base URL
+npx trickle test --generate --base-url http://localhost:8080
+```
+
+Output example:
+
+```typescript
+import { describe, it, expect } from "vitest";
+
+const BASE_URL = process.env.TEST_API_URL || "http://localhost:3000";
+
+describe("/api/users", () => {
+  it("GET /api/users — returns expected shape", async () => {
+    const res = await fetch(`${BASE_URL}/api/users`, {
+      method: "GET",
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(Array.isArray(body.users)).toBe(true);
+    expect(body.users.length).toBeGreaterThan(0);
+    expect(typeof body.users[0].id).toBe("number");
+    expect(typeof body.users[0].name).toBe("string");
+    expect(typeof body.users[0].email).toBe("string");
+    expect(typeof body.total).toBe("number");
+  });
+
+  it("POST /api/users — returns expected shape", async () => {
+    const res = await fetch(`${BASE_URL}/api/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        "name": "Charlie",
+        "email": "charlie@test.com"
+      }),
+    });
+
+    expect(res.ok).toBe(true);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(typeof body.id).toBe("number");
+    expect(typeof body.name).toBe("string");
+    expect(typeof body.created).toBe("boolean");
+  });
+});
+```
+
+### What makes this useful
+
+- **Real sample data**: Request bodies come from actual runtime observations, not made-up values
+- **Shape assertions**: Tests verify the structure of responses (field existence and types), not exact values
+- **Grouped by resource**: Tests are organized into `describe` blocks by API resource
+- **Framework support**: Works with Vitest (default) or Jest
+- **CI-ready**: Set `TEST_API_URL` env var to point to any environment
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-test-gen-e2e.js
+```
+
+---
+
 ## Breaking Change Detection
 
 Catch breaking API changes before they reach production. Save a baseline of your API types and compare against it — with CI-friendly exit codes.
@@ -1157,6 +1240,24 @@ npx trickle openapi --env production                         # Filter by env
 | `--api-version <version>` | API version (default: "1.0.0") |
 | `--server <url>` | Server URL to include in the spec |
 
+### `trickle test --generate`
+
+Generate API test files from runtime-observed routes and sample data.
+
+```bash
+npx trickle test --generate                                    # Vitest to stdout
+npx trickle test --generate --out tests/api.test.ts            # Write to file
+npx trickle test --generate --framework jest                   # Use Jest
+npx trickle test --generate --base-url http://localhost:8080   # Custom base URL
+```
+
+| Flag | Description |
+|------|-------------|
+| `--generate` | Generate test file (required) |
+| `-o, --out <path>` | Write tests to a file |
+| `--framework <name>` | Test framework: `vitest` or `jest` (default: vitest) |
+| `--base-url <url>` | Base URL for requests (default: `http://localhost:3000`) |
+
 ### `trickle mock`
 
 Start a mock API server from observed runtime types.
@@ -1360,9 +1461,10 @@ TypeNode =
 ├──────────────────┤                                         │
 │  dev             │  all-in-one app + instrumentation + types│
 │  init            │  project setup                          │
-│  codegen         │  TypeScript/Python/client generation    │
+│  codegen         │  TypeScript/Python/client/hooks/zod gen  │
 │  mock            │  mock API server from observed types    │
 │  diff            │  cross-function type drift report       │
+│  test            │  generate API tests from observations   │
 │  check           │  breaking change detection (CI-ready)   │
 │  openapi         │  generate OpenAPI 3.0 spec              │
 │  functions       │  list observed functions                │
@@ -1414,7 +1516,7 @@ trickle/
 │   └── cli/                # Developer CLI tool
 │       └── src/
 │           ├── index.ts        # Commander setup
-│           ├── commands/       # dev, init, functions, types, errors, codegen, mock, diff, check, openapi, tail
+│           ├── commands/       # dev, init, functions, types, errors, codegen, mock, diff, check, openapi, test-gen, tail
 │           ├── formatters/     # Type and diff formatting
 │           └── ui/             # Badges, helpers
 │
@@ -1429,6 +1531,7 @@ trickle/
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
+├── test-test-gen-e2e.js    # API test generation test
 ├── test-react-query-e2e.js # React Query hook generation test
 ├── test-zod-e2e.js         # Zod schema generation test
 ├── test-handlers-e2e.js    # Express handler type generation test
@@ -1468,6 +1571,7 @@ node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
+node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
 node test-zod-e2e.js         # Zod schema generation
 node test-handlers-e2e.js    # Express handler type generation

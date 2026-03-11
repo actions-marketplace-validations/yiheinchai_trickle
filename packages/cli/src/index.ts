@@ -13,6 +13,7 @@ import { diffCommand } from "./commands/diff";
 import { openapiCommand } from "./commands/openapi";
 import { checkCommand } from "./commands/check";
 import { devCommand } from "./commands/dev";
+import { testGenCommand } from "./commands/test-gen";
 
 const program = new Command();
 
@@ -146,6 +147,22 @@ program
   .option("--no-cors", "Disable CORS headers")
   .action(async (opts) => {
     await mockCommand(opts);
+  });
+
+// trickle test --generate
+program
+  .command("test")
+  .description("Generate API test files from runtime-observed routes and sample data")
+  .option("--generate", "Generate test file from observed routes")
+  .option("-o, --out <path>", "Write tests to a file")
+  .option("--framework <name>", "Test framework: vitest or jest (default: vitest)")
+  .option("--base-url <url>", "Base URL for API requests (default: http://localhost:3000)")
+  .action(async (opts) => {
+    if (!opts.generate) {
+      console.log(chalk.gray("\n  Usage: trickle test --generate [--out tests.ts] [--framework vitest|jest]\n"));
+      return;
+    }
+    await testGenCommand(opts);
   });
 
 // Handle unhandled rejections

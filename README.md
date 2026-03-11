@@ -23,6 +23,7 @@ trickle dev
 - [Mock Server](#mock-server)
 - [Type Drift Report](#type-drift-report)
 - [OpenAPI Spec Generation](#openapi-spec-generation)
+- [Express Handler Types](#express-handler-types)
 - [Breaking Change Detection](#breaking-change-detection)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
@@ -81,6 +82,7 @@ npx trickle diff                 # What types changed recently?
 npx trickle check --against b.json  # CI: catch breaking changes
 npx trickle openapi              # Generate OpenAPI 3.0 spec
 npx trickle codegen --client     # Generate a typed API client
+npx trickle codegen --handlers   # Generate typed Express handlers
 npx trickle mock                 # Start a mock API server
 npx trickle tail                 # Live stream of events
 ```
@@ -617,6 +619,85 @@ cat openapi.json | jq '.paths | keys'
 
 ---
 
+## Express Handler Types
+
+Generate fully-typed Express handler type aliases from runtime-observed routes — so your route handlers have typed `req.body`, `req.params`, `req.query`, and `res.json()` without writing any types.
+
+```bash
+# Generate to stdout
+npx trickle codegen --handlers
+
+# Write to file
+npx trickle codegen --handlers --out .trickle/handlers.d.ts
+```
+
+Output example:
+
+```typescript
+import { Request, Response, NextFunction } from "express";
+
+export interface GetApiUsersResBody {
+  users: GetApiUsersResBodyUsers[];
+  total: number;
+}
+
+export interface PostApiUsersReqBody {
+  name: string;
+  email: string;
+}
+
+export interface GetApiUsersIdParams {
+  id: string;
+}
+
+/** GET /api/users */
+export type GetApiUsersHandler = (
+  req: Request<Record<string, string>, GetApiUsersResBody, unknown, qs.ParsedQs>,
+  res: Response<GetApiUsersResBody>,
+  next: NextFunction
+) => void;
+
+/** POST /api/users */
+export type PostApiUsersHandler = (
+  req: Request<Record<string, string>, PostApiUsersResBody, PostApiUsersReqBody, qs.ParsedQs>,
+  res: Response<PostApiUsersResBody>,
+  next: NextFunction
+) => void;
+
+/** GET /api/users/:id */
+export type GetApiUsersIdHandler = (
+  req: Request<GetApiUsersIdParams, GetApiUsersIdResBody, unknown, qs.ParsedQs>,
+  res: Response<GetApiUsersIdResBody>,
+  next: NextFunction
+) => void;
+```
+
+Usage in your Express app:
+
+```typescript
+import { GetApiUsersHandler, PostApiUsersHandler } from './.trickle/handlers';
+
+app.get('/api/users', ((req, res) => {
+  // req.query is typed, res.json() expects the right shape
+  res.json({ users: [...], total: 10 });
+}) as GetApiUsersHandler);
+
+app.post('/api/users', ((req, res) => {
+  // req.body is typed — { name: string, email: string }
+  const { name, email } = req.body;  // autocomplete!
+  res.json({ id: 3, name, email, created: true });
+}) as PostApiUsersHandler);
+```
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-handlers-e2e.js
+```
+
+---
+
 ## Breaking Change Detection
 
 Catch breaking API changes before they reach production. Save a baseline of your API types and compare against it — with CI-friendly exit codes.
@@ -801,6 +882,7 @@ npx trickle codegen                                    # TypeScript to stdout
 npx trickle codegen --out .trickle/types.d.ts          # Write to file
 npx trickle codegen --python --out .trickle/types.pyi  # Python stubs
 npx trickle codegen --client --out .trickle/client.ts  # Typed API client
+npx trickle codegen --handlers --out .trickle/handlers.d.ts  # Express handler types
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -811,6 +893,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--env <env>` | Filter by environment |
 | `--python` | Generate Python TypedDict stubs |
 | `--client` | Generate typed fetch-based API client |
+| `--handlers` | Generate typed Express handler types |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -1139,6 +1222,7 @@ trickle/
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
+├── test-handlers-e2e.js    # Express handler type generation test
 ├── test-dev-e2e.js         # Dev mode (all-in-one) test
 ├── package.json            # npm workspace root
 └── tsconfig.base.json      # Shared TypeScript config
@@ -1175,6 +1259,7 @@ node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
+node test-handlers-e2e.js    # Express handler type generation
 node test-dev-e2e.js         # Dev mode (all-in-one)
 
 # Self-contained tests (start their own backend):

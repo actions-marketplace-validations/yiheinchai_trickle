@@ -1040,5 +1040,159 @@ export function generateOpenApiSpec(
   return spec;
 }
 
+// ── Express handler type generation ──
+
+/**
+ * Generate typed Express handler type aliases from runtime-observed routes.
+ *
+ * For each route like `GET /api/users/:id`, produces:
+ * - `GetApiUsersIdHandler` — a fully typed `RequestHandler` with
+ *   `Request<Params, ResBody, ReqBody, Query>` and `Response<ResBody>`
+ *
+ * Developers can use these to type their route handlers:
+ *   app.get('/api/users/:id', ((req, res) => { ... }) as GetApiUsersIdHandler);
+ */
+export function generateHandlerTypes(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  // Filter to route-style functions only
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (parsed) {
+      routes.push({ parsed, fn });
+    }
+  }
+
+  if (routes.length === 0) {
+    return "// No API routes found. Instrument your Express app to generate handler types.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated Express handler types by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --handlers` to update");
+  sections.push("");
+  sections.push('import { Request, Response, NextFunction } from "express";');
+  sections.push("");
+
+  const extracted: ExtractedInterface[] = [];
+
+  for (const { parsed, fn } of routes) {
+    const baseName = parsed.typeName;
+
+    // --- Params type ---
+    let paramsType = "Record<string, string>";
+    if (parsed.pathParams.length > 0) {
+      const paramsName = `${baseName}Params`;
+      // Check if we have observed param types
+      let paramsNode: TypeNode | undefined;
+      if (fn.argsType.kind === "object" && fn.argsType.properties["params"]) {
+        paramsNode = fn.argsType.properties["params"];
+      }
+      if (paramsNode && paramsNode.kind === "object" && Object.keys(paramsNode.properties).length > 0) {
+        sections.push(renderInterface(paramsName, paramsNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+      } else {
+        // Generate from path params — all strings
+        const props: string[] = parsed.pathParams.map(p => `  ${p}: string;`);
+        sections.push(`export interface ${paramsName} {`);
+        sections.push(...props);
+        sections.push("}");
+        sections.push("");
+      }
+      paramsType = paramsName;
+    }
+
+    // --- Response body type ---
+    let resBodyType = "unknown";
+    const resBodyName = `${baseName}ResBody`;
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      sections.push(renderInterface(resBodyName, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+      sections.push("");
+      resBodyType = resBodyName;
+    } else {
+      const retStr = typeNodeToTS(fn.returnType, extracted, baseName, undefined, 0);
+      sections.push(`export type ${resBodyName} = ${retStr};`);
+      sections.push("");
+      resBodyType = resBodyName;
+    }
+
+    // --- Request body type ---
+    let reqBodyType = "unknown";
+    if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+      let bodyNode: TypeNode | undefined;
+      if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+        bodyNode = fn.argsType.properties["body"];
+      } else if (fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1) {
+        const el = fn.argsType.elements[0];
+        if (el.kind === "object" && el.properties["body"]) {
+          bodyNode = el.properties["body"];
+        }
+      }
+      if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+        const reqBodyName = `${baseName}ReqBody`;
+        sections.push(renderInterface(reqBodyName, bodyNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+        reqBodyType = reqBodyName;
+      }
+    }
+
+    // --- Query type ---
+    let queryType = "qs.ParsedQs";
+    if (fn.argsType.kind === "object" && fn.argsType.properties["query"]) {
+      const queryNode = fn.argsType.properties["query"];
+      if (queryNode.kind === "object" && Object.keys(queryNode.properties).length > 0) {
+        const queryName = `${baseName}Query`;
+        sections.push(renderInterface(queryName, queryNode as Extract<TypeNode, { kind: "object" }>, extracted));
+        sections.push("");
+        queryType = queryName;
+      }
+    }
+
+    // --- Handler type alias ---
+    sections.push(`/** ${parsed.method} ${parsed.path} */`);
+    sections.push(
+      `export type ${baseName}Handler = (` +
+      `req: Request<${paramsType}, ${resBodyType}, ${reqBodyType}, ${queryType}>, ` +
+      `res: Response<${resBodyType}>, ` +
+      `next: NextFunction` +
+      `) => void;`,
+    );
+    sections.push("");
+  }
+
+  // Emit extracted sub-interfaces
+  const emitted = new Set<string>();
+  const extractedLines: string[] = [];
+  let cursor = 0;
+  while (cursor < extracted.length) {
+    const iface = extracted[cursor];
+    cursor++;
+    if (emitted.has(iface.name)) continue;
+    emitted.add(iface.name);
+    extractedLines.push(renderInterface(iface.name, iface.node, extracted));
+    extractedLines.push("");
+  }
+
+  if (extractedLines.length > 0) {
+    // Insert after the import line (index 4 = after the blank line after import)
+    sections.splice(5, 0, ...extractedLines);
+  }
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

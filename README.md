@@ -6,11 +6,8 @@ Runtime type observability for JavaScript and Python. With minimal setup, trickl
 # Setup (one command)
 trickle init
 
-# Start your app with instrumentation (zero code changes)
-node -r trickle/register app.js
-
-# Types appear in your IDE automatically
-npm run trickle:dev
+# Start your app — types appear in your IDE as requests flow through
+trickle dev
 ```
 
 ---
@@ -18,6 +15,7 @@ npm run trickle:dev
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Dev Mode](#dev-mode)
 - [Zero-Code Instrumentation](#zero-code-instrumentation)
 - [One-Liner Instrumentation](#one-liner-instrumentation)
 - [Manual Instrumentation](#manual-instrumentation)
@@ -57,23 +55,22 @@ This configures everything:
 - Adds npm scripts (`trickle:start`, `trickle:dev`, `trickle:client`, `trickle:mock`)
 - Updates `.gitignore`
 
-### 3. Start your app with instrumentation
+### 3. Start developing
 
 ```bash
-npm run trickle:start
+trickle dev
 ```
 
-This uses `node -r trickle/register` under the hood — zero code changes to your app.
+This single command starts your app with auto-instrumentation and watches for type changes. As requests flow through, `.trickle/types.d.ts` updates automatically and types appear in your IDE.
 
-### 4. Start type generation (in another terminal)
+Or if you prefer separate terminals:
 
 ```bash
-npm run trickle:dev
+npm run trickle:start    # Terminal 1: app with instrumentation
+npm run trickle:dev      # Terminal 2: type generation watch
 ```
 
-This watches for new type observations and regenerates `.trickle/types.d.ts` automatically. Types appear in VS Code as you make requests.
-
-### 5. Explore with the CLI
+### 4. Explore with the CLI
 
 ```bash
 npx trickle functions            # List all instrumented functions
@@ -86,6 +83,71 @@ npx trickle openapi              # Generate OpenAPI 3.0 spec
 npx trickle codegen --client     # Generate a typed API client
 npx trickle mock                 # Start a mock API server
 npx trickle tail                 # Live stream of events
+```
+
+---
+
+## Dev Mode
+
+One command that starts your app with auto-instrumentation and live type generation:
+
+```bash
+# With explicit command
+trickle dev "node app.js"
+
+# Auto-detect from package.json scripts.start
+trickle dev
+
+# Also generate typed API client
+trickle dev --client
+
+# Custom output path
+trickle dev --out .trickle/types.d.ts
+```
+
+What it does:
+1. Reads your start command from `package.json` (or use an explicit command)
+2. Injects `-r trickle/register` for zero-code instrumentation
+3. Starts your app with color-coded `[app]` output prefix
+4. Polls for new type observations every 3 seconds
+5. Writes updated types to `.trickle/types.d.ts` automatically
+6. Optionally generates a typed API client with `--client`
+
+The `[types]` prefix shows when type files are updated:
+
+```
+  trickle dev
+  ──────────────────────────────────────────────────
+  App command:  node app.js
+  Backend:      http://localhost:4888
+  Types output: .trickle/types.d.ts
+  ──────────────────────────────────────────────────
+
+[app] Server listening on port 3000
+[types] Updated .trickle/types.d.ts (4 types)
+[app] GET /api/users 200 12ms
+[types] Updated .trickle/types.d.ts (8 types)
+```
+
+### Testing it
+
+```bash
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Run trickle dev
+cd your-project
+trickle dev "node app.js"
+
+# Terminal 3: Make requests
+curl http://localhost:3000/api/users
+# → Types appear in your IDE!
+```
+
+Or run the dedicated E2E test:
+
+```bash
+node test-dev-e2e.js
 ```
 
 ---
@@ -638,6 +700,23 @@ node test-check-e2e.js
 
 ## CLI Reference
 
+### `trickle dev [command]`
+
+All-in-one development command — app + instrumentation + type generation.
+
+```bash
+trickle dev "node app.js"       # Explicit command
+trickle dev                     # Auto-detect from package.json
+trickle dev --client            # Also generate typed API client
+trickle dev --out types.d.ts    # Custom output path
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o, --out <path>` | Types output path (default: `.trickle/types.d.ts`) |
+| `--client` | Also generate typed API client (`.trickle/api-client.ts`) |
+| `--python` | Generate Python type stubs instead of TypeScript |
+
 ### `trickle init`
 
 Set up trickle in your project.
@@ -989,6 +1068,7 @@ TypeNode =
 │   CLI            │ <──────────────────────────────────────>│
 │   (npx trickle)  │                                         │
 ├──────────────────┤                                         │
+│  dev             │  all-in-one app + instrumentation + types│
 │  init            │  project setup                          │
 │  codegen         │  TypeScript/Python/client generation    │
 │  mock            │  mock API server from observed types    │
@@ -1044,7 +1124,7 @@ trickle/
 │   └── cli/                # Developer CLI tool
 │       └── src/
 │           ├── index.ts        # Commander setup
-│           ├── commands/       # init, functions, types, errors, codegen, mock, diff, check, openapi, tail
+│           ├── commands/       # dev, init, functions, types, errors, codegen, mock, diff, check, openapi, tail
 │           ├── formatters/     # Type and diff formatting
 │           └── ui/             # Badges, helpers
 │
@@ -1059,6 +1139,7 @@ trickle/
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
+├── test-dev-e2e.js         # Dev mode (all-in-one) test
 ├── package.json            # npm workspace root
 └── tsconfig.base.json      # Shared TypeScript config
 ```
@@ -1094,6 +1175,7 @@ node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
 node test-check-e2e.js       # Breaking change detection
+node test-dev-e2e.js         # Dev mode (all-in-one)
 
 # Self-contained tests (start their own backend):
 node test-register-e2e.js    # Zero-code register hook

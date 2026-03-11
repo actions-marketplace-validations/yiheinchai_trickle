@@ -12,6 +12,7 @@ import { initCommand } from "./commands/init";
 import { diffCommand } from "./commands/diff";
 import { openapiCommand } from "./commands/openapi";
 import { checkCommand } from "./commands/check";
+import { devCommand } from "./commands/dev";
 
 const program = new Command();
 
@@ -28,6 +29,17 @@ program
   .option("--python", "Set up for a Python project")
   .action(async (opts) => {
     await initCommand(opts);
+  });
+
+// trickle dev [command]
+program
+  .command("dev [command]")
+  .description("Start your app with auto-instrumentation and live type generation")
+  .option("-o, --out <path>", "Types output path (default: .trickle/types.d.ts)")
+  .option("--client", "Also generate typed API client (.trickle/api-client.ts)")
+  .option("--python", "Generate Python type stubs instead of TypeScript")
+  .action(async (command: string | undefined, opts) => {
+    await devCommand(command, opts);
   });
 
 // trickle functions

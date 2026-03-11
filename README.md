@@ -221,6 +221,7 @@ Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for
 | `--exclude <patterns>` | Skip modules matching these comma-separated substrings |
 | `--stubs <dir>` | Auto-generate `.d.ts` / `.pyi` stub files in `<dir>` after observation |
 | `--annotate <path>` | Auto-annotate source file(s) with JSDoc/TS/Python types after observation |
+| `-w, --watch` | Watch source files and re-run observation on changes |
 
 **Deep observation** — trickle doesn't just capture exported functions. It observes ALL function declarations in your code, including functions defined in the entry file and non-exported internal helpers. No blind spots.
 
@@ -241,15 +242,26 @@ Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for
 
 No extra setup needed — just `trickle run app.js` or `trickle run script.py` and HTTP types appear automatically. POST/PUT/PATCH request body types are captured too.
 
+**Watch mode** — use `--watch` to continuously observe types as you edit code:
+
+```bash
+trickle run app.js --watch
+# Edit app.js → trickle detects change → re-runs → types update
+# Works with --stubs and --annotate for live type generation
+```
+
+Watches the source directory for `.js`, `.ts`, `.py` (and other code files) changes, ignores `node_modules`/`dist`/`__pycache__`, and debounces rapid changes (300ms).
+
 **Test:**
 
 ```bash
-node test-run-e2e.js      # CJS test
-node test-esm-e2e.js      # ESM test
-node test-deep-e2e.js     # Deep observation (entry file + non-exported functions)
-node test-fetch-e2e.js    # JS HTTP fetch response type capture
-node test-py-http-e2e.js  # Python HTTP requests type capture
-node test-py-deep-e2e.js  # Python entry file deep observation
+node test-run-e2e.js         # CJS test
+node test-esm-e2e.js         # ESM test
+node test-deep-e2e.js        # Deep observation (entry file + non-exported functions)
+node test-fetch-e2e.js       # JS HTTP fetch response type capture
+node test-py-http-e2e.js     # Python HTTP requests type capture
+node test-py-deep-e2e.js     # Python entry file deep observation
+node test-run-watch-e2e.js   # Watch mode (auto-rerun on file changes)
 ```
 
 ---

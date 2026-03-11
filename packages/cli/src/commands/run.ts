@@ -19,6 +19,7 @@ export interface RunOptions {
   exclude?: string;
   stubs?: string;
   annotate?: string;
+  watch?: boolean;
 }
 
 // ── .tricklerc.json config ──
@@ -182,6 +183,7 @@ export async function runCommand(
     console.error(chalk.gray("    trickle run app.ts              # auto-detects TypeScript runtime"));
     console.error(chalk.gray("    trickle run script.py            # auto-detects Python"));
     console.error(chalk.gray('    trickle run "node app.js" --stubs src/'));
+    console.error(chalk.gray("    trickle run app.js --watch       # watch for changes and re-run"));
     console.error("");
     process.exit(1);
   }
@@ -215,18 +217,6 @@ export async function runCommand(
     }
   }
 
-  // Snapshot functions before run (to compute delta)
-  let functionsBefore: FunctionRow[] = [];
-  let errorsBefore: ErrorRow[] = [];
-  try {
-    const fb = await listFunctions();
-    functionsBefore = fb.functions;
-    const eb = await listErrors();
-    errorsBefore = eb.errors;
-  } catch {
-    // Backend might not have data yet
-  }
-
   // Detect language and inject instrumentation
   const { instrumentedCommand, env: extraEnv } = injectObservation(
     resolvedCommand,
@@ -236,7 +226,7 @@ export async function runCommand(
 
   // Print header
   console.log("");
-  console.log(chalk.bold("  trickle run"));
+  console.log(chalk.bold(opts.watch ? "  trickle run --watch" : "  trickle run"));
   console.log(chalk.gray("  " + "─".repeat(50)));
   if (resolvedCommand !== command) {
     console.log(chalk.gray(`  File:      ${command}`));
@@ -257,15 +247,63 @@ export async function runCommand(
   if (opts.annotate) {
     console.log(chalk.gray(`  Annotate:  ${opts.annotate}`));
   }
+  if (opts.watch) {
+    console.log(chalk.gray(`  Watch:     enabled`));
+  }
   console.log(chalk.gray("  " + "─".repeat(50)));
   console.log("");
 
-  // Run the instrumented command
-  const exitCode = await runProcess(instrumentedCommand, {
+  // Shared env for all runs
+  const runEnv = {
     ...extraEnv,
     TRICKLE_BACKEND_URL: backendUrl,
     TRICKLE_DEBUG: process.env.TRICKLE_DEBUG || "",
-  });
+  };
+
+  // Execute the single-run flow
+  const exitCode = await executeSingleRun(
+    instrumentedCommand,
+    runEnv,
+    opts,
+  );
+
+  // If --watch, enter watch loop instead of exiting
+  if (opts.watch) {
+    await enterWatchLoop(command, instrumentedCommand, runEnv, opts, backendProc);
+    // enterWatchLoop never returns (handles its own exit)
+  }
+
+  // Clean up
+  if (backendProc) {
+    backendProc.kill("SIGTERM");
+    await sleep(500);
+  }
+
+  process.exit(exitCode);
+}
+
+/**
+ * Execute a single observation run: run the command, wait for flush, show summary.
+ */
+async function executeSingleRun(
+  instrumentedCommand: string,
+  env: Record<string, string>,
+  opts: RunOptions,
+): Promise<number> {
+  // Snapshot functions before run (to compute delta)
+  let functionsBefore: FunctionRow[] = [];
+  let errorsBefore: ErrorRow[] = [];
+  try {
+    const fb = await listFunctions();
+    functionsBefore = fb.functions;
+    const eb = await listErrors();
+    errorsBefore = eb.errors;
+  } catch {
+    // Backend might not have data yet
+  }
+
+  // Run the instrumented command
+  const exitCode = await runProcess(instrumentedCommand, env);
 
   // Wait for transport to flush
   console.log(chalk.gray("\n  Waiting for type data to flush..."));
@@ -284,13 +322,146 @@ export async function runCommand(
     await autoAnnotateFiles(opts.annotate);
   }
 
-  // Clean up
-  if (backendProc) {
-    backendProc.kill("SIGTERM");
-    await sleep(500);
+  return exitCode;
+}
+
+// ── Watch mode ──
+
+/**
+ * Find source files to watch based on the command.
+ * Returns the directory to watch and specific file paths.
+ */
+function findWatchTargets(command: string): { dir: string; file: string | null } {
+  const parts = command.split(/\s+/);
+
+  // Find the first token that looks like a file path
+  for (const part of parts) {
+    const ext = path.extname(part).toLowerCase();
+    if ([".js", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".py", ".jsx"].includes(ext)) {
+      const resolved = path.resolve(part);
+      if (fs.existsSync(resolved)) {
+        return {
+          dir: path.dirname(resolved),
+          file: resolved,
+        };
+      }
+    }
   }
 
-  process.exit(exitCode);
+  return { dir: process.cwd(), file: null };
+}
+
+/**
+ * Enter watch mode — watch source files and re-run on changes.
+ */
+async function enterWatchLoop(
+  originalCommand: string,
+  instrumentedCommand: string,
+  env: Record<string, string>,
+  opts: RunOptions,
+  backendProc: ChildProcess | null,
+): Promise<void> {
+  const { dir: watchDir, file: watchFile } = findWatchTargets(originalCommand);
+
+  const watchExts = new Set([".js", ".ts", ".tsx", ".mjs", ".cjs", ".mts", ".py", ".jsx"]);
+  const ignoreDirs = new Set(["node_modules", ".git", "dist", "build", "__pycache__", ".trickle"]);
+
+  console.log("");
+  console.log(chalk.gray("  " + "─".repeat(50)));
+  console.log(chalk.cyan("  Watching for changes...") + chalk.gray(` (${watchDir})`));
+  console.log(chalk.gray("  Press Ctrl+C to stop."));
+  console.log(chalk.gray("  " + "─".repeat(50)));
+  console.log("");
+
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let runCount = 1;
+
+  const triggerRerun = () => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(async () => {
+      runCount++;
+      const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+      console.log("");
+      console.log(chalk.cyan(`  [${ts}]`) + chalk.bold(` Re-running (#${runCount})...`));
+      console.log(chalk.gray("  " + "─".repeat(50)));
+
+      try {
+        await executeSingleRun(instrumentedCommand, env, opts);
+      } catch {
+        console.log(chalk.red("  Run failed. Waiting for next change..."));
+      }
+
+      console.log("");
+      console.log(chalk.gray("  Watching for changes..."));
+    }, 300); // 300ms debounce
+  };
+
+  // Use fs.watch with recursive option (supported on macOS and Windows)
+  try {
+    const watcher = fs.watch(watchDir, { recursive: true }, (_eventType, filename) => {
+      if (!filename) return;
+
+      // Check file extension
+      const ext = path.extname(filename).toLowerCase();
+      if (!watchExts.has(ext)) return;
+
+      // Skip ignored directories
+      const parts = filename.split(path.sep);
+      if (parts.some(p => ignoreDirs.has(p))) return;
+
+      const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+      console.log(chalk.gray(`  [${ts}] Changed: ${filename}`));
+      triggerRerun();
+    });
+
+    // Handle graceful shutdown
+    const cleanup = () => {
+      watcher.close();
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (backendProc) {
+        backendProc.kill("SIGTERM");
+      }
+      console.log(chalk.gray("\n  Watch stopped.\n"));
+      process.exit(0);
+    };
+
+    process.on("SIGINT", cleanup);
+    process.on("SIGTERM", cleanup);
+
+    // Keep the process alive
+    await new Promise<never>(() => {});
+  } catch (err: unknown) {
+    // Fallback: if recursive watch isn't supported, watch just the target file
+    if (watchFile) {
+      console.log(chalk.gray("  (Watching single file: " + path.basename(watchFile) + ")"));
+
+      const watcher = fs.watch(watchFile, () => {
+        const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+        console.log(chalk.gray(`  [${ts}] Changed: ${path.basename(watchFile)}`));
+        triggerRerun();
+      });
+
+      const cleanup = () => {
+        watcher.close();
+        if (debounceTimer) clearTimeout(debounceTimer);
+        if (backendProc) {
+          backendProc.kill("SIGTERM");
+        }
+        console.log(chalk.gray("\n  Watch stopped.\n"));
+        process.exit(0);
+      };
+
+      process.on("SIGINT", cleanup);
+      process.on("SIGTERM", cleanup);
+
+      await new Promise<never>(() => {});
+    }
+
+    // Can't watch anything
+    console.error(chalk.red("  Could not set up file watcher."));
+    if (backendProc) backendProc.kill("SIGTERM");
+    process.exit(1);
+  }
 }
 
 // ── Auto-generate stubs ──

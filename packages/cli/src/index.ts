@@ -73,6 +73,7 @@ program
   .option("--exclude <patterns>", "Comma-separated substrings — skip matching modules")
   .option("--stubs <dir>", "Auto-generate .d.ts/.pyi type stubs in this directory after the run")
   .option("--annotate <path>", "Auto-annotate this file or directory with types after the run")
+  .option("-w, --watch", "Watch source files and re-run on changes")
   .action(async (command: string | undefined, opts) => {
     await runCommand(command, opts);
   });

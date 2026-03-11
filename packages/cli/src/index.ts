@@ -25,6 +25,7 @@ import { auditCommand } from "./commands/audit";
 import { captureCommand } from "./commands/capture";
 import { searchCommand } from "./commands/search";
 import { autoCommand } from "./commands/auto";
+import { validateCommand } from "./commands/validate";
 
 const program = new Command();
 
@@ -302,6 +303,18 @@ program
   .option("--env <env>", "Filter by environment")
   .action(async (opts) => {
     await autoCommand(opts);
+  });
+
+// trickle validate <method> <url>
+program
+  .command("validate <method> <url>")
+  .description("Validate a live API response against previously observed types")
+  .option("-H, --header <header...>", "HTTP headers")
+  .option("-d, --body <body>", "Request body (JSON string)")
+  .option("--env <env>", "Filter by environment")
+  .option("--strict", "Treat extra fields as errors (not just warnings)")
+  .action(async (method: string, url: string, opts) => {
+    await validateCommand(method, url, opts);
   });
 
 // Handle unhandled rejections

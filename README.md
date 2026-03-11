@@ -49,6 +49,7 @@ trickle dev
 - [Type Search](#type-search)
 - [Axios Client](#axios-client)
 - [Auto-Detect & Generate](#auto-detect--generate)
+- [API Validation](#api-validation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2303,6 +2304,57 @@ node test-auto-e2e.js
 
 ---
 
+## API Validation
+
+Validate live API responses against previously observed types. Catch type drift, missing fields, and shape changes before they reach production.
+
+```bash
+# First, capture a baseline
+trickle capture GET https://api.example.com/users
+
+# Later, validate the API still matches
+trickle validate GET https://api.example.com/users
+#  ✓ Response matches observed type shape
+
+# Strict mode: treat extra fields as errors too
+trickle validate GET https://api.example.com/users --strict
+```
+
+The validate command:
+1. Makes an HTTP request to the target URL
+2. Infers types from the live response
+3. Fetches the stored type baseline from the backend
+4. Compares field-by-field: reports **MISSING** fields, **TYPE** mismatches, **SHAPE** changes, and **EXTRA** fields
+5. Exits with code 1 on errors (missing fields, type mismatches) — perfect for CI
+
+**Mismatch types:**
+- `MISSING` — a field that was in the baseline is gone (error)
+- `TYPE` — a field changed type, e.g. `number` → `string` (error)
+- `SHAPE` — structural change, e.g. `object` → `array` (error)
+- `EXTRA` — a new field appeared (warning in normal mode, error with `--strict`)
+
+```bash
+# Use in CI to catch API contract drift
+trickle validate GET https://staging.example.com/api/users \
+  -H "Authorization: Bearer $TOKEN" \
+  --strict
+
+# Validate with custom headers and body
+trickle validate POST https://api.example.com/users \
+  -H "Authorization: Bearer token" \
+  -d '{"name": "test"}' \
+  --env production
+```
+
+**Test:**
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-validate-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2638,6 +2690,23 @@ npx trickle auto -d src/gen   # Custom output directory
 |------|-------------|
 | `-d, --dir <path>` | Output directory (default: .trickle) |
 | `--env <env>` | Filter by environment |
+
+### `trickle validate <method> <url>`
+
+Validate a live API response against previously observed types.
+
+```bash
+npx trickle validate GET https://api.example.com/users
+npx trickle validate GET https://api.example.com/users --strict
+npx trickle validate POST https://api.example.com/users -d '{"name":"test"}'
+```
+
+| Flag | Description |
+|------|-------------|
+| `-H, --header <header...>` | HTTP headers |
+| `-d, --body <body>` | Request body (JSON string) |
+| `--env <env>` | Filter by environment |
+| `--strict` | Treat extra fields as errors (not just warnings) |
 
 ### `trickle replay`
 
@@ -2976,6 +3045,7 @@ trickle/
 ├── test-search-e2e.js      # Type search test
 ├── test-axios-e2e.js       # Axios client generation test
 ├── test-auto-e2e.js        # Auto-detect & generate test
+├── test-validate-e2e.js    # API validation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -3041,6 +3111,7 @@ node test-trpc-e2e.js        # tRPC router generation
 node test-search-e2e.js      # Type search
 node test-axios-e2e.js       # Axios client generation
 node test-auto-e2e.js        # Auto-detect & generate
+node test-validate-e2e.js    # API validation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

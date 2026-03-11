@@ -11,6 +11,7 @@ import { mockCommand } from "./commands/mock";
 import { initCommand } from "./commands/init";
 import { diffCommand } from "./commands/diff";
 import { openapiCommand } from "./commands/openapi";
+import { checkCommand } from "./commands/check";
 
 const program = new Command();
 
@@ -109,6 +110,17 @@ program
   .option("--server <url>", "Server URL to include in the spec")
   .action(async (opts) => {
     await openapiCommand(opts);
+  });
+
+// trickle check
+program
+  .command("check")
+  .description("Detect breaking API changes by comparing against a saved baseline")
+  .option("--save <file>", "Save current types as a baseline snapshot")
+  .option("--against <file>", "Check current types against a baseline (exit 1 on breaking changes)")
+  .option("--env <env>", "Filter by environment")
+  .action(async (opts) => {
+    await checkCommand(opts);
   });
 
 // trickle mock

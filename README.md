@@ -25,6 +25,7 @@ npm run trickle:dev
 - [Mock Server](#mock-server)
 - [Type Drift Report](#type-drift-report)
 - [OpenAPI Spec Generation](#openapi-spec-generation)
+- [Breaking Change Detection](#breaking-change-detection)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -80,6 +81,7 @@ npx trickle errors               # See what's failing
 npx trickle errors 1             # Inspect error with full type context
 npx trickle types processOrder   # See captured runtime types
 npx trickle diff                 # What types changed recently?
+npx trickle check --against b.json  # CI: catch breaking changes
 npx trickle openapi              # Generate OpenAPI 3.0 spec
 npx trickle codegen --client     # Generate a typed API client
 npx trickle mock                 # Start a mock API server
@@ -553,6 +555,87 @@ cat openapi.json | jq '.paths | keys'
 
 ---
 
+## Breaking Change Detection
+
+Catch breaking API changes before they reach production. Save a baseline of your API types and compare against it — with CI-friendly exit codes.
+
+### Save a baseline
+
+```bash
+# After deploying to production, save current types
+trickle check --save baseline.json
+```
+
+### Check for breaking changes
+
+```bash
+# In CI, before deploying
+trickle check --against baseline.json
+# Exit code 0 = compatible, exit code 1 = breaking changes
+```
+
+### What counts as breaking vs non-breaking
+
+| Change | Classification | Why |
+|--------|---------------|-----|
+| Response field removed | **Breaking** | Clients may depend on it |
+| Response field type changed | **Breaking** | Clients expect the old type |
+| Route/function removed | **Breaking** | Clients call it |
+| New required request field | **Breaking** | Existing callers don't send it |
+| Response field added | Non-breaking | Clients ignore unknown fields |
+| Request field removed | Non-breaking | Server no longer requires it |
+| New route added | Non-breaking | Doesn't affect existing clients |
+
+### Example output
+
+```
+  trickle check
+  Baseline: baseline.json (2024-01-15T10:30:00Z)
+  Current: 5 functions observed
+  ──────────────────────────────────────────────────
+
+  2 BREAKING CHANGES
+
+  GET /api/users
+    ✗ response.users[].email — Field removed from response
+    ✗ response.users[].name — Type changed from string to number
+
+  1 non-breaking change
+
+  GET /api/users
+    + response.users[].role — Field added to response
+
+  FAIL — 2 breaking changes detected
+```
+
+### CI/CD integration
+
+```yaml
+# GitHub Actions example
+- name: Check for breaking API changes
+  run: |
+    npx trickle check --against baseline.json
+```
+
+```bash
+# Shell script
+if npx trickle check --against baseline.json; then
+  echo "API compatible — safe to deploy"
+else
+  echo "Breaking changes detected — review before deploying"
+  exit 1
+fi
+```
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-check-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle init`
@@ -668,6 +751,22 @@ npx trickle diff --env1 staging --env2 production   # Cross-env comparison
 | `--env <env>` | Filter by environment |
 | `--env1 <env>` | First environment for cross-env comparison |
 | `--env2 <env>` | Second environment for cross-env comparison |
+
+### `trickle check`
+
+Detect breaking API changes by comparing against a saved baseline.
+
+```bash
+trickle check --save baseline.json               # Save current types
+trickle check --against baseline.json             # Check for breaking changes
+trickle check --against baseline.json --env prod  # Filter by environment
+```
+
+| Flag | Description |
+|------|-------------|
+| `--save <file>` | Save current types as a baseline snapshot |
+| `--against <file>` | Check current types against baseline (exit 1 on breaking) |
+| `--env <env>` | Filter by environment |
 
 ### `trickle openapi`
 
@@ -894,6 +993,7 @@ TypeNode =
 │  codegen         │  TypeScript/Python/client generation    │
 │  mock            │  mock API server from observed types    │
 │  diff            │  cross-function type drift report       │
+│  check           │  breaking change detection (CI-ready)   │
 │  openapi         │  generate OpenAPI 3.0 spec              │
 │  functions       │  list observed functions                │
 │  types           │  inspect runtime types                  │
@@ -944,7 +1044,7 @@ trickle/
 │   └── cli/                # Developer CLI tool
 │       └── src/
 │           ├── index.ts        # Commander setup
-│           ├── commands/       # init, functions, types, errors, codegen, mock, diff, openapi, tail
+│           ├── commands/       # init, functions, types, errors, codegen, mock, diff, check, openapi, tail
 │           ├── formatters/     # Type and diff formatting
 │           └── ui/             # Badges, helpers
 │
@@ -958,6 +1058,7 @@ trickle/
 ├── test-init-e2e.js        # trickle init test
 ├── test-diff-e2e.js        # Type drift report test
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
+├── test-check-e2e.js       # Breaking change detection test
 ├── package.json            # npm workspace root
 └── tsconfig.base.json      # Shared TypeScript config
 ```
@@ -992,6 +1093,7 @@ node test-mock-e2e.js        # Mock server
 node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
 node test-openapi-e2e.js     # OpenAPI spec generation
+node test-check-e2e.js       # Breaking change detection
 
 # Self-contained tests (start their own backend):
 node test-register-e2e.js    # Zero-code register hook

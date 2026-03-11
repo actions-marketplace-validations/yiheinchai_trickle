@@ -89,6 +89,23 @@ router.get("/", (req: Request, res: Response) => {
     const format = (req.query.format as string)?.toLowerCase();
     const isPython = (language as string)?.toLowerCase() === "python";
 
+    if (format === "snapshot") {
+      // Return raw type data as a portable JSON snapshot for `trickle check`
+      const snapshot = {
+        version: 1,
+        createdAt: new Date().toISOString(),
+        functions: functions.map((f) => ({
+          name: f.name,
+          module: f.module,
+          env: f.env,
+          argsType: f.argsType,
+          returnType: f.returnType,
+        })),
+      };
+      res.json(snapshot);
+      return;
+    }
+
     if (format === "openapi") {
       const title = (req.query.title as string) || undefined;
       const version = (req.query.version as string) || undefined;

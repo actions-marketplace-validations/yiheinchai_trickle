@@ -224,6 +224,29 @@ export async function fetchMockConfig(): Promise<{ routes: MockRoute[] }> {
   return fetchJson("/api/mock-config");
 }
 
+// ── Snapshot (for trickle check) ──
+
+export interface SnapshotFunction {
+  name: string;
+  module: string;
+  env?: string;
+  argsType: unknown;
+  returnType: unknown;
+}
+
+export interface CheckSnapshot {
+  version: number;
+  createdAt: string;
+  functions: SnapshotFunction[];
+}
+
+export async function fetchSnapshot(opts?: { env?: string }): Promise<CheckSnapshot> {
+  return fetchJson("/api/codegen", {
+    format: "snapshot",
+    env: opts?.env,
+  });
+}
+
 // ── OpenAPI ──
 
 export interface OpenApiOpts {

@@ -154,21 +154,25 @@ function injectObservation(
     return { instrumentedCommand: command, env };
   }
 
-  // Python: use python -m trickle
+  // Python: use trickle.observe_runner for universal observation
   const pyMatch = command.match(/^(python3?|python3?\.\d+)\s/);
   if (pyMatch) {
     const python = pyMatch[1];
     const rest = command.slice(pyMatch[0].length);
+    if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
+    if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
     return {
-      instrumentedCommand: `${python} -m trickle ${rest}`,
+      instrumentedCommand: `${python} -c "from trickle.observe_runner import main; main()" ${rest}`,
       env,
     };
   }
 
-  // Python test runners / tools: prefix with python -m trickle -m
+  // Python test runners / tools: use observe_runner with -m flag
   if (/^(pytest|uvicorn|gunicorn|flask|django-admin)\b/.test(command)) {
+    if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
+    if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
     return {
-      instrumentedCommand: `python -m trickle -m ${command}`,
+      instrumentedCommand: `python -c "from trickle.observe_runner import main; main()" -m ${command}`,
       env,
     };
   }

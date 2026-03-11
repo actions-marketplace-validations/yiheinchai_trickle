@@ -2663,7 +2663,7 @@ node test-pack-e2e.js
 
 Observe **any** function — not just Express routes. Wrap test helpers, SDK clients, utility functions, or entire modules to capture runtime types and sample data for every call. Perfect for debugging e2e tests, understanding unfamiliar APIs, or documenting what your code actually does at runtime.
 
-### Explicit: `observe()`
+### JavaScript: `observe()`
 
 Wrap all functions on an object (module exports, helper collections, etc.):
 
@@ -2690,12 +2690,47 @@ const tracedFetch = observeFn(fetchUser, { module: 'api', name: 'fetchUser' });
 const user = await tracedFetch('user_123');
 ```
 
-### Auto-register: `node -r trickle/observe`
+### Python: `observe()`
 
-For CommonJS apps, auto-wrap all exported functions from your user modules (not `node_modules`):
+Works the same way — wrap a module, dict, or single function:
+
+```python
+from trickle import observe, observe_fn
+import my_helpers
+
+# Wrap all functions in a module
+helpers = observe(my_helpers, module="my-helpers")
+helpers.fetch_user("user_123")  # types captured
+
+# Wrap a dict of functions
+traced = observe({
+    "fetch_user": fetch_user,
+    "create_order": create_order,
+}, module="api")
+
+# Wrap a single function
+traced_fetch = observe_fn(fetch_user, module="api", name="fetch_user")
+```
+
+### Auto-register: zero-code observation
+
+**Node.js (CommonJS):** Auto-wrap all exported functions from user modules:
 
 ```bash
 node -r trickle/observe app.js
+```
+
+**Python:** Auto-wrap all user module functions on import:
+
+```bash
+python -c "from trickle.observe_runner import main; main()" app.py
+```
+
+Or just use `trickle run` which does this automatically:
+
+```bash
+trickle run "node app.js"
+trickle run "python script.py"
 ```
 
 | Environment Variable | Description |
@@ -2720,14 +2755,15 @@ trickle errors                     # See which calls threw + with what args
 |---|---|---|
 | `module` | auto-detected | Module name shown in `trickle functions` |
 | `environment` | auto-detected | Environment label |
-| `sampleRate` | `1` | Fraction of calls to capture (0–1) |
-| `maxDepth` | `5` | Max depth for type inference |
+| `sampleRate` / `sample_rate` | `1` | Fraction of calls to capture (0–1) |
+| `maxDepth` / `max_depth` | `5` | Max depth for type inference |
 | `enabled` | `true` | Set to `false` for passthrough |
 
 **Test:**
 
 ```bash
-node test-observe-e2e.js
+node test-observe-e2e.js      # JavaScript
+node test-observe-py-e2e.js   # Python
 ```
 
 ---

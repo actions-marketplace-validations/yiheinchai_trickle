@@ -3,12 +3,22 @@ import * as fs from "fs";
 import { spawn, ChildProcess } from "child_process";
 import chalk from "chalk";
 import { getBackendUrl } from "../config";
-import { listFunctions, listErrors, FunctionRow, ErrorRow } from "../api-client";
+import {
+  listFunctions,
+  listErrors,
+  fetchAnnotations,
+  fetchStubs,
+  FunctionRow,
+  ErrorRow,
+  AnnotationEntry,
+} from "../api-client";
 
 export interface RunOptions {
   module?: string;
   include?: string;
   exclude?: string;
+  stubs?: string;
+  annotate?: string;
 }
 
 /**
@@ -16,20 +26,18 @@ export interface RunOptions {
  *
  * Auto-detects JS or Python, injects the right instrumentation, starts the
  * backend if needed, and shows a summary of captured types after exit.
+ * With --stubs or --annotate, also generates type files automatically.
  */
 export async function runCommand(
   command: string | undefined,
-  opts: RunOptions
+  opts: RunOptions,
 ): Promise<void> {
   if (!command) {
-    console.error(
-      chalk.red("\n  Usage: trickle run <command>\n")
-    );
+    console.error(chalk.red("\n  Usage: trickle run <command>\n"));
     console.error(chalk.gray("  Examples:"));
     console.error(chalk.gray('    trickle run "node app.js"'));
-    console.error(chalk.gray('    trickle run "vitest run"'));
-    console.error(chalk.gray('    trickle run "python script.py"'));
-    console.error(chalk.gray('    trickle run "pytest tests/"'));
+    console.error(chalk.gray('    trickle run "node app.js" --stubs src/'));
+    console.error(chalk.gray('    trickle run "python script.py" --annotate src/helpers.py'));
     console.error("");
     process.exit(1);
   }
@@ -44,13 +52,13 @@ export async function runCommand(
     if (!backendProc) {
       console.error(
         chalk.red(
-          `\n  Cannot reach trickle backend at ${chalk.bold(backendUrl)}`
-        )
+          `\n  Cannot reach trickle backend at ${chalk.bold(backendUrl)}`,
+        ),
       );
       console.error(
         chalk.gray(
-          "  Start the backend: cd packages/backend && npm start\n"
-        )
+          "  Start the backend: cd packages/backend && npm start\n",
+        ),
       );
       process.exit(1);
     }
@@ -72,7 +80,7 @@ export async function runCommand(
   const { instrumentedCommand, env: extraEnv } = injectObservation(
     command,
     backendUrl,
-    opts
+    opts,
   );
 
   // Print header
@@ -84,6 +92,12 @@ export async function runCommand(
     console.log(chalk.gray(`  Injected:  ${instrumentedCommand}`));
   }
   console.log(chalk.gray(`  Backend:   ${backendUrl}`));
+  if (opts.stubs) {
+    console.log(chalk.gray(`  Stubs:     ${opts.stubs}`));
+  }
+  if (opts.annotate) {
+    console.log(chalk.gray(`  Annotate:  ${opts.annotate}`));
+  }
   console.log(chalk.gray("  " + "─".repeat(50)));
   console.log("");
 
@@ -98,8 +112,18 @@ export async function runCommand(
   console.log(chalk.gray("\n  Waiting for type data to flush..."));
   await sleep(3000);
 
-  // Show summary
+  // Show summary with inline type signatures
   await showSummary(functionsBefore, errorsBefore);
+
+  // Auto-generate stubs if --stubs was specified
+  if (opts.stubs) {
+    await autoGenerateStubs(opts.stubs);
+  }
+
+  // Auto-annotate if --annotate was specified
+  if (opts.annotate) {
+    await autoAnnotateFiles(opts.annotate);
+  }
 
   // Clean up
   if (backendProc) {
@@ -110,34 +134,123 @@ export async function runCommand(
   process.exit(exitCode);
 }
 
+// ── Auto-generate stubs ──
+
+async function autoGenerateStubs(dir: string): Promise<void> {
+  try {
+    const { stubsCommand } = await import("./stubs");
+    await stubsCommand(dir, {});
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      console.error(chalk.yellow(`\n  Stubs generation warning: ${err.message}`));
+    }
+  }
+}
+
+// ── Auto-annotate files ──
+
+async function autoAnnotateFiles(fileOrDir: string): Promise<void> {
+  try {
+    const { annotateCommand } = await import("./annotate");
+    const resolved = path.resolve(fileOrDir);
+
+    if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+      // Annotate all JS/TS/Python files in the directory
+      const files = findAnnotatableFiles(resolved);
+      if (files.length === 0) {
+        console.log(chalk.gray(`\n  No annotatable files found in ${fileOrDir}`));
+        return;
+      }
+      for (const file of files) {
+        await annotateCommand(file, {});
+      }
+    } else {
+      // Annotate a single file
+      await annotateCommand(fileOrDir, {});
+    }
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      console.error(chalk.yellow(`\n  Annotation warning: ${err.message}`));
+    }
+  }
+}
+
+function findAnnotatableFiles(dir: string): string[] {
+  const results: string[] = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (["node_modules", "__pycache__", ".git", "dist", "build", ".trickle"].includes(entry.name)) continue;
+      results.push(...findAnnotatableFiles(fullPath));
+    } else if (entry.isFile()) {
+      const ext = path.extname(entry.name).toLowerCase();
+      if ([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".py"].includes(ext)) {
+        results.push(fullPath);
+      }
+    }
+  }
+  return results;
+}
+
+// ── Inline type signatures in summary ──
+
+async function fetchTypeSignatures(
+  newFunctions: FunctionRow[],
+): Promise<Record<string, AnnotationEntry>> {
+  try {
+    const { annotations } = await fetchAnnotations({});
+    return annotations || {};
+  } catch {
+    return {};
+  }
+}
+
+function formatSignature(
+  fnName: string,
+  annotation: AnnotationEntry,
+  maxLen: number = 90,
+): string {
+  const params = annotation.params
+    .map((p) => `${p.name}: ${p.type}`)
+    .join(", ");
+  const sig = `${fnName}(${params}) → ${annotation.returnType}`;
+  if (sig.length > maxLen) {
+    return sig.substring(0, maxLen - 1) + "…";
+  }
+  return sig;
+}
+
 /**
  * Detect if a script file uses ES modules.
  */
 function isEsmFile(command: string): boolean {
-  // Extract the script file from the command
   const parts = command.split(/\s+/);
-  // Find the first .js/.mjs/.ts file in the command
   for (const part of parts) {
-    if (part.endsWith('.mjs') || part.endsWith('.mts')) return true;
+    if (part.endsWith(".mjs") || part.endsWith(".mts")) return true;
 
-    if (part.endsWith('.js') || part.endsWith('.ts') || part.endsWith('.tsx') || part.endsWith('.jsx')) {
+    if (
+      part.endsWith(".js") ||
+      part.endsWith(".ts") ||
+      part.endsWith(".tsx") ||
+      part.endsWith(".jsx")
+    ) {
       const filePath = path.resolve(part);
-      // Check if the file uses import/export
       try {
-        const content = fs.readFileSync(filePath, 'utf-8');
+        const content = fs.readFileSync(filePath, "utf-8");
         if (/^\s*(import|export)\s/m.test(content)) return true;
       } catch {
         // File might not exist at this path
       }
 
-      // Check package.json for "type": "module"
       try {
         let dir = path.dirname(filePath);
         for (let i = 0; i < 10; i++) {
-          const pkgPath = path.join(dir, 'package.json');
+          const pkgPath = path.join(dir, "package.json");
           if (fs.existsSync(pkgPath)) {
-            const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-            if (pkg.type === 'module') return true;
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+            if (pkg.type === "module") return true;
             break;
           }
           const parent = path.dirname(dir);
@@ -158,11 +271,10 @@ function isEsmFile(command: string): boolean {
 function injectObservation(
   command: string,
   backendUrl: string,
-  opts: RunOptions
+  opts: RunOptions,
 ): { instrumentedCommand: string; env: Record<string, string> } {
   const env: Record<string, string> = {};
 
-  // Already instrumented?
   if (
     command.includes("trickle/observe") ||
     command.includes("trickle/register") ||
@@ -171,15 +283,12 @@ function injectObservation(
     return { instrumentedCommand: command, env };
   }
 
-  // Resolve the observe entry point paths
   const observePath = resolveObservePath();
   const observeEsmPath = resolveObserveEsmPath();
 
-  // Set observe config via env vars
   if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
   if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
 
-  // Node.js commands: detect CJS vs ESM and inject accordingly
   const nodeMatch = command.match(/^(node|ts-node|tsx|nodemon)\s/);
   if (nodeMatch) {
     const runner = nodeMatch[1];
@@ -188,31 +297,29 @@ function injectObservation(
     if (useEsm) {
       const modified = command.replace(
         new RegExp(`^${runner}\\s`),
-        `${runner} --import ${observeEsmPath} `
+        `${runner} --import ${observeEsmPath} `,
       );
       return { instrumentedCommand: modified, env };
     } else {
       const modified = command.replace(
         new RegExp(`^${runner}\\s`),
-        `${runner} -r ${observePath} `
+        `${runner} -r ${observePath} `,
       );
       return { instrumentedCommand: modified, env };
     }
   }
 
-  // JS test runners / npx commands: use NODE_OPTIONS
   if (/^(vitest|jest|mocha|npx|bunx|bun)\b/.test(command)) {
     const existing = process.env.NODE_OPTIONS || "";
-    // Use both -r (CJS) and --import (ESM) for test runners
     if (observeEsmPath) {
-      env.NODE_OPTIONS = `${existing} -r ${observePath} --import ${observeEsmPath}`.trim();
+      env.NODE_OPTIONS =
+        `${existing} -r ${observePath} --import ${observeEsmPath}`.trim();
     } else {
       env.NODE_OPTIONS = `${existing} -r ${observePath}`.trim();
     }
     return { instrumentedCommand: command, env };
   }
 
-  // Python: use trickle.observe_runner for universal observation
   const pyMatch = command.match(/^(python3?|python3?\.\d+)\s/);
   if (pyMatch) {
     const python = pyMatch[1];
@@ -225,7 +332,6 @@ function injectObservation(
     };
   }
 
-  // Python test runners / tools: use observe_runner with -m flag
   if (/^(pytest|uvicorn|gunicorn|flask|django-admin)\b/.test(command)) {
     if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
     if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
@@ -235,81 +341,59 @@ function injectObservation(
     };
   }
 
-  // Unknown: try NODE_OPTIONS as best effort
   console.log(
     chalk.yellow(
-      "  Could not detect language. Trying Node.js instrumentation..."
-    )
+      "  Could not detect language. Trying Node.js instrumentation...",
+    ),
   );
   const existing = process.env.NODE_OPTIONS || "";
   env.NODE_OPTIONS = `${existing} -r ${observePath}`.trim();
   return { instrumentedCommand: command, env };
 }
 
-/**
- * Resolve the absolute path to the CJS observe entry point.
- */
 function resolveObservePath(): string {
-  // Try to find trickle/observe in node_modules
   try {
-    const resolved = require.resolve("trickle/observe");
-    return resolved;
+    return require.resolve("trickle/observe");
   } catch {
     // Not in node_modules
   }
 
-  // Try relative to this CLI package (monorepo)
   const monorepoPath = path.resolve(
     __dirname,
     "..",
     "..",
     "..",
     "client-js",
-    "observe.js"
+    "observe.js",
   );
-  if (fs.existsSync(monorepoPath)) {
-    return monorepoPath;
-  }
+  if (fs.existsSync(monorepoPath)) return monorepoPath;
 
-  // Fallback: assume trickle is installed
   return "trickle/observe";
 }
 
-/**
- * Resolve the absolute path to the ESM observe entry point.
- * Returns null if ESM hooks are not available.
- */
 function resolveObserveEsmPath(): string | null {
-  // Try to find trickle/observe-esm in node_modules
   try {
-    const resolved = require.resolve("trickle/observe-esm");
-    return resolved;
+    return require.resolve("trickle/observe-esm");
   } catch {
     // Not in node_modules
   }
 
-  // Try relative to this CLI package (monorepo)
   const monorepoPath = path.resolve(
     __dirname,
     "..",
     "..",
     "..",
     "client-js",
-    "observe-esm.mjs"
+    "observe-esm.mjs",
   );
-  if (fs.existsSync(monorepoPath)) {
-    return monorepoPath;
-  }
+  if (fs.existsSync(monorepoPath)) return monorepoPath;
 
   return null;
 }
 
-/**
- * Run a command as a child process. Returns the exit code.
- */
 function runProcess(
   command: string,
-  env: Record<string, string>
+  env: Record<string, string>,
 ): Promise<number> {
   return new Promise((resolve) => {
     const proc = spawn(command, [], {
@@ -330,11 +414,11 @@ function runProcess(
 }
 
 /**
- * Show a summary of what was captured during the run.
+ * Show a summary of what was captured during the run, with inline type signatures.
  */
 async function showSummary(
   functionsBefore: FunctionRow[],
-  errorsBefore: ErrorRow[]
+  errorsBefore: ErrorRow[],
 ): Promise<void> {
   try {
     const { functions } = await listFunctions();
@@ -346,64 +430,85 @@ async function showSummary(
     const beforeErrorIds = new Set(errorsBefore.map((e) => e.id));
     const newErrors = errors.filter((e) => !beforeErrorIds.has(e.id));
 
+    // Fetch inline type signatures for the new functions
+    const annotations = await fetchTypeSignatures(newFunctions);
+
     console.log("");
     console.log(chalk.bold("  Summary"));
     console.log(chalk.gray("  " + "─".repeat(50)));
 
     if (functions.length === 0) {
       console.log(
-        chalk.yellow("  No functions captured. The command may not have")
+        chalk.yellow("  No functions captured. The command may not have"),
       );
       console.log(
-        chalk.yellow("  loaded any modules that could be instrumented.")
+        chalk.yellow("  loaded any modules that could be instrumented."),
       );
     } else {
       console.log(
-        `  Functions observed: ${chalk.bold(String(functions.length))} total, ${chalk.green(String(newFunctions.length) + " new")}`
+        `  Functions observed: ${chalk.bold(String(functions.length))} total, ${chalk.green(String(newFunctions.length) + " new")}`,
       );
 
-      // Show new functions
       if (newFunctions.length > 0) {
         console.log("");
         const shown = newFunctions.slice(0, 15);
         for (const fn of shown) {
-          const moduleBadge = chalk.gray(`[${fn.module}]`);
-          console.log(
-            `    ${chalk.green("+")} ${fn.function_name} ${moduleBadge}`
-          );
+          const annotation = annotations[fn.function_name];
+          if (annotation) {
+            // Show full type signature
+            const sig = formatSignature(fn.function_name, annotation);
+            console.log(`    ${chalk.green("+")} ${sig}`);
+            console.log(chalk.gray(`      ${fn.module} module`));
+          } else {
+            const moduleBadge = chalk.gray(`[${fn.module}]`);
+            console.log(
+              `    ${chalk.green("+")} ${fn.function_name} ${moduleBadge}`,
+            );
+          }
         }
         if (newFunctions.length > 15) {
           console.log(
-            chalk.gray(`    ... and ${newFunctions.length - 15} more`)
+            chalk.gray(`    ... and ${newFunctions.length - 15} more`),
           );
         }
       }
 
-      // Show new errors
       if (newErrors.length > 0) {
         console.log("");
         console.log(
-          `  Errors captured: ${chalk.red(String(newErrors.length))}`
+          `  Errors captured: ${chalk.red(String(newErrors.length))}`,
         );
         const shownErrors = newErrors.slice(0, 5);
         for (const err of shownErrors) {
           const fn = functions.find((f) => f.id === err.function_id);
           const fnName = fn ? fn.function_name : "unknown";
           console.log(
-            `    ${chalk.red("!")} ${fnName}: ${chalk.gray(err.error_message.substring(0, 80))}`
+            `    ${chalk.red("!")} ${fnName}: ${chalk.gray(err.error_message.substring(0, 80))}`,
           );
         }
       }
 
       console.log("");
       console.log(chalk.gray("  Explore results:"));
-      console.log(chalk.gray("    trickle functions          # list all captured functions"));
+      console.log(
+        chalk.gray(
+          "    trickle functions          # list all captured functions",
+        ),
+      );
       if (newFunctions.length > 0) {
         const example = newFunctions[0].function_name;
-        console.log(chalk.gray(`    trickle types ${example}  # see types + sample data`));
+        console.log(
+          chalk.gray(
+            `    trickle types ${example}  # see types + sample data`,
+          ),
+        );
       }
       if (newErrors.length > 0) {
-        console.log(chalk.gray("    trickle errors             # see captured errors"));
+        console.log(
+          chalk.gray(
+            "    trickle errors             # see captured errors",
+          ),
+        );
       }
     }
 
@@ -426,13 +531,11 @@ async function checkBackend(url: string): Promise<boolean> {
 }
 
 async function autoStartBackend(): Promise<ChildProcess | null> {
-  // Try to find and start the backend
   const backendPaths = [
     path.resolve("packages/backend/dist/index.js"),
     path.resolve("node_modules/trickle-backend/dist/index.js"),
   ];
 
-  // Also check for global trickle-backend
   for (const p of backendPaths) {
     if (fs.existsSync(p)) {
       console.log(chalk.gray("  Auto-starting trickle backend..."));
@@ -444,11 +547,8 @@ async function autoStartBackend(): Promise<ChildProcess | null> {
 
       proc.stdout?.on("data", () => {});
       proc.stderr?.on("data", () => {});
-
-      // Prevent keeping process alive
       proc.unref();
 
-      // Wait for it to be ready
       for (let i = 0; i < 20; i++) {
         await sleep(500);
         const ready = await checkBackend(getBackendUrl());

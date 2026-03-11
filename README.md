@@ -155,24 +155,39 @@ trickle run "npx tsx app.ts"
 trickle run "python script.py"
 ```
 
-After the command finishes, trickle shows a summary of what was captured:
+After the command finishes, trickle shows a summary with inline type signatures:
 
 ```
   Summary
   ──────────────────────────────────────────────────
   Functions observed: 5 total, 5 new
 
-    + parseConfig [helpers]
-    + processItems [helpers]
-    + fetchData [helpers]
-    + transformResponse [helpers]
-    + calculateStats [helpers]
+    + parseConfig(arg0: { host: string; port: number }) → { host: string; port: number; debug: boolean }
+      helpers module
+    + processItems(arg0: { id: number; name: string }[]) → { id: number; name: string; processed: boolean }[]
+      helpers module
+    + calculateTotal(arg0: number[], arg1: number) → { subtotal: number; tax: number; total: number }
+      helpers module
 
   Explore results:
     trickle functions          # list all captured functions
     trickle types parseConfig  # see types + sample data
-    trickle errors             # see captured errors
   ──────────────────────────────────────────────────
+```
+
+### One-command type generation
+
+Add `--stubs` or `--annotate` to generate type files automatically after observation:
+
+```bash
+# Generate .d.ts sidecar files next to your source files
+trickle run "node app.js" --stubs src/
+
+# Add JSDoc annotations directly into .js files (or TS annotations for .ts)
+trickle run "node app.js" --annotate src/helpers.js
+
+# Annotate all files in a directory
+trickle run "node app.js" --annotate src/
 ```
 
 **How it works:** Auto-detects CJS vs ESM. For CJS, injects `-r trickle/observe` (patches `Module._load`). For ESM, injects `--import trickle/observe-esm` (uses Node.js loader hooks to transform exports). For Python, uses `python -m trickle` to install import hooks. Auto-starts the backend if not running.
@@ -181,6 +196,8 @@ After the command finishes, trickle shows a summary of what was captured:
 |------|-------------|
 | `--include <patterns>` | Only observe modules matching these comma-separated substrings |
 | `--exclude <patterns>` | Skip modules matching these comma-separated substrings |
+| `--stubs <dir>` | Auto-generate `.d.ts` / `.pyi` stub files in `<dir>` after observation |
+| `--annotate <path>` | Auto-annotate source file(s) with JSDoc/TS/Python types after observation |
 
 **Test:**
 
@@ -2936,6 +2953,8 @@ trickle run "python script.py"    # Python
 |------|-------------|
 | `--include <patterns>` | Only observe matching modules (comma-separated) |
 | `--exclude <patterns>` | Skip matching modules (comma-separated) |
+| `--stubs <dir>` | Auto-generate `.d.ts` / `.pyi` stub files after observation |
+| `--annotate <path>` | Auto-annotate source file(s) with types after observation |
 
 ### `trickle dev [command]`
 

@@ -71,6 +71,8 @@ program
   .option("--module <name>", "Module name for captured functions")
   .option("--include <patterns>", "Comma-separated substrings — only observe matching modules")
   .option("--exclude <patterns>", "Comma-separated substrings — skip matching modules")
+  .option("--stubs <dir>", "Auto-generate .d.ts/.pyi type stubs in this directory after the run")
+  .option("--annotate <path>", "Auto-annotate this file or directory with types after the run")
   .action(async (command: string, opts) => {
     await runCommand(command, opts);
   });

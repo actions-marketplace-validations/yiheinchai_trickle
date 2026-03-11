@@ -3686,5 +3686,168 @@ export function generateAxiosClient(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── Inline annotation generation ──
+
+/**
+ * Generate compact inline type annotations for annotating source code.
+ * Unlike generateFunctionTypes which emits full interfaces, this produces
+ * minimal inline annotations suitable for inserting into source files.
+ */
+export function generateInlineAnnotations(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+  }>,
+  language: "typescript" | "python" = "typescript",
+): Record<string, { params: Array<{ name: string; type: string }>; returnType: string }> {
+  const result: Record<string, { params: Array<{ name: string; type: string }>; returnType: string }> = {};
+
+  for (const fn of functions) {
+    const extracted: ExtractedInterface[] = [];
+    const pyExtracted: Array<{ name: string; node: Extract<TypeNode, { kind: "object" }> }> = [];
+
+    // Build param types
+    const params: Array<{ name: string; type: string }> = [];
+
+    if (fn.argsType.kind === "tuple") {
+      for (let i = 0; i < fn.argsType.elements.length; i++) {
+        const el = fn.argsType.elements[i];
+        const typeStr = language === "python"
+          ? typeNodeToPythonInline(el)
+          : typeNodeToTSInline(el);
+        params.push({ name: `arg${i}`, type: typeStr });
+      }
+    } else if (fn.argsType.kind === "object") {
+      for (const key of Object.keys(fn.argsType.properties)) {
+        const typeStr = language === "python"
+          ? typeNodeToPythonInline(fn.argsType.properties[key])
+          : typeNodeToTSInline(fn.argsType.properties[key]);
+        params.push({ name: key, type: typeStr });
+      }
+    }
+
+    // Build return type
+    const returnTypeStr = language === "python"
+      ? typeNodeToPythonInline(fn.returnType)
+      : typeNodeToTSInline(fn.returnType);
+
+    result[fn.name] = { params, returnType: returnTypeStr };
+  }
+
+  return result;
+}
+
+/**
+ * Convert a TypeNode to an inline TypeScript type string (no extraction, no interfaces).
+ */
+function typeNodeToTSInline(node: TypeNode, depth: number = 0): string {
+  if (depth > 5) return "any";
+
+  switch (node.kind) {
+    case "primitive":
+      return node.name;
+    case "unknown":
+      return "unknown";
+    case "array": {
+      const inner = typeNodeToTSInline(node.element, depth + 1);
+      return node.element.kind === "union" || node.element.kind === "function"
+        ? `Array<${inner}>`
+        : `${inner}[]`;
+    }
+    case "tuple": {
+      const elements = node.elements.map(el => typeNodeToTSInline(el, depth + 1));
+      return `[${elements.join(", ")}]`;
+    }
+    case "union": {
+      const members = node.members.map(m => typeNodeToTSInline(m, depth + 1));
+      return members.join(" | ");
+    }
+    case "map": {
+      const k = typeNodeToTSInline(node.key, depth + 1);
+      const v = typeNodeToTSInline(node.value, depth + 1);
+      return `Map<${k}, ${v}>`;
+    }
+    case "set":
+      return `Set<${typeNodeToTSInline(node.element, depth + 1)}>`;
+    case "promise":
+      return `Promise<${typeNodeToTSInline(node.resolved, depth + 1)}>`;
+    case "function": {
+      const params = node.params.map((p, i) =>
+        `arg${i}: ${typeNodeToTSInline(p, depth + 1)}`
+      );
+      return `(${params.join(", ")}) => ${typeNodeToTSInline(node.returnType, depth + 1)}`;
+    }
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) return "Record<string, never>";
+      const entries = keys.map(key =>
+        `${key}: ${typeNodeToTSInline(node.properties[key], depth + 1)}`
+      );
+      return `{ ${entries.join("; ")} }`;
+    }
+  }
+}
+
+/**
+ * Convert a TypeNode to an inline Python type string.
+ */
+function typeNodeToPythonInline(node: TypeNode, depth: number = 0): string {
+  if (depth > 5) return "Any";
+
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string": return "str";
+        case "number": return "float";
+        case "boolean": return "bool";
+        case "null": return "None";
+        case "undefined": return "None";
+        case "bigint": return "int";
+        case "symbol": return "str";
+        default: return "Any";
+      }
+    case "unknown":
+      return "Any";
+    case "array":
+      return `list[${typeNodeToPythonInline(node.element, depth + 1)}]`;
+    case "tuple": {
+      const elements = node.elements.map(el => typeNodeToPythonInline(el, depth + 1));
+      return `tuple[${elements.join(", ")}]`;
+    }
+    case "union": {
+      const members = node.members.map(m => typeNodeToPythonInline(m, depth + 1));
+      if (members.length === 2 && members.includes("None")) {
+        const nonNone = members.find(m => m !== "None");
+        return `${nonNone} | None`;
+      }
+      return members.join(" | ");
+    }
+    case "map": {
+      const k = typeNodeToPythonInline(node.key, depth + 1);
+      const v = typeNodeToPythonInline(node.value, depth + 1);
+      return `dict[${k}, ${v}]`;
+    }
+    case "set":
+      return `set[${typeNodeToPythonInline(node.element, depth + 1)}]`;
+    case "promise":
+      return typeNodeToPythonInline(node.resolved, depth + 1);
+    case "function": {
+      const params = node.params.map(p => typeNodeToPythonInline(p, depth + 1));
+      const ret = typeNodeToPythonInline(node.returnType, depth + 1);
+      return `Callable[[${params.join(", ")}], ${ret}]`;
+    }
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) return "dict[str, Any]";
+      const entries = keys.map(key =>
+        `"${key}": ${typeNodeToPythonInline(node.properties[key], depth + 1)}`
+      );
+      return `TypedDict("_", {${entries.join(", ")}})`;
+    }
+  }
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

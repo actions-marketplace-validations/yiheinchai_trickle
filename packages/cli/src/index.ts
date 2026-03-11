@@ -7,6 +7,7 @@ import { typesCommand } from "./commands/types";
 import { errorsCommand } from "./commands/errors";
 import { tailCommand } from "./commands/tail";
 import { codegenCommand } from "./commands/codegen";
+import { mockCommand } from "./commands/mock";
 
 const program = new Command();
 
@@ -70,6 +71,16 @@ program
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);
+  });
+
+// trickle mock
+program
+  .command("mock")
+  .description("Start a mock API server from runtime-observed routes and sample data")
+  .option("-p, --port <port>", "Port to listen on", "3000")
+  .option("--no-cors", "Disable CORS headers")
+  .action(async (opts) => {
+    await mockCommand(opts);
   });
 
 // Handle unhandled rejections

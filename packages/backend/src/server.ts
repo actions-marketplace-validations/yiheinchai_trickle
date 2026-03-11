@@ -7,6 +7,7 @@ import typesRouter from "./routes/types";
 import errorsRouter from "./routes/errors";
 import tailRouter from "./routes/tail";
 import codegenRouter from "./routes/codegen";
+import mockRouter from "./routes/mock";
 
 const app = express();
 
@@ -19,6 +20,7 @@ app.use("/api/types", typesRouter);
 app.use("/api/errors", errorsRouter);
 app.use("/api/tail", tailRouter);
 app.use("/api/codegen", codegenRouter);
+app.use("/api/mock-config", mockRouter);
 
 // Health check
 app.get("/api/health", (_req, res) => {

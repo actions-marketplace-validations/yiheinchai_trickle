@@ -210,6 +210,20 @@ export async function fetchCodegen(opts?: CodegenOpts): Promise<{ types: string 
   });
 }
 
+export interface MockRoute {
+  method: string;
+  path: string;
+  functionName: string;
+  module: string;
+  sampleInput: unknown;
+  sampleOutput: unknown;
+  observedAt: string;
+}
+
+export async function fetchMockConfig(): Promise<{ routes: MockRoute[] }> {
+  return fetchJson("/api/mock-config");
+}
+
 export function tailEvents(
   onEvent: (event: TailEvent) => void,
   filter?: string

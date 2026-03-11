@@ -2277,5 +2277,167 @@ export function generateMswHandlers(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── JSON Schema Generation ──
+
+/**
+ * Convert a TypeNode to a standalone JSON Schema (Draft 2020-12).
+ * Unlike the OpenAPI variant, this produces proper JSON Schema with
+ * $defs, oneOf, prefixItems, and nullable via type arrays.
+ */
+function typeNodeToStandaloneSchema(node: TypeNode): Record<string, unknown> {
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string": return { type: "string" };
+        case "number": return { type: "number" };
+        case "boolean": return { type: "boolean" };
+        case "null": return { type: "null" };
+        case "undefined": return { type: "null" };
+        case "bigint": return { type: "integer" };
+        case "symbol": return { type: "string" };
+        default: return {};
+      }
+
+    case "array":
+      return { type: "array", items: typeNodeToStandaloneSchema(node.element) };
+
+    case "tuple":
+      return {
+        type: "array",
+        prefixItems: node.elements.map(typeNodeToStandaloneSchema),
+        minItems: node.elements.length,
+        maxItems: node.elements.length,
+      };
+
+    case "object": {
+      const properties: Record<string, unknown> = {};
+      const required: string[] = [];
+      for (const [key, val] of Object.entries(node.properties)) {
+        properties[key] = typeNodeToStandaloneSchema(val);
+        required.push(key);
+      }
+      const schema: Record<string, unknown> = { type: "object", properties };
+      if (required.length > 0) schema.required = required;
+      return schema;
+    }
+
+    case "union": {
+      const nonNull = node.members.filter(
+        (m) => !(m.kind === "primitive" && (m.name === "null" || m.name === "undefined"))
+      );
+      const hasNull = nonNull.length < node.members.length;
+
+      if (nonNull.length === 1) {
+        const inner = typeNodeToStandaloneSchema(nonNull[0]);
+        if (hasNull) {
+          if (typeof inner.type === "string") {
+            return { ...inner, type: [inner.type, "null"] };
+          }
+          return { oneOf: [inner, { type: "null" }] };
+        }
+        return inner;
+      }
+
+      const schemas = nonNull.map(typeNodeToStandaloneSchema);
+      if (hasNull) schemas.push({ type: "null" });
+      return { oneOf: schemas };
+    }
+
+    case "map":
+      return {
+        type: "object",
+        additionalProperties: typeNodeToStandaloneSchema(node.value),
+      };
+
+    case "set":
+      return {
+        type: "array",
+        uniqueItems: true,
+        items: typeNodeToStandaloneSchema(node.element),
+      };
+
+    case "promise":
+      return typeNodeToStandaloneSchema(node.resolved);
+
+    case "function":
+      return {};
+
+    case "unknown":
+      return {};
+
+    default:
+      return {};
+  }
+}
+
+/**
+ * Generate JSON Schema definitions from observed runtime types.
+ *
+ * Output is a single JSON object with $defs for each route/function's
+ * request and response types, suitable for use with ajv, joi, or any
+ * JSON Schema-compatible validator.
+ */
+export function generateJsonSchemas(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  const defs: Record<string, unknown> = {};
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    const baseName = parsed ? parsed.typeName : toPascalCase(fn.name);
+
+    // For routes, generate request body + response schemas
+    if (parsed) {
+      // Request body (only for methods with body)
+      if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+        let bodyNode: TypeNode | undefined;
+        if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+          bodyNode = fn.argsType.properties["body"];
+        }
+        if (bodyNode && bodyNode.kind !== "unknown") {
+          const bodySchema = typeNodeToStandaloneSchema(bodyNode);
+          defs[`${baseName}Request`] = {
+            description: `Request body for ${parsed.method} ${parsed.path}`,
+            ...bodySchema,
+          };
+        }
+      }
+
+      // Response
+      if (fn.returnType.kind !== "unknown") {
+        const responseSchema = typeNodeToStandaloneSchema(fn.returnType);
+        defs[`${baseName}Response`] = {
+          description: `Response for ${parsed.method} ${parsed.path}`,
+          ...responseSchema,
+        };
+      }
+    } else {
+      // Non-route function: generate input/output schemas
+      if (fn.argsType.kind !== "unknown") {
+        defs[`${baseName}Input`] = typeNodeToStandaloneSchema(fn.argsType);
+      }
+      if (fn.returnType.kind !== "unknown") {
+        defs[`${baseName}Output`] = typeNodeToStandaloneSchema(fn.returnType);
+      }
+    }
+  }
+
+  const schema = {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "API Schemas",
+    description: "Auto-generated JSON Schema definitions by trickle",
+    $defs: defs,
+  };
+
+  return JSON.stringify(schema, null, 2) + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

@@ -38,6 +38,7 @@ trickle dev
 - [Test Fixtures](#test-fixtures)
 - [Request Validation Middleware](#request-validation-middleware)
 - [MSW Mock Handlers](#msw-mock-handlers)
+- [JSON Schema Generation](#json-schema-generation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -100,6 +101,7 @@ npx trickle codegen --zod        # Generate Zod validation schemas
 npx trickle codegen --react-query # Generate React Query hooks
 npx trickle codegen --middleware  # Generate Express validation middleware
 npx trickle codegen --msw        # Generate MSW mock handlers
+npx trickle codegen --json-schema # Generate JSON Schema definitions
 npx trickle test --generate      # Generate API test files
 npx trickle mock                 # Start a mock API server
 npx trickle proxy -t http://localhost:3000  # Zero-change type capture
@@ -1594,6 +1596,81 @@ node test-msw-e2e.js
 
 ---
 
+## JSON Schema Generation
+
+Generate standard [JSON Schema](https://json-schema.org/) (Draft 2020-12) definitions from observed runtime types — the universal data validation format.
+
+```bash
+npx trickle codegen --json-schema
+npx trickle codegen --json-schema --out .trickle/schemas.json
+```
+
+trickle observes your actual API request/response shapes and generates portable JSON Schema definitions:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "API Schemas",
+  "$defs": {
+    "PostApiUsersRequest": {
+      "description": "Request body for POST /api/users",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "age": { "type": "number" }
+      },
+      "required": ["name", "email", "age"]
+    },
+    "GetApiUsersResponse": {
+      "description": "Response for GET /api/users",
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "number" },
+              "name": { "type": "string" }
+            },
+            "required": ["id", "name"]
+          }
+        },
+        "total": { "type": "number" }
+      },
+      "required": ["users", "total"]
+    }
+  }
+}
+```
+
+Use with any validation library:
+
+```typescript
+import Ajv from "ajv";
+import schemas from "./.trickle/schemas.json";
+
+const ajv = new Ajv();
+const validate = ajv.compile(schemas.$defs.PostApiUsersRequest);
+const valid = validate(req.body); // true/false
+```
+
+Key behaviors:
+- Generates request schemas for POST/PUT/PATCH routes (body validation)
+- Generates response schemas for all routes
+- Maps all TypeNode kinds: objects, arrays, tuples, unions, primitives
+- Nullable unions become `type: ["string", "null"]`
+- All observed properties marked as `required`
+- Works with ajv, joi, yup, zod (via conversion), API gateways, and any JSON Schema consumer
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-json-schema-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1703,6 +1780,7 @@ npx trickle codegen --react-query --out .trickle/hooks.ts    # React Query hooks
 npx trickle codegen --guards --out .trickle/guards.ts       # Runtime type guards
 npx trickle codegen --middleware --out .trickle/middleware.ts # Express validation middleware
 npx trickle codegen --msw --out .trickle/handlers.ts         # MSW mock handlers
+npx trickle codegen --json-schema --out .trickle/schemas.json # JSON Schema definitions
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -1718,6 +1796,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--guards` | Generate runtime type guard functions |
 | `--middleware` | Generate Express request validation middleware |
 | `--msw` | Generate Mock Service Worker (MSW) request handlers |
+| `--json-schema` | Generate JSON Schema definitions from observed types |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2180,6 +2259,7 @@ trickle/
 ├── test-guards-e2e.js      # Type guard generation test
 ├── test-middleware-e2e.js   # Express validation middleware test
 ├── test-msw-e2e.js          # MSW mock handler generation test
+├── test-json-schema-e2e.js  # JSON Schema generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2234,6 +2314,7 @@ node test-sample-e2e.js      # Test fixture generation
 node test-guards-e2e.js      # Type guard generation
 node test-middleware-e2e.js   # Express validation middleware
 node test-msw-e2e.js          # MSW mock handler generation
+node test-json-schema-e2e.js  # JSON Schema generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

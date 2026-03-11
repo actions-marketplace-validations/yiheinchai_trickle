@@ -54,6 +54,7 @@ trickle dev
 - [Type Inference from JSON](#type-inference-from-json)
 - [API Overview](#api-overview)
 - [Type-Annotated API Tracing](#type-annotated-api-tracing)
+- [Portable Type Bundles](#portable-type-bundles)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2551,6 +2552,54 @@ node test-trace-e2e.js
 
 ---
 
+## Portable Type Bundles
+
+Export all observed types as a portable JSON bundle and import them anywhere. Share types across teams, commit them to version control, or bootstrap new developer environments — no running API needed.
+
+```bash
+# Export all observed types to a file
+trickle pack -o api-types.trickle.json
+
+# Import on another machine
+trickle unpack api-types.trickle.json
+#   ✓ GET /api/users
+#   ✓ POST /api/users
+#   ✓ GET /api/orders
+#   3 functions imported successfully
+
+# Pipe-friendly: pack to stdout
+trickle pack > snapshot.json
+
+# Preview before importing
+trickle unpack api-types.trickle.json --dry-run
+```
+
+The bundle file is a self-contained JSON file containing all functions, their type snapshots, sample data, and metadata. It's versioned and includes the source backend URL and creation timestamp.
+
+**Use cases:**
+- **Team sharing** — export types and share with frontend teams who don't run the backend
+- **Version control** — commit type snapshots alongside code, track API evolution in git
+- **CI/CD** — export types in one pipeline stage, import and validate in another
+- **Bootstrapping** — new team members import the bundle and immediately get all types
+- **Backup/restore** — snapshot your type observations before database migrations
+
+```bash
+# Filter by environment
+trickle pack --env production -o prod-types.trickle.json
+
+# Import with environment override
+trickle unpack api-types.trickle.json --env staging
+```
+
+**Test:**
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-pack-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2970,6 +3019,36 @@ npx trickle trace GET https://api.example.com/users --save
 | `--env <env>` | Environment label (default: development) |
 | `--module <module>` | Module label (default: trace) |
 
+### `trickle pack`
+
+Export all observed types as a portable JSON bundle.
+
+```bash
+npx trickle pack -o types.trickle.json   # Save to file
+npx trickle pack > types.json             # Pipe to stdout
+npx trickle pack --env production -o prod.json
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o, --out <file>` | Write bundle to a file (otherwise stdout) |
+| `--env <env>` | Filter by environment |
+
+### `trickle unpack <file>`
+
+Import types from a packed bundle into the backend.
+
+```bash
+npx trickle unpack types.trickle.json           # Import all
+npx trickle unpack types.trickle.json --dry-run  # Preview only
+npx trickle unpack types.trickle.json --env staging
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Override environment for all imported types |
+| `--dry-run` | List contents without importing |
+
 ### `trickle replay`
 
 Replay captured API requests as regression tests.
@@ -3312,6 +3391,7 @@ trickle/
 ├── test-infer-e2e.js       # JSON type inference test
 ├── test-overview-e2e.js    # API overview test
 ├── test-trace-e2e.js       # Type-annotated tracing test
+├── test-pack-e2e.js        # Pack/unpack bundle test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -3382,6 +3462,7 @@ node test-watch-e2e.js       # Live watch mode
 node test-infer-e2e.js       # JSON type inference
 node test-overview-e2e.js    # API overview
 node test-trace-e2e.js       # Type-annotated tracing
+node test-pack-e2e.js        # Pack/unpack bundles
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

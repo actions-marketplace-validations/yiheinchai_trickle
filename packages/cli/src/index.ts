@@ -30,6 +30,8 @@ import { watchCommand } from "./commands/watch";
 import { inferCommand } from "./commands/infer";
 import { overviewCommand } from "./commands/overview";
 import { traceCommand } from "./commands/trace";
+import { packCommand } from "./commands/pack";
+import { unpackCommand } from "./commands/unpack";
 
 const program = new Command();
 
@@ -365,6 +367,26 @@ program
   .option("--module <module>", "Module label (default: trace)")
   .action(async (method: string, url: string, opts) => {
     await traceCommand(method, url, opts);
+  });
+
+// trickle pack
+program
+  .command("pack")
+  .description("Export all observed types as a portable bundle")
+  .option("-o, --out <file>", "Write bundle to a file (otherwise stdout)")
+  .option("--env <env>", "Filter by environment")
+  .action(async (opts) => {
+    await packCommand(opts);
+  });
+
+// trickle unpack <file>
+program
+  .command("unpack <file>")
+  .description("Import types from a packed bundle into the backend")
+  .option("--env <env>", "Override environment for all imported types")
+  .option("--dry-run", "List contents without importing")
+  .action(async (file: string, opts) => {
+    await unpackCommand(file, opts);
   });
 
 // Handle unhandled rejections

@@ -33,6 +33,7 @@ trickle dev
 - [Export All](#export-all)
 - [Type Coverage Report](#type-coverage-report)
 - [API Replay Testing](#api-replay-testing)
+- [API Documentation Generation](#api-documentation-generation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -1308,6 +1309,41 @@ node test-replay-e2e.js
 
 ---
 
+## API Documentation Generation
+
+Generate API documentation from observed runtime types — Markdown for your repo or self-contained HTML for sharing.
+
+```bash
+# Print Markdown to stdout
+npx trickle docs
+
+# Write to file
+npx trickle docs --out API.md
+
+# Self-contained HTML (works offline, no server needed)
+npx trickle docs --html --out docs/api.html
+
+# Custom title and environment filter
+npx trickle docs --title "My API v2" --env production --out API.md
+```
+
+The generated documentation includes:
+- Routes grouped by resource (`/api/users`, `/api/products`, etc.)
+- Request body types for POST/PUT/PATCH routes
+- Response shapes as TypeScript type annotations
+- Collapsible example payloads from captured sample data
+- Table of contents with anchor links
+- Last-observed timestamps per route
+
+The Markdown output works great on GitHub/GitLab and can be committed directly to your repo. The HTML output is a self-contained file with embedded CSS — open it in any browser.
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-docs-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1578,6 +1614,24 @@ npx trickle replay --json --fail-fast
 | `--strict` | Compare exact values instead of just shapes |
 | `--json` | Output JSON results for CI |
 | `--fail-fast` | Stop on first failure |
+
+### `trickle docs`
+
+Generate API documentation from observed runtime types.
+
+```bash
+npx trickle docs                          # Markdown to stdout
+npx trickle docs --out API.md             # Write Markdown file
+npx trickle docs --html --out docs/api.html  # Self-contained HTML
+npx trickle docs --title "My API" --env production
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o, --out <path>` | Write docs to a file |
+| `--html` | Generate self-contained HTML instead of Markdown |
+| `--env <env>` | Filter by environment |
+| `--title <title>` | Documentation title (default: "API Documentation") |
 
 ### `trickle dashboard`
 
@@ -1850,6 +1904,7 @@ trickle/
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
 ├── test-proxy-e2e.js       # Transparent proxy type capture test
+├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
 ├── test-export-e2e.js      # Export all formats test
@@ -1899,6 +1954,7 @@ node test-dashboard-e2e.js   # Web dashboard
 node test-export-e2e.js      # Export all formats
 node test-coverage-e2e.js    # Type coverage report
 node test-replay-e2e.js      # API replay regression tests
+node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation
 node test-zod-e2e.js         # Zod schema generation

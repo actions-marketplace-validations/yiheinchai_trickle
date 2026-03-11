@@ -19,6 +19,7 @@ import { proxyCommand } from "./commands/proxy";
 import { exportCommand } from "./commands/export";
 import { coverageCommand } from "./commands/coverage";
 import { replayCommand } from "./commands/replay";
+import { docsCommand } from "./commands/docs";
 
 const program = new Command();
 
@@ -220,6 +221,18 @@ program
   .option("--fail-fast", "Stop on first failure")
   .action(async (opts) => {
     await replayCommand(opts);
+  });
+
+// trickle docs
+program
+  .command("docs")
+  .description("Generate API documentation from observed runtime types and sample data")
+  .option("-o, --out <path>", "Write docs to a file instead of stdout")
+  .option("--html", "Generate self-contained HTML instead of Markdown")
+  .option("--env <env>", "Filter by environment")
+  .option("--title <title>", "Documentation title", "API Documentation")
+  .action(async (opts) => {
+    await docsCommand(opts);
   });
 
 // Handle unhandled rejections

@@ -319,15 +319,18 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
 
     # Function signature
     func_name = _to_snake_case(name)
+    param_names = fn.get("paramNames", [])
     if args_type.get("kind") == "tuple":
         elements = args_type.get("elements", [])
         if len(elements) == 1 and elements[0].get("kind") == "object":
-            sig = f"def {func_name}(input: {base_name}Input) -> {base_name}Output: ..."
+            pname = param_names[0] if param_names else "input"
+            sig = f"def {func_name}({pname}: {base_name}Input) -> {base_name}Output: ..."
         else:
             params = []
             for idx, el in enumerate(elements):
-                py_type = _type_to_python(el, extracted, base_name, f"arg{idx}")
-                params.append(f"arg{idx}: {py_type}")
+                pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
+                py_type = _type_to_python(el, extracted, base_name, pname)
+                params.append(f"{pname}: {py_type}")
             sig = f"def {func_name}({', '.join(params)}) -> {base_name}Output: ..."
     elif args_type.get("kind") == "object" and args_type.get("properties"):
         sig = f"def {func_name}(input: {base_name}Input) -> {base_name}Output: ..."
@@ -407,12 +410,21 @@ def generate_types() -> int:
                 merged_args = _merge_type_nodes(merged_args, p["argsType"])
                 merged_return = _merge_type_nodes(merged_return, p["returnType"])
 
-        functions.append({
+        # Use paramNames from the latest payload that has them
+        param_names = None
+        for p in payloads:
+            if p.get("paramNames"):
+                param_names = p["paramNames"]
+
+        entry: Dict[str, Any] = {
             "name": fn_name,
             "argsType": merged_args,
             "returnType": merged_return,
             "module": payloads[-1].get("module", ""),
-        })
+        }
+        if param_names:
+            entry["paramNames"] = param_names
+        functions.append(entry)
 
     # Group by module
     by_module: Dict[str, List[Dict[str, Any]]] = {}

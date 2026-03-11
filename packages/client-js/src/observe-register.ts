@@ -148,7 +148,7 @@ function findClosingBrace(source: string, openBrace: number): number {
  */
 function transformCjsSource(source: string, filename: string, moduleName: string, env: string): string {
   const funcRegex = /^[ \t]*(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
-  const insertions: Array<{ position: number; name: string }> = [];
+  const insertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
   let match;
 
   while ((match = funcRegex.exec(source)) !== null) {
@@ -161,11 +161,23 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     const openBrace = source.indexOf('{', afterMatch);
     if (openBrace === -1) continue;
 
+    // Extract parameter names from the source between ( and {
+    const paramStr = source.slice(afterMatch, openBrace).replace(/[()]/g, '').trim();
+    const paramNames = paramStr
+      ? paramStr.split(',').map(p => {
+          // Handle default values: "x = 5" → "x", destructuring: "{a, b}" → skip
+          const trimmed = p.trim().split('=')[0].trim().split(':')[0].trim();
+          // Skip destructuring patterns and rest params
+          if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('...')) return '';
+          return trimmed;
+        }).filter(Boolean)
+      : [];
+
     // Find the matching closing brace
     const closeBrace = findClosingBrace(source, openBrace);
     if (closeBrace === -1) continue;
 
-    insertions.push({ position: closeBrace + 1, name });
+    insertions.push({ position: closeBrace + 1, name, paramNames });
   }
 
   if (insertions.length === 0) return source;
@@ -176,8 +188,8 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   // Prepend: load the wrapper and create the wrap helper
   const prefix = [
     `var __trickle_mod = require(${JSON.stringify(wrapHelperPath)});`,
-    `var __trickle_wrap = function(fn, name) {`,
-    `  return __trickle_mod.wrapFunction(fn, {`,
+    `var __trickle_wrap = function(fn, name, paramNames) {`,
+    `  var opts = {`,
     `    functionName: name,`,
     `    module: ${JSON.stringify(moduleName)},`,
     `    trackArgs: true,`,
@@ -186,7 +198,9 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     `    maxDepth: 5,`,
     `    environment: ${JSON.stringify(env)},`,
     `    enabled: true,`,
-    `  });`,
+    `  };`,
+    `  if (paramNames && paramNames.length) opts.paramNames = paramNames;`,
+    `  return __trickle_mod.wrapFunction(fn, opts);`,
     `};`,
     '',
   ].join('\n');
@@ -194,12 +208,33 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   // Insert wrapper calls immediately after each function body (reverse order to preserve positions)
   let result = source;
   for (let i = insertions.length - 1; i >= 0; i--) {
-    const { position, name } = insertions[i];
-    const wrapperCall = `\ntry{${name}=__trickle_wrap(${name},'${name}')}catch(__e){}\n`;
+    const { position, name, paramNames } = insertions[i];
+    const paramNamesArg = paramNames.length > 0 ? JSON.stringify(paramNames) : 'null';
+    const wrapperCall = `\ntry{${name}=__trickle_wrap(${name},'${name}',${paramNamesArg})}catch(__e){}\n`;
     result = result.slice(0, position) + wrapperCall + result.slice(position);
   }
 
   return prefix + result;
+}
+
+/**
+ * Extract parameter names from a function using fn.toString().
+ */
+function extractParamNames(fn: Function): string[] {
+  try {
+    const src = fn.toString();
+    const parenMatch = src.match(/^(?:async\s+)?(?:function\s*\w*)?\s*\(([^)]*)\)/);
+    if (!parenMatch) return [];
+    const paramStr = parenMatch[1].trim();
+    if (!paramStr) return [];
+    return paramStr.split(',').map(p => {
+      const trimmed = p.trim().split('=')[0].trim().split(':')[0].trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('...')) return '';
+      return trimmed;
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 if (enabled) {
@@ -300,6 +335,7 @@ if (enabled) {
       for (const key of Object.keys(exports)) {
         if (typeof exports[key] === 'function' && key !== 'default') {
           const fn = exports[key];
+          const paramNames = extractParamNames(fn);
           const wrapOpts: WrapOptions = {
             functionName: key,
             module: moduleName,
@@ -309,6 +345,7 @@ if (enabled) {
             maxDepth: 5,
             environment,
             enabled: true,
+            paramNames: paramNames.length > 0 ? paramNames : undefined,
           };
           exports[key] = wrapFunction(fn, wrapOpts);
           count++;
@@ -318,6 +355,7 @@ if (enabled) {
       // Handle default export if it's a function
       if (typeof exports.default === 'function') {
         const fn = exports.default;
+        const paramNames = extractParamNames(fn);
         const wrapOpts: WrapOptions = {
           functionName: fn.name || 'default',
           module: moduleName,
@@ -327,6 +365,7 @@ if (enabled) {
           maxDepth: 5,
           environment,
           enabled: true,
+          paramNames: paramNames.length > 0 ? paramNames : undefined,
         };
         exports.default = wrapFunction(fn, wrapOpts);
         count++;
@@ -338,6 +377,7 @@ if (enabled) {
     } else if (typeof exports === 'function') {
       // Module exports a single function (e.g. module.exports = fn)
       const fn = exports;
+      const fnParamNames = extractParamNames(fn);
       const wrapOpts: WrapOptions = {
         functionName: fn.name || moduleName,
         module: moduleName,
@@ -347,6 +387,7 @@ if (enabled) {
         maxDepth: 5,
         environment,
         enabled: true,
+        paramNames: fnParamNames.length > 0 ? fnParamNames : undefined,
       };
       const wrappedFn = wrapFunction(fn, wrapOpts);
 

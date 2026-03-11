@@ -140,6 +140,10 @@ function capturePayload(
     sampleOutput: sanitizeSample(returnValue),
   };
 
+  if (opts.paramNames && opts.paramNames.length > 0) {
+    payload.paramNames = opts.paramNames;
+  }
+
   enqueue(payload);
 }
 

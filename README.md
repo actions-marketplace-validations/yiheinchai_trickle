@@ -3209,7 +3209,7 @@ export interface CalculateDiscountOutput {
   discount: number;
   final: number;
 }
-export declare function calculateDiscount(arg0: number, arg1: number): CalculateDiscountOutput;
+export declare function calculateDiscount(price: number, percentage: number): CalculateDiscountOutput;
 ```
 
 **Python** — for `calculate_discount(99.99, 15)`:
@@ -3219,8 +3219,10 @@ class CalculateDiscountOutput(TypedDict):
     discount: float
     final: float
 
-def calculate_discount(arg0: float, arg1: float) -> CalculateDiscountOutput: ...
+def calculate_discount(price: float, percentage: float) -> CalculateDiscountOutput: ...
 ```
+
+Parameter names are preserved from the original source code — no generic `arg0`, `arg1` names.
 
 ### Notes
 

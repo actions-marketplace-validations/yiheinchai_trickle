@@ -30,6 +30,7 @@ interface Observation {
   typeHash: string;
   argsType: TypeNode;
   returnType: TypeNode;
+  paramNames?: string[];
 }
 
 interface FunctionData {
@@ -37,6 +38,7 @@ interface FunctionData {
   argsType: TypeNode;
   returnType: TypeNode;
   module: string;
+  paramNames?: string[];
 }
 
 // ── Type merging (same logic as CLI local-codegen) ──
@@ -145,7 +147,12 @@ function readAndMerge(jsonlPath: string): FunctionData[] {
         ret = mergeTypeNodes(ret, observations[i].returnType);
       }
     }
-    results.push({ name, argsType: args, returnType: ret, module: observations[observations.length - 1].module });
+    // Use paramNames from the latest observation that has them
+    const paramNames = observations.reduce<string[] | undefined>(
+      (acc, obs) => obs.paramNames && obs.paramNames.length > 0 ? obs.paramNames : acc,
+      undefined,
+    );
+    results.push({ name, argsType: args, returnType: ret, module: observations[observations.length - 1].module, paramNames });
   }
   return results;
 }
@@ -241,7 +248,11 @@ function generateDts(functions: FunctionData[]): string {
     // Args
     let argEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
     if (fn.argsType.kind === 'tuple') {
-      argEntries = (fn.argsType.elements || []).map((el, i) => ({ paramName: `arg${i}`, typeNode: el }));
+      const names = fn.paramNames || [];
+      argEntries = (fn.argsType.elements || []).map((el, i) => ({
+        paramName: names[i] || `arg${i}`,
+        typeNode: el,
+      }));
     } else if (fn.argsType.kind === 'object') {
       argEntries = Object.keys(fn.argsType.properties || {}).map(k => ({ paramName: k, typeNode: fn.argsType.properties![k] }));
     } else {

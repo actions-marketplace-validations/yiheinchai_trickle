@@ -200,6 +200,20 @@ def _emit(
         args_type: Dict[str, Any] = {"kind": "tuple", "elements": elements}
         return_type = infer_type(result)
 
+        # Extract parameter names from the original function
+        param_names: list[str] = []
+        try:
+            sig = inspect.signature(fn)
+            param_names = [
+                p.name for p in sig.parameters.values()
+                if p.kind in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                )
+            ]
+        except (ValueError, TypeError):
+            pass
+
         type_hash_val = hash_type(args_type, return_type)
         function_key = f"{func_module}.{func_name}"
 
@@ -224,6 +238,9 @@ def _emit(
             "sampleInput": sample_args,
             "sampleOutput": _sanitize_sample(result),
         }
+
+        if param_names:
+            payload["paramNames"] = param_names
 
         if error_exc is not None:
             payload["error"] = {

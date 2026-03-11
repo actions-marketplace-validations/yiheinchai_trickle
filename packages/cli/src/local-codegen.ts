@@ -30,6 +30,7 @@ interface IngestPayload {
   typeHash: string;
   argsType: TypeNode;
   returnType: TypeNode;
+  paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;
 }
@@ -39,6 +40,7 @@ interface FunctionTypeData {
   argsType: TypeNode;
   returnType: TypeNode;
   module?: string;
+  paramNames?: string[];
 }
 
 // ── Type merging ──
@@ -235,11 +237,18 @@ function readObservations(jsonlPath: string): FunctionTypeData[] {
       }
     }
 
+    // Use paramNames from the latest payload that has them
+    const paramNames = payloads.reduce<string[] | undefined>(
+      (acc, p) => p.paramNames && p.paramNames.length > 0 ? p.paramNames : acc,
+      undefined,
+    );
+
     results.push({
       name,
       argsType: mergedArgs,
       returnType: mergedReturn,
       module: payloads[payloads.length - 1].module, // use latest module
+      paramNames,
     });
   }
 
@@ -395,8 +404,9 @@ function generateTsForFunction(fn: FunctionTypeData): string {
   // Determine args
   let argEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
   if (fn.argsType.kind === "tuple") {
+    const names = fn.paramNames || [];
     argEntries = (fn.argsType.elements || []).map((el, i) => ({
-      paramName: `arg${i}`,
+      paramName: names[i] || `arg${i}`,
       typeNode: el,
     }));
   } else if (fn.argsType.kind === "object") {

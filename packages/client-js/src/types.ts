@@ -18,6 +18,7 @@ export interface IngestPayload {
   typeHash: string;
   argsType: TypeNode;
   returnType: TypeNode;
+  paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;
   error?: {
@@ -55,4 +56,5 @@ export interface WrapOptions {
   maxDepth: number;
   environment: string;
   enabled: boolean;
+  paramNames?: string[];
 }

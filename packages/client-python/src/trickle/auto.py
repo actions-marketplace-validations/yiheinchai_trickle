@@ -144,14 +144,14 @@ if _entry_file:
                     }
 
                 # Store pending call (keyed by frame id for correct matching)
-                _pending_calls[id(frame)] = (name, args_type, list(args[:3]))
+                _pending_calls[id(frame)] = (name, args_type, list(args[:3]), list(arg_names))
 
             elif event == "return":
                 key = id(frame)  # type: ignore[arg-type]
                 if key not in _pending_calls:
                     return
 
-                func_name, args_type, sample_input = _pending_calls.pop(key)
+                func_name, args_type, sample_input, param_names = _pending_calls.pop(key)
 
                 # Infer return type
                 return_type = infer_type(arg)
@@ -160,7 +160,7 @@ if _entry_file:
                 type_hash = hash_type(args_type, return_type)
 
                 # Build and enqueue payload
-                payload = {
+                payload: dict = {
                     "functionName": func_name,
                     "module": _entry_module,
                     "language": "python",
@@ -169,6 +169,9 @@ if _entry_file:
                     "argsType": args_type,
                     "returnType": return_type,
                 }
+
+                if param_names:
+                    payload["paramNames"] = param_names
 
                 enqueue(payload)
 

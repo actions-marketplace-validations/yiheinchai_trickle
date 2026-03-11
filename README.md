@@ -1,48 +1,16 @@
 # trickle
 
-Runtime type observability for JavaScript and Python applications. A drop-in replacement for CloudWatch and Datadog that captures the actual types and data flowing through your functions at runtime — then lets you explore them through a CLI.
+Runtime type observability for JavaScript and Python. With minimal setup, trickle records the actual types flowing through your functions at runtime and brings them to compile time — so you get type information in your IDE without writing types yourself.
 
-Instead of logs, trickle gives you a type-cache system: it records the input types, output types, and accessed properties of every instrumented function as real traffic flows through. When something breaks, you see exactly what types were in play at the point of failure, alongside a sample of the actual data.
+```bash
+# Setup (one command)
+trickle init
 
-```
-$ npx trickle errors 1
+# Start your app with instrumentation (zero code changes)
+node -r trickle/register app.js
 
-  ━━━ Error Detail ━━━
-
-   TypeError    prod
-
-  Cannot read property 'email' of undefined
-  2m ago (2026-03-10 14:32:01)
-
-  ── Stack Trace ──
-
-    TypeError: Cannot read property 'email' of undefined
-        at processOrder (/app/src/orders.js:45:22)
-        ...
-
-  ── Type Context at Point of Failure ──
-
-  Function: processOrder
-  Module:   orders
-
-  Input types:
-    [{
-      id: string,
-      customer: null,        ← customer was null, not an object
-      items: { price: number, quantity: number }[]
-    }]
-
-  Sample data:
-    [{ "id": "ORD-99821", "customer": null, "items": [...] }]
-
-  ── Expected Types (Happy Path) ──
-
-  Expected input types:
-    [{
-      id: string,
-      customer: { name: string, email: string },
-      items: { price: number, quantity: number }[]
-    }]
+# Types appear in your IDE automatically
+npm run trickle:dev
 ```
 
 ---
@@ -50,14 +18,15 @@ $ npx trickle errors 1
 ## Table of Contents
 
 - [Quick Start](#quick-start)
-- [How It Works](#how-it-works)
-- [JavaScript Client](#javascript-client)
-- [Python Client](#python-client)
+- [Zero-Code Instrumentation](#zero-code-instrumentation)
+- [One-Liner Instrumentation](#one-liner-instrumentation)
+- [Manual Instrumentation](#manual-instrumentation)
+- [Code Generation](#code-generation)
+- [Mock Server](#mock-server)
 - [CLI Reference](#cli-reference)
+- [Python Support](#python-support)
 - [Backend](#backend)
-- [Smart Caching](#smart-caching)
-- [Type System](#type-system)
-- [Environment Detection](#environment-detection)
+- [How It Works](#how-it-works)
 - [Architecture](#architecture)
 
 ---
@@ -68,32 +37,191 @@ $ npx trickle errors 1
 
 ```bash
 cd packages/backend
-npm install && npm run build
-npm start
+npm install && npm run build && npm start
 # [trickle] Backend listening on http://localhost:4888
 ```
 
-### 2. Instrument your code
+### 2. Initialize your project
 
-**JavaScript:**
+```bash
+cd your-project
+npx trickle init
+```
+
+This configures everything:
+- Creates `.trickle/` with type placeholder files
+- Updates `tsconfig.json` to include generated types
+- Adds npm scripts (`trickle:start`, `trickle:dev`, `trickle:client`, `trickle:mock`)
+- Updates `.gitignore`
+
+### 3. Start your app with instrumentation
+
+```bash
+npm run trickle:start
+```
+
+This uses `node -r trickle/register` under the hood — zero code changes to your app.
+
+### 4. Start type generation (in another terminal)
+
+```bash
+npm run trickle:dev
+```
+
+This watches for new type observations and regenerates `.trickle/types.d.ts` automatically. Types appear in VS Code as you make requests.
+
+### 5. Explore with the CLI
+
+```bash
+npx trickle functions            # List all instrumented functions
+npx trickle errors               # See what's failing
+npx trickle errors 1             # Inspect error with full type context
+npx trickle types processOrder   # See captured runtime types
+npx trickle codegen --client     # Generate a typed API client
+npx trickle mock                 # Start a mock API server
+npx trickle tail                 # Live stream of events
+```
+
+---
+
+## Zero-Code Instrumentation
+
+The easiest way to use trickle — no code changes at all. Just add a flag to your start command.
+
+### Node.js
+
+```bash
+node -r trickle/register app.js
+```
+
+This patches `require('express')` so every Express app created is automatically instrumented. All route handlers are wrapped to capture request/response types.
+
+### Python
+
+```bash
+python -m trickle app.py
+```
+
+This installs import hooks that patch Flask and FastAPI constructors. Any app created after import is automatically instrumented.
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `TRICKLE_BACKEND_URL` | Backend URL | `http://localhost:4888` |
+| `TRICKLE_ENABLED` | Set to `0` or `false` to disable | `true` |
+| `TRICKLE_DEBUG` | Set to `1` for debug logging | `false` |
+| `TRICKLE_ENV` | Override detected environment name | auto-detected |
+
+### Testing it
+
+```bash
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Start your Express app with zero-code instrumentation
+TRICKLE_DEBUG=1 node -r trickle/register your-app.js
+
+# Terminal 3: Make requests and watch types appear
+curl http://localhost:3000/api/users
+npx trickle functions    # See captured routes
+npx trickle codegen      # See generated types
+```
+
+---
+
+## One-Liner Instrumentation
+
+If you prefer explicit instrumentation, add one line to your app:
+
+### Express
+
+```javascript
+const express = require('express');
+const { instrument, configure } = require('trickle');
+
+const app = express();
+app.use(express.json());
+
+instrument(app);  // ← one line
+
+app.get('/api/users', (req, res) => { ... });
+app.post('/api/orders', (req, res) => { ... });
+```
+
+`instrument(app)` must be called **before** defining routes. It patches `app.get`, `app.post`, etc. to wrap every handler.
+
+### FastAPI
+
+```python
+from fastapi import FastAPI
+from trickle import instrument
+
+app = FastAPI()
+instrument(app)  # ← one line
+
+@app.get("/api/users")
+async def get_users(): ...
+```
+
+### Flask
+
+```python
+from flask import Flask
+from trickle import instrument
+
+app = Flask(__name__)
+instrument(app)  # ← one line
+
+@app.route("/api/users")
+def get_users(): ...
+```
+
+### Django
+
+```python
+from trickle import instrument_django
+from myapp.urls import urlpatterns
+
+instrument_django(urlpatterns)
+```
+
+### Testing it
+
+```bash
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Run the Express E2E test
+node test-express-e2e.js
+
+# Terminal 3: See the captured types
+npx trickle functions
+npx trickle codegen
+```
+
+---
+
+## Manual Instrumentation
+
+For non-framework code (utility functions, Lambda handlers, etc.), wrap individual functions:
+
+### JavaScript
 
 ```javascript
 const { trickle, configure } = require('trickle');
 
-// Optional: configure if backend isn't on localhost:4888
 configure({ backendUrl: 'http://localhost:4888' });
 
-// Wrap any function
 const processOrder = trickle(function processOrder(order) {
-  const total = order.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const total = order.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   return { orderId: order.id, total, status: 'processed' };
 });
 
-// Use it normally — trickle is transparent
 processOrder({ id: 'ORD-123', items: [{ price: 29.99, quantity: 2 }] });
 ```
 
-**Python:**
+### Python
 
 ```python
 from trickle import trickle, configure
@@ -102,279 +230,230 @@ configure(backend_url='http://localhost:4888')
 
 @trickle
 def process_order(order):
-    total = sum(item['price'] * item['quantity'] for item in order['items'])
+    total = sum(i['price'] * i['quantity'] for i in order['items'])
     return {'order_id': order['id'], 'total': total, 'status': 'processed'}
-
-process_order({'id': 'ORD-123', 'items': [{'price': 29.99, 'quantity': 2}]})
 ```
 
-### 3. Deploy and trigger your application
-
-Types are captured automatically as real traffic flows through. Happy path types are cached; errors always capture the full type context.
-
-### 4. Explore with the CLI
-
-```bash
-npx trickle functions           # List all instrumented functions
-npx trickle errors              # See what's failing
-npx trickle errors 1            # Inspect full type state of error #1
-npx trickle types processOrder  # See captured runtime types
-npx trickle tail                # Live stream of events
-```
-
----
-
-## How It Works
-
-### Two modes of use
-
-**Sad path (debugging errors):** When your deployed code errors, select any error entry via CLI and inspect the types and values of every input and accessed property in the function at the point of failure. Compare against the expected happy-path types to instantly see what went wrong.
-
-**Happy path (development):** Query the cached types for any function to know the real runtime types, so you can write code faster without guessing. Filter by environment (staging/prod/local) and timeframe.
-
-### The type-cache system
-
-When an instrumented function is called:
-
-1. Input arguments are wrapped in transparent Proxy objects (JS) or attribute trackers (Python) that record which properties are accessed
-2. The function executes normally — trickle never interferes with behavior
-3. After execution, trickle infers the TypeNode representation of inputs and outputs
-4. The type signature is hashed (SHA-256, 16 hex chars)
-5. If the hash matches the cached hash, nothing is sent (zero network overhead)
-6. If the hash is new, the type signature + one sample of actual data is sent to the backend
-7. If the function threw an error, types are **always** captured regardless of cache
-
-This means an application handling 1,000,000 requests/sec generates network traffic only when type signatures change — which is almost never in steady state.
-
----
-
-## JavaScript Client
-
-### Installation
-
-```bash
-npm install trickle
-```
-
-### API
-
-#### `configure(opts)`
-
-Set global configuration. Call before wrapping functions.
-
-```javascript
-const { configure } = require('trickle');
-
-configure({
-  backendUrl: 'http://localhost:4888', // Backend URL (default)
-  batchIntervalMs: 2000,              // Flush interval in ms (default: 2000)
-  maxBatchSize: 50,                   // Max payloads per batch (default: 50)
-  enabled: true,                      // Enable/disable instrumentation (default: true)
-  debug: false,                       // Log transport activity (default: false)
-  environment: undefined,             // Override auto-detected env
-});
-```
-
-#### `trickle(fn, opts?)`
-
-Wrap a function to capture runtime types. Returns a function with identical behavior.
-
-```javascript
-const { trickle } = require('trickle');
-
-// Basic usage
-const myFn = trickle(function myFn(x, y) { return x + y; });
-
-// With explicit name (for anonymous functions)
-const handler = trickle('processWebhook', (event) => { ... });
-
-// With options
-const myFn = trickle(myFunction, {
-  name: 'customName',     // Override function name
-  module: 'api.orders',   // Override module (auto-inferred from call stack)
-  sampleRate: 0.1,        // Only capture 10% of calls
-  maxDepth: 3,            // Limit type inference depth (default: 5)
-});
-```
-
-#### `trickleHandler(handler, opts?)`
-
-Specialized wrapper for AWS Lambda handlers. Automatically flushes the transport after each invocation, since Lambda may freeze the process between calls.
+### AWS Lambda
 
 ```javascript
 const { trickleHandler } = require('trickle');
 
 exports.handler = trickleHandler(async (event, context) => {
   const order = JSON.parse(event.body);
-  const result = await processOrder(order);
-  return { statusCode: 200, body: JSON.stringify(result) };
+  return { statusCode: 200, body: JSON.stringify(await processOrder(order)) };
 });
 ```
 
-#### `flush()`
+### Testing it
 
-Manually flush all queued payloads. Automatically called on process exit.
+```bash
+# Terminal 1: Start backend
+cd packages/backend && npm start
 
-```javascript
-const { flush } = require('trickle');
-await flush();
+# Terminal 2: Run the basic E2E test
+node test-e2e.js
+
+# Terminal 3: Explore
+npx trickle functions
+npx trickle types processOrder
+npx trickle errors
 ```
-
-### Proxy-based property tracking
-
-When you wrap a function with `trickle()`, input arguments that are objects or arrays are wrapped in transparent ES6 Proxies before being passed to your function. These proxies record which properties your function actually accesses.
-
-```javascript
-const processOrder = trickle(function processOrder(order) {
-  // trickle tracks that order.customer.name and order.items are accessed
-  const name = order.customer.name;
-  const total = order.items.reduce((s, i) => s + i.price, 0);
-  return { name, total };
-});
-```
-
-The proxies are fully transparent:
-- `typeof`, `instanceof`, `Array.isArray()` all work correctly
-- `JSON.stringify`, spread operator, `Object.keys` all work
-- `===` comparisons work
-- Iterator protocols work
-- No observable difference from the original values
-
-### What the JS client handles
-
-| Type | Inference |
-|------|-----------|
-| `string`, `number`, `boolean`, `null`, `undefined` | Primitive types |
-| `BigInt`, `Symbol` | Primitive types |
-| Plain objects | Recursive property inference |
-| Arrays | Element type unification (samples first 20) |
-| `Map`, `Set` | Key/value or element types |
-| `Date`, `RegExp`, `Error` | Object with type marker |
-| `Buffer`, `TypedArray` | Primitive buffer type |
-| Promises | Promise with resolved type |
-| Functions | Function with arity |
-| Circular references | Detected, marked as `unknown` |
 
 ---
 
-## Python Client
+## Code Generation
 
-### Installation
+Generate TypeScript/Python type definitions from runtime observations.
+
+### TypeScript types
 
 ```bash
-pip install trickle
+# Generate to stdout
+npx trickle codegen
+
+# Write to file
+npx trickle codegen --out .trickle/types.d.ts
+
+# Watch mode — auto-regenerate on new observations
+npx trickle codegen --watch --out .trickle/types.d.ts
+
+# Filter by environment
+npx trickle codegen --env prod
 ```
 
-(Requires `requests` package)
+Output example:
 
-### API
+```typescript
+export interface GetApiUsersOutput {
+  users: GetApiUsersOutputUsers[];
+  total: number;
+}
 
-#### `configure(**kwargs)`
+export interface PostApiOrdersInput {
+  customer: string;
+  items: PostApiOrdersInputItems[];
+}
 
-```python
-from trickle import configure
-
-configure(
-    backend_url='http://localhost:4888',  # Default
-    batch_interval=2.0,                   # Seconds between flushes
-    enabled=True,                         # Enable/disable
-    max_batch_size=100,                   # Max payloads per batch
-    max_retries=3,                        # Retry attempts
-)
+export declare function getApiUsers(): GetApiUsersOutput;
+export declare function postApiOrders(input: PostApiOrdersInput): PostApiOrdersOutput;
 ```
 
-#### `@trickle` decorator
+### Python type stubs
 
-```python
-from trickle import trickle
-
-# Basic usage
-@trickle
-def process_order(order):
-    return {'total': sum(i['price'] for i in order['items'])}
-
-# With options
-@trickle(name='custom_name', module='orders.api')
-def process_order(order):
-    ...
-
-# Async support
-@trickle
-async def fetch_user(user_id):
-    return await db.get_user(user_id)
+```bash
+npx trickle codegen --python --out .trickle/types.pyi
 ```
 
-### Attribute tracking
+### Typed API client
 
-Python uses tracker subclasses instead of Proxies:
+Generate a fully-typed `fetch`-based API client from observed routes:
 
-- **TrackedDict** — subclass of `dict`, intercepts `__getitem__` and `.get()`
-- **TrackedList** — subclass of `list`, intercepts index access and iteration
-- **TrackedObject** — wraps arbitrary objects, intercepts `__getattr__`
-
-`isinstance` checks still pass (a TrackedDict is still a dict).
-
-### What the Python client handles
-
-| Type | Inference |
-|------|-----------|
-| `str`, `int`, `float`, `bool`, `None` | Primitive types |
-| `bytes`, `bytearray` | Bytes primitive |
-| `datetime`, `date`, `time` | Temporal primitives |
-| `Enum` | String primitive |
-| `dict` | Object with property types |
-| `list` | Array with unified element type |
-| `tuple` | Tuple type (named tuples → object) |
-| `set`, `frozenset` | Set with element type |
-| `dataclass` | Object with field types |
-| Pydantic models (v1 & v2) | Object with field types |
-| Callables | Function type |
-| Circular references | Detected via `id()` set |
-
-### Framework examples
-
-**FastAPI:**
-
-```python
-from fastapi import FastAPI
-from trickle import trickle
-
-app = FastAPI()
-
-@app.post("/orders")
-@trickle
-async def create_order(order: OrderSchema):
-    result = await process_order(order.dict())
-    return {"status": "ok", "data": result}
+```bash
+npx trickle codegen --client --out .trickle/api-client.ts
 ```
 
-**Django:**
+Output example:
 
-```python
-from trickle import trickle
+```typescript
+export function createTrickleClient(baseUrl: string) {
+  return {
+    getApiUsers: (): Promise<GetApiUsersOutput> =>
+      request<GetApiUsersOutput>("GET", "/api/users", undefined),
 
-@trickle
-def my_view(request):
-    data = json.loads(request.body)
-    return JsonResponse(process(data))
+    getApiUsersId: (id: string): Promise<GetApiUsersIdOutput> =>
+      request<GetApiUsersIdOutput>("GET", `/api/users/${id}`, undefined),
+
+    postApiOrders: (input: PostApiOrdersInput): Promise<PostApiOrdersOutput> =>
+      request<PostApiOrdersOutput>("POST", "/api/orders", input),
+  };
+}
+
+export type TrickleClient = ReturnType<typeof createTrickleClient>;
 ```
 
-**AWS Lambda (Python):**
+Usage:
 
-```python
-from trickle import trickle
+```typescript
+import { createTrickleClient } from './.trickle/api-client';
 
-@trickle
-def handler(event, context):
-    body = json.loads(event['body'])
-    return {'statusCode': 200, 'body': json.dumps(process(body))}
+const api = createTrickleClient('http://localhost:3000');
+const users = await api.getApiUsers();          // fully typed!
+const order = await api.postApiOrders({         // input autocomplete!
+  customer: 'Alice',
+  items: [{ name: 'Widget', price: 29.99, quantity: 2 }],
+});
+```
+
+### Testing codegen
+
+```bash
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Run the Express E2E test to populate types
+node test-express-e2e.js
+
+# Terminal 3: Generate and validate
+npx trickle codegen --out /tmp/types.d.ts
+npx tsc --noEmit --strict /tmp/types.d.ts    # Should pass
+
+npx trickle codegen --client --out /tmp/client.ts
+npx tsc --noEmit --strict /tmp/client.ts      # Should pass
+
+npx trickle codegen --python --out /tmp/types.pyi
+python3 -c "import ast; ast.parse(open('/tmp/types.pyi').read())"  # Should pass
+```
+
+Or run the dedicated E2E test:
+
+```bash
+node test-client-e2e.js
+```
+
+---
+
+## Mock Server
+
+Start an instant mock API server from runtime-observed types and sample data:
+
+```bash
+npx trickle mock
+npx trickle mock --port 8080
+npx trickle mock --no-cors
+```
+
+Output:
+
+```
+  Trickle Mock Server
+
+  Routes (from runtime observations):
+    GET     /api/products        (sample from 2m ago)
+    GET     /api/products/:id    (sample from 2m ago)
+    POST    /api/cart/add        (sample from 1m ago)
+    DELETE  /api/cart/:cartId    (sample from 1m ago)
+
+  Listening on http://localhost:3000
+  CORS enabled (Access-Control-Allow-Origin: *)
+```
+
+Features:
+- Serves all observed routes with real sample data
+- **Path parameter substitution** — `/api/products/42` returns `id: 42`
+- CORS enabled by default for frontend development
+- Colored request logging
+- 404 with helpful error for unknown routes
+
+### Testing the mock server
+
+```bash
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Populate types (run any E2E test)
+node test-express-e2e.js
+
+# Terminal 3: Start mock server
+npx trickle mock --port 3000
+
+# Terminal 4: Query the mock
+curl http://localhost:3000/api/users
+curl http://localhost:3000/api/users/42
+curl -X POST http://localhost:3000/api/orders -H 'Content-Type: application/json' -d '{"customer":"Alice"}'
+```
+
+Or run the dedicated E2E test:
+
+```bash
+node test-mock-e2e.js
 ```
 
 ---
 
 ## CLI Reference
 
-The CLI queries the trickle backend and displays results with colors, tables, and tree views.
+### `trickle init`
+
+Set up trickle in your project.
+
+```bash
+npx trickle init
+npx trickle init --dir /path/to/project
+npx trickle init --python
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dir <path>` | Project directory (defaults to cwd) |
+| `--python` | Set up for a Python project |
+
+What it does:
+- Creates `.trickle/` with `types.d.ts` and `api-client.ts` placeholders
+- Updates `tsconfig.json` to include `.trickle` in `include`
+- Adds npm scripts: `trickle:dev`, `trickle:start`, `trickle:client`, `trickle:mock`
+- Updates `.gitignore`
+- Idempotent — safe to run multiple times
 
 ### `trickle functions`
 
@@ -389,66 +468,9 @@ npx trickle functions --search processOrder
 
 | Flag | Description |
 |------|-------------|
-| `--env <env>` | Filter by environment (prod, staging, lambda, etc.) |
-| `--lang <lang>` | Filter by language (js, python) |
-| `--search <query>` | Search by function name or module |
-
-Output:
-
-```
-┌──────────────────┬──────────┬──────────┬─────────────┬───────────┐
-│ Name             │ Module   │ Language │ Environment │ Last Seen │
-├──────────────────┼──────────┼──────────┼─────────────┼───────────┤
-│ processOrder     │ orders   │  js      │  lambda     │ 2m ago    │
-│ validatePayment  │ payments │  js      │  lambda     │ 5m ago    │
-│ process_order    │ api      │  python  │  fastapi    │ 1h ago    │
-└──────────────────┴──────────┴──────────┴─────────────┴───────────┘
-```
-
-### `trickle errors [id]`
-
-**List mode** — show all errors:
-
-```bash
-npx trickle errors
-npx trickle errors --env prod
-npx trickle errors --since 2h
-npx trickle errors --since 3d
-npx trickle errors --function processOrder
-npx trickle errors --limit 10
-```
-
-| Flag | Description |
-|------|-------------|
 | `--env <env>` | Filter by environment |
-| `--since <timeframe>` | Time filter: `30s`, `5m`, `2h`, `3d`, `1w` |
-| `--function <name>` | Filter by function name |
-| `--limit <n>` | Max results |
-
-Output:
-
-```
-┌────────┬──────────────────────┬──────────────────┬──────────────────────────┬──────┬──────────┐
-│ ID     │ Function             │ Error Type       │ Message                  │ Env  │ Time     │
-├────────┼──────────────────────┼──────────────────┼──────────────────────────┼──────┼──────────┤
-│ 42     │ processOrder         │  TypeError       │ Cannot read property…    │ prod │ 2m ago   │
-│ 41     │ validatePayment      │  Error           │ Card number is required  │ prod │ 5m ago   │
-└────────┴──────────────────────┴──────────────────┴──────────────────────────┴──────┴──────────┘
-```
-
-**Detail mode** — inspect a specific error:
-
-```bash
-npx trickle errors 42
-```
-
-Shows:
-- Error type, message, environment, timestamp
-- Full stack trace
-- **Type context at point of failure:** the exact input types, return type, and a sample of the actual data
-- **Expected types (happy path):** the most recent successful type snapshot for comparison
-
-This is the core debugging workflow — you immediately see what types were present when the error occurred vs. what they should have been.
+| `--lang <lang>` | Filter by language (js, python) |
+| `--search <query>` | Search by function name |
 
 ### `trickle types <function-name>`
 
@@ -456,7 +478,7 @@ Show captured runtime types for a function.
 
 ```bash
 npx trickle types processOrder
-npx trickle types processOrder --env prod
+npx trickle types "GET /api/users"
 npx trickle types processOrder --diff
 npx trickle types processOrder --diff --env1 prod --env2 staging
 ```
@@ -468,49 +490,63 @@ npx trickle types processOrder --diff --env1 prod --env2 staging
 | `--env1 <env>` | First environment for cross-env diff |
 | `--env2 <env>` | Second environment for cross-env diff |
 
-Output (normal mode):
+### `trickle errors [id]`
 
-```
-  processOrder (orders)
-  ──────────────────────────────────────────────────
+List errors or inspect a specific error with full type context.
 
-   prod   2m ago
-
-  args: [{
-      id: string,
-      customer: { name: string, email: string },
-      items: { price: number, quantity: number }[]
-    }]
-  returns: {
-      orderId: string,
-      total: number,
-      tax: number,
-      status: string
-    }
-
-  sample input:
-    [{ "id": "ORD-123", "customer": { "name": "Alice", ... }, "items": [...] }]
-  sample output:
-    { "orderId": "ORD-123", "total": 109.97, "tax": 10.99, "status": "processed" }
+```bash
+npx trickle errors
+npx trickle errors --since 2h
+npx trickle errors --function processOrder
+npx trickle errors 42    # Inspect error #42
 ```
 
-Output (diff mode):
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Filter by environment |
+| `--since <timeframe>` | Time filter: `30s`, `5m`, `2h`, `3d` |
+| `--function <name>` | Filter by function name |
+| `--limit <n>` | Max results |
 
+### `trickle codegen [function-name]`
+
+Generate type definitions from runtime observations.
+
+```bash
+npx trickle codegen                                    # TypeScript to stdout
+npx trickle codegen --out .trickle/types.d.ts          # Write to file
+npx trickle codegen --python --out .trickle/types.pyi  # Python stubs
+npx trickle codegen --client --out .trickle/client.ts  # Typed API client
+npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
+npx trickle codegen --env prod                         # Filter by env
 ```
-  Type diff for processOrder
-  ──────────────────────────────────────────────────
 
-  from:  staging   3d ago
-  to:    prod      2m ago
+| Flag | Description |
+|------|-------------|
+| `-o, --out <path>` | Write to file instead of stdout |
+| `--env <env>` | Filter by environment |
+| `--python` | Generate Python TypedDict stubs |
+| `--client` | Generate typed fetch-based API client |
+| `--watch` | Re-generate when new types are observed |
 
-  + args.0.customer.phone     string
-  ~ args.0.items[].quantity   string → number
-  - return.discount           number
+### `trickle mock`
+
+Start a mock API server from observed runtime types.
+
+```bash
+npx trickle mock
+npx trickle mock --port 8080
+npx trickle mock --no-cors
 ```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --port <port>` | Port to listen on (default: 3000) |
+| `--no-cors` | Disable CORS headers |
 
 ### `trickle tail`
 
-Live stream of events as they happen (like `tail -f`).
+Live stream of events.
 
 ```bash
 npx trickle tail
@@ -521,32 +557,82 @@ npx trickle tail --filter processOrder
 |------|-------------|
 | `--filter <pattern>` | Only show events matching function name |
 
-Output:
+---
 
+## Python Support
+
+### Installation
+
+```bash
+pip install -e packages/client-python
 ```
-  Listening for events... (Ctrl+C to stop)
 
-  14:32:01  [ERROR]     processOrder — TypeError: Cannot read property 'email'
-  14:32:05  [NEW_TYPE]  getUser — new type signature observed
-  14:32:08  [ERROR]     validatePayment — Card number is required
+### Zero-code instrumentation
+
+```bash
+python -m trickle app.py
+```
+
+Automatically patches Flask and FastAPI constructors via import hooks.
+
+### One-liner instrumentation
+
+```python
+from trickle import instrument
+instrument(app)  # Auto-detects FastAPI, Flask, or Django
+```
+
+Or use framework-specific functions:
+
+```python
+from trickle import instrument_fastapi, instrument_flask, instrument_django
+
+instrument_fastapi(app)
+instrument_flask(app)
+instrument_django(urlpatterns)
+```
+
+### Decorator
+
+```python
+from trickle import trickle
+
+@trickle
+def process_order(order):
+    ...
+
+@trickle
+async def fetch_user(user_id):
+    ...
+```
+
+### Testing Python
+
+```bash
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Run Python E2E test
+PYTHONPATH=packages/client-python/src python3 test-e2e.py
+
+# Terminal 3: Explore
+npx trickle functions --lang python
+npx trickle codegen --python
 ```
 
 ---
 
 ## Backend
 
-The backend is a Node.js Express server with SQLite storage.
-
 ### Running
 
 ```bash
 cd packages/backend
-npm install
-npm run build
-npm start
+npm install && npm run build && npm start
+# [trickle] Backend listening on http://localhost:4888
 ```
 
-The backend listens on port **4888** by default (configurable via `PORT` env var). The SQLite database is created at `~/.trickle/trickle.db`.
+SQLite database: `~/.trickle/trickle.db` (WAL mode, created automatically).
 
 ### API Endpoints
 
@@ -554,55 +640,57 @@ The backend listens on port **4888** by default (configurable via `PORT` env var
 |--------|------|-------------|
 | `POST` | `/api/ingest/` | Ingest a single type observation |
 | `POST` | `/api/ingest/batch` | Batch ingest multiple observations |
-| `GET` | `/api/functions` | List functions (query: `q`, `env`, `language`, `limit`, `offset`) |
-| `GET` | `/api/functions/:id` | Get function with latest type snapshots per env |
-| `GET` | `/api/types/:functionId` | List type snapshots (query: `env`, `limit`) |
-| `GET` | `/api/types/:functionId/diff` | Diff snapshots (query: `from`/`to` IDs or `fromEnv`/`toEnv`) |
-| `GET` | `/api/errors` | List errors (query: `functionName`, `env`, `since`, `limit`, `offset`) |
-| `GET` | `/api/errors/:id` | Get error with full type context and happy-path snapshot |
-| `GET` | `/api/tail` | SSE stream of real-time events (query: `filter`) |
+| `GET` | `/api/functions` | List functions |
+| `GET` | `/api/functions/:id` | Get function with latest snapshots per env |
+| `GET` | `/api/types/:functionId` | List type snapshots |
+| `GET` | `/api/types/:functionId/diff` | Diff snapshots between envs or time |
+| `GET` | `/api/errors` | List errors |
+| `GET` | `/api/errors/:id` | Get error with type context |
+| `GET` | `/api/codegen` | Generate type definitions |
+| `GET` | `/api/mock-config` | Get mock server configuration |
+| `GET` | `/api/tail` | SSE stream of real-time events |
+| `GET` | `/api/health` | Health check |
 
-### Database schema
+### Configuration
 
-Three tables:
-- **functions** — every distinct function being observed (unique on name + module + language)
-- **type_snapshots** — immutable log of every type signature observed (unique on function + hash + env)
-- **errors** — every error captured, with full type context and sample data
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Server port | `4888` |
+| `TRICKLE_BACKEND_URL` | CLI backend URL | `http://localhost:4888` |
 
-SQLite uses WAL mode for concurrent reads and writes.
-
----
-
-## Smart Caching
-
-The caching strategy is designed to handle high-throughput applications (millions of requests/sec) without generating excessive data:
-
-### What gets cached
-
-- **Types, not data.** trickle stores type signatures (the shapes), not the raw data. For each unique type signature, one sample of actual data is stored.
-- **Hash-based deduplication.** Type signatures are hashed. If the hash hasn't changed, nothing is sent. This is checked both client-side (in-memory) and server-side (database lookup).
-- **Heartbeat re-sends.** Even when types haven't changed, the client re-sends every 5 minutes to keep `last_seen_at` fresh.
-
-### Error capture rules
-
-- **Errors always capture types** — even if the types match the happy path, because you need the type context to debug.
-- **Error types are compared against existing error types**, not happy path types. If a new error has the same type signature as an existing error, only the error metadata is stored (no duplicate type data).
-- **One sample per error** — actual data is stored with each error for debugging.
-
-### Overhead in steady state
-
-For an application handling 1M req/sec where types don't change:
-- **Client:** one SHA-256 hash + one Map lookup per call (~microseconds)
-- **Network:** zero (hash matches cache, no HTTP call)
-- **Backend:** zero (no incoming requests)
-
-When types change (e.g., a new field appears in an API response), one HTTP call is made per unique new signature.
+The CLI reads backend URL from (in order):
+1. `TRICKLE_BACKEND_URL` env var
+2. `~/.trickle/config.json` (`{ "backendUrl": "..." }`)
+3. Default: `http://localhost:4888`
 
 ---
 
-## Type System
+## How It Works
 
-Both JS and Python clients produce the same TypeNode representation, enabling cross-language type comparison.
+### The type-cache system
+
+When an instrumented function is called:
+
+1. Input arguments are wrapped in transparent Proxy objects (JS) or attribute trackers (Python)
+2. The function executes normally — trickle never interferes with behavior
+3. After execution, trickle infers a TypeNode representation of inputs and outputs
+4. The type signature is hashed (SHA-256, 16 hex chars)
+5. If the hash matches the cache, nothing is sent (zero network overhead)
+6. If the hash is new, the type signature + one sample of data is sent to the backend
+7. If the function threw an error, types are **always** captured regardless of cache
+
+An application handling 1,000,000 requests/sec generates network traffic only when type signatures change — which is almost never in steady state.
+
+### Smart caching
+
+- **Types, not data.** Stores type shapes, not raw data. One sample per signature.
+- **Hash-based dedup.** Client-side in-memory cache + server-side database dedup.
+- **5-minute heartbeat.** Re-sends to keep `last_seen_at` fresh.
+- **Errors always capture.** Full type context on every error for debugging.
+
+### Type system
+
+Both JS and Python produce the same TypeNode representation:
 
 ```
 TypeNode =
@@ -618,62 +706,36 @@ TypeNode =
   | { kind: "unknown" }
 ```
 
-Type hashing is deterministic — object keys are sorted alphabetically, union members are deduplicated and sorted. The same runtime shape always produces the same hash regardless of insertion order.
-
----
-
-## Environment Detection
-
-trickle automatically detects the runtime environment from environment variables and framework imports:
-
-### JavaScript
-
-| Environment Variable | Detected As |
-|---------------------|-------------|
-| `AWS_LAMBDA_FUNCTION_NAME` | `lambda` |
-| `VERCEL` | `vercel` |
-| `RAILWAY_ENVIRONMENT` | `railway` |
-| `K_SERVICE` | `cloud-run` |
-| `AZURE_FUNCTIONS_ENVIRONMENT` | `azure-functions` |
-| `GOOGLE_CLOUD_PROJECT` | `gcp` |
-| `ECS_CONTAINER_METADATA_URI` | `ecs` |
-| `FLY_APP_NAME` | `fly` |
-| `RENDER_SERVICE_ID` | `render` |
-| `HEROKU_APP_NAME` / `DYNO` | `heroku` |
-| _(none)_ | `node` |
-
-### Python
-
-| Detection Method | Detected As |
-|-----------------|-------------|
-| `AWS_LAMBDA_FUNCTION_NAME` env var | `lambda` |
-| `FUNCTION_TARGET` / `GOOGLE_CLOUD_PROJECT` | `gcp-functions` |
-| `AZURE_FUNCTIONS_ENVIRONMENT` | `azure-functions` |
-| `import fastapi` succeeds | `fastapi` |
-| `import django` succeeds | `django` |
-| `import flask` succeeds | `flask` |
-| _(none)_ | `python` |
-
-Override with `configure({ environment: 'custom' })` (JS) or `configure(environment='custom')` (Python — pass through to transport if needed).
-
 ---
 
 ## Architecture
 
 ```
-┌──────────────────┐       POST /api/ingest/batch       ┌─────────────────────┐
-│   JS Client      │ ──────────────────────────────────> │                     │
-│   (trickle npm)  │                                     │   Backend           │
-└──────────────────┘                                     │   (Express + SQLite)│
-                                                         │                     │
-┌──────────────────┐       POST /api/ingest/batch       │   Port 4888         │
-│  Python Client   │ ──────────────────────────────────> │   ~/.trickle/       │
-│  (trickle pip)   │                                     │     trickle.db      │
-└──────────────────┘                                     │                     │
-                                                         │   GET /api/*        │
-┌──────────────────┐       REST + SSE                   │   GET /api/tail     │
-│   CLI            │ <────────────────────────────────> │                     │
-│   (npx trickle)  │                                     └─────────────────────┘
+┌──────────────────┐     POST /api/ingest/batch     ┌─────────────────────┐
+│   JS Client      │ ─────────────────────────────> │                     │
+│   (trickle npm)  │                                │   Backend           │
+├──────────────────┤                                │   (Express + SQLite)│
+│  -r register     │  auto-patches require()        │                     │
+└──────────────────┘                                │   Port 4888         │
+                                                    │   ~/.trickle/db     │
+┌──────────────────┐     POST /api/ingest/batch     │                     │
+│  Python Client   │ ─────────────────────────────> │                     │
+│  (trickle pip)   │                                │                     │
+├──────────────────┤                                │                     │
+│  -m trickle      │  auto-patches imports          │                     │
+└──────────────────┘                                └─────────┬───────────┘
+                                                              │
+┌──────────────────┐     REST + SSE                          │
+│   CLI            │ <──────────────────────────────────────>│
+│   (npx trickle)  │                                         │
+├──────────────────┤                                         │
+│  init            │  project setup                          │
+│  codegen         │  TypeScript/Python/client generation    │
+│  mock            │  mock API server from observed types    │
+│  functions       │  list observed functions                │
+│  types           │  inspect runtime types                  │
+│  errors          │  debug errors with type context         │
+│  tail            │  live event stream                      │
 └──────────────────┘
 ```
 
@@ -682,80 +744,94 @@ Override with `configure({ environment: 'custom' })` (JS) or `configure(environm
 ```
 trickle/
 ├── packages/
-│   ├── backend/           # Express API + SQLite storage
+│   ├── backend/            # Express API + SQLite storage
 │   │   └── src/
-│   │       ├── db/        # Connection, migrations, queries
-│   │       ├── routes/    # Ingest, functions, types, errors, tail
-│   │       └── services/  # SSE broker, type differ
+│   │       ├── db/         # Connection, migrations, queries
+│   │       ├── routes/     # ingest, functions, types, errors, tail, codegen, mock
+│   │       └── services/   # SSE broker, type differ, type generator
 │   │
-│   ├── client-js/         # JavaScript instrumentation library
+│   ├── client-js/          # JavaScript instrumentation library
+│   │   ├── register.js     # Entry point for node -r trickle/register
 │   │   └── src/
-│   │       ├── index.ts          # Public API
-│   │       ├── wrap.ts           # Core wrapping logic
-│   │       ├── proxy-tracker.ts  # Deep property access tracking
-│   │       ├── type-inference.ts # Runtime type inference
-│   │       ├── type-hash.ts      # Canonical hashing
-│   │       ├── cache.ts          # Client-side dedup
-│   │       └── transport.ts      # Batched HTTP
+│   │       ├── index.ts        # Public API: configure, trickle, instrument, flush
+│   │       ├── register.ts     # Auto-instrumentation via Module._load
+│   │       ├── express.ts      # Express monkey-patching
+│   │       ├── wrap.ts         # Core function wrapping
+│   │       ├── proxy-tracker.ts # Deep property access tracking
+│   │       ├── type-inference.ts
+│   │       ├── type-hash.ts
+│   │       ├── cache.ts
+│   │       ├── transport.ts    # Batched HTTP with retry
+│   │       └── env-detect.ts
 │   │
-│   ├── client-python/     # Python instrumentation library
+│   ├── client-python/      # Python instrumentation library
 │   │   └── src/trickle/
-│   │       ├── decorator.py      # @trickle decorator
-│   │       ├── attr_tracker.py   # Property access tracking
-│   │       ├── type_inference.py # Runtime type inference
-│   │       ├── type_hash.py      # Canonical hashing
-│   │       ├── cache.py          # Client-side dedup
-│   │       └── transport.py      # Batched HTTP (background thread)
+│   │       ├── __init__.py     # Public API
+│   │       ├── __main__.py     # python -m trickle runner
+│   │       ├── _auto.py        # Auto-instrumentation import hooks
+│   │       ├── instrument.py   # FastAPI/Flask/Django instrumentation
+│   │       ├── decorator.py    # @trickle decorator
+│   │       ├── attr_tracker.py
+│   │       ├── type_inference.py
+│   │       ├── type_hash.py
+│   │       ├── cache.py
+│   │       ├── transport.py
+│   │       └── env_detect.py
 │   │
-│   └── cli/               # Developer CLI tool
+│   └── cli/                # Developer CLI tool
 │       └── src/
-│           ├── commands/   # functions, errors, types, tail
-│           ├── formatters/ # Type and diff formatting
-│           └── ui/         # Badges, helpers
+│           ├── index.ts        # Commander setup
+│           ├── commands/       # init, functions, types, errors, codegen, mock, tail
+│           ├── formatters/     # Type and diff formatting
+│           └── ui/             # Badges, helpers
 │
-├── package.json           # npm workspace root
-└── tsconfig.base.json     # Shared TypeScript config
+├── test-e2e.js             # Basic JS client test
+├── test-e2e.py             # Basic Python client test
+├── test-express-e2e.js     # Express auto-instrumentation test
+├── test-client-e2e.js      # Typed API client generation test
+├── test-register-e2e.js    # Zero-code register hook test
+├── test-register-app.js    # Plain Express app (no trickle code) for register test
+├── test-mock-e2e.js        # Mock server test
+├── test-init-e2e.js        # trickle init test
+├── package.json            # npm workspace root
+└── tsconfig.base.json      # Shared TypeScript config
 ```
 
 ### Dependencies
 
-**Backend:** express, better-sqlite3, cors
-
-**JS Client:** zero runtime dependencies (uses Node.js built-in `crypto` and `fetch`)
-
-**Python Client:** requests
-
-**CLI:** chalk, cli-table3, commander
+| Package | Dependencies |
+|---------|-------------|
+| Backend | express, better-sqlite3, cors |
+| JS Client | zero runtime dependencies |
+| Python Client | requests |
+| CLI | chalk, cli-table3, commander |
 
 ---
 
-## Configuration
+## E2E Tests
 
-### Backend URL
+Run all E2E tests to verify everything works:
 
-The CLI reads the backend URL from (in order):
+```bash
+# Build everything first
+npm run build
 
-1. `TRICKLE_BACKEND_URL` environment variable
-2. `~/.trickle/config.json` (`{ "backendUrl": "..." }`)
-3. Default: `http://localhost:4888`
+# Start backend (required for all tests)
+cd packages/backend && npm start
 
-### Backend port
+# In another terminal, run tests:
+node test-e2e.js             # Basic JS instrumentation
+node test-express-e2e.js     # Express auto-instrumentation
+node test-client-e2e.js      # Typed API client generation
+node test-mock-e2e.js        # Mock server
+node test-init-e2e.js        # trickle init (creates temp project)
 
-Set via `PORT` environment variable (default: `4888`).
+# Self-contained tests (start their own backend):
+node test-register-e2e.js    # Zero-code register hook
 
-### Disabling in tests
-
-**JavaScript:**
-```javascript
-configure({ enabled: false });
+# Python test:
+PYTHONPATH=packages/client-python/src python3 test-e2e.py
 ```
-
-**Python:**
-```python
-configure(enabled=False)
-```
-
-When disabled, `trickle()` / `@trickle` returns the original function unwrapped (JS) or the decorator becomes a no-op pass-through (Python). Zero overhead.
 
 ---
 

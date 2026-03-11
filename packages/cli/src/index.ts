@@ -23,6 +23,7 @@ import { docsCommand } from "./commands/docs";
 import { sampleCommand } from "./commands/sample";
 import { auditCommand } from "./commands/audit";
 import { captureCommand } from "./commands/capture";
+import { searchCommand } from "./commands/search";
 
 const program = new Command();
 
@@ -279,6 +280,16 @@ program
   .option("--module <module>", "Module label (default: capture)")
   .action(async (method: string, url: string, opts) => {
     await captureCommand(method, url, opts);
+  });
+
+// trickle search <query>
+program
+  .command("search <query>")
+  .description("Search across all observed types — find functions by field names, types, or patterns")
+  .option("--env <env>", "Filter by environment")
+  .option("--json", "Output raw JSON")
+  .action(async (query: string, opts) => {
+    await searchCommand(query, opts);
   });
 
 // Handle unhandled rejections

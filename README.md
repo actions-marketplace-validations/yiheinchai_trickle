@@ -46,6 +46,7 @@ trickle dev
 - [API Capture](#api-capture)
 - [GraphQL Schema Generation](#graphql-schema-generation)
 - [tRPC Router Generation](#trpc-router-generation)
+- [Type Search](#type-search)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2129,6 +2130,53 @@ node test-trpc-e2e.js
 
 ---
 
+## Type Search
+
+Search across all observed types to find functions by field names, type shapes, or route patterns. Useful for answering questions like "which endpoint returns an email?" or "what routes use a boolean field?"
+
+```bash
+# Find all functions with an "email" field
+trickle search email
+
+# Find all fields of type boolean
+trickle search boolean
+
+# Find nested fields
+trickle search street
+
+# JSON output for scripting
+trickle search email --json
+```
+
+Example output:
+
+```
+  Search: "email"
+  ──────────────────────────────────────────────────
+  2 functions matched
+
+  GET /api/users
+  module: api  env: development
+    → response.users[].email: string
+
+  POST /api/users
+  module: api  env: development
+    → args.body.email: string
+```
+
+The search covers:
+- **Field names**: Find all routes with a specific field (e.g., `email`, `userId`, `token`)
+- **Type names**: Find all fields of a specific type (e.g., `boolean`, `number`)
+- **Function names**: Match against route/function names (e.g., `orders`, `users`)
+- **Nested fields**: Finds deeply nested fields (e.g., `address.street`)
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-search-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -2433,6 +2481,22 @@ npx trickle capture GET https://api.example.com/me -H "Authorization: Bearer tok
 | `-d, --body <body>` | Request body (JSON) |
 | `--env <env>` | Environment label (default: development) |
 | `--module <module>` | Module label (default: capture) |
+
+### `trickle search <query>`
+
+Search across all observed types by field name, type, or pattern.
+
+```bash
+npx trickle search email                # Find email fields
+npx trickle search boolean              # Find boolean-typed fields
+npx trickle search street               # Find nested fields
+npx trickle search email --json         # JSON output
+```
+
+| Flag | Description |
+|------|-------------|
+| `--env <env>` | Filter by environment |
+| `--json` | Output raw JSON |
 
 ### `trickle replay`
 
@@ -2768,6 +2832,7 @@ trickle/
 ├── test-capture-e2e.js     # API capture (live endpoint) test
 ├── test-graphql-e2e.js     # GraphQL schema generation test
 ├── test-trpc-e2e.js        # tRPC router generation test
+├── test-search-e2e.js      # Type search test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2830,6 +2895,7 @@ node test-class-validator-e2e.js # NestJS class-validator DTOs
 node test-capture-e2e.js     # API capture (live endpoint)
 node test-graphql-e2e.js     # GraphQL schema generation
 node test-trpc-e2e.js        # tRPC router generation
+node test-search-e2e.js      # Type search
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

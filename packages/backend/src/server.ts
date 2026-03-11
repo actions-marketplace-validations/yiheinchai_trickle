@@ -12,6 +12,7 @@ import diffRouter from "./routes/diff";
 import dashboardRouter from "./routes/dashboard";
 import coverageRouter from "./routes/coverage";
 import auditRouter from "./routes/audit";
+import searchRouter from "./routes/search";
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use("/api/diff", diffRouter);
 app.use("/dashboard", dashboardRouter);
 app.use("/api/coverage", coverageRouter);
 app.use("/api/audit", auditRouter);
+app.use("/api/search", searchRouter);
 
 // Health check
 app.get("/api/health", (_req, res) => {

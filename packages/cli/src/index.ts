@@ -10,6 +10,7 @@ import { codegenCommand } from "./commands/codegen";
 import { mockCommand } from "./commands/mock";
 import { initCommand } from "./commands/init";
 import { diffCommand } from "./commands/diff";
+import { openapiCommand } from "./commands/openapi";
 
 const program = new Command();
 
@@ -95,6 +96,19 @@ program
   .option("--env2 <env>", "Second environment for cross-env comparison")
   .action(async (opts) => {
     await diffCommand(opts);
+  });
+
+// trickle openapi
+program
+  .command("openapi")
+  .description("Generate an OpenAPI 3.0 spec from runtime-observed API routes")
+  .option("-o, --out <path>", "Write spec to a file (JSON)")
+  .option("--env <env>", "Filter by environment")
+  .option("--title <title>", "API title in the spec", "API")
+  .option("--api-version <version>", "API version in the spec", "1.0.0")
+  .option("--server <url>", "Server URL to include in the spec")
+  .action(async (opts) => {
+    await openapiCommand(opts);
   });
 
 // trickle mock

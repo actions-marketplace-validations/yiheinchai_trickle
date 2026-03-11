@@ -224,6 +224,25 @@ export async function fetchMockConfig(): Promise<{ routes: MockRoute[] }> {
   return fetchJson("/api/mock-config");
 }
 
+// ── OpenAPI ──
+
+export interface OpenApiOpts {
+  env?: string;
+  title?: string;
+  version?: string;
+  serverUrl?: string;
+}
+
+export async function fetchOpenApiSpec(opts?: OpenApiOpts): Promise<object> {
+  return fetchJson("/api/codegen", {
+    format: "openapi",
+    env: opts?.env,
+    title: opts?.title,
+    version: opts?.version,
+    serverUrl: opts?.serverUrl,
+  });
+}
+
 // ── Diff Report ──
 
 export interface DiffReportEntry {

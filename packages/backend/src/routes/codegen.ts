@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/connection";
 import { listFunctions, getFunctionByName, getLatestSnapshot } from "../db/queries";
-import { generateAllTypes, generatePythonTypes, generateApiClient } from "../services/type-generator";
+import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec } from "../services/type-generator";
 import { TypeNode } from "../types";
 
 const router = Router();
@@ -88,6 +88,15 @@ router.get("/", (req: Request, res: Response) => {
 
     const format = (req.query.format as string)?.toLowerCase();
     const isPython = (language as string)?.toLowerCase() === "python";
+
+    if (format === "openapi") {
+      const title = (req.query.title as string) || undefined;
+      const version = (req.query.version as string) || undefined;
+      const serverUrl = (req.query.serverUrl as string) || undefined;
+      const spec = generateOpenApiSpec(functions, { title, version, serverUrl });
+      res.json(spec);
+      return;
+    }
 
     let types: string;
     if (format === "client") {

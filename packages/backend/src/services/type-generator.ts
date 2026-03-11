@@ -779,5 +779,266 @@ export function generateApiClient(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── OpenAPI spec generation ──
+
+/**
+ * Convert a TypeNode to a JSON Schema object.
+ */
+function typeNodeToJsonSchema(
+  node: TypeNode,
+  defs: Record<string, object>,
+  parentName: string,
+  propName: string | undefined,
+): object {
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string":    return { type: "string" };
+        case "number":    return { type: "number" };
+        case "boolean":   return { type: "boolean" };
+        case "null":      return { type: "string", nullable: true };
+        case "undefined": return { type: "string", nullable: true };
+        case "bigint":    return { type: "integer", format: "int64" };
+        case "symbol":    return { type: "string" };
+        default:          return {};
+      }
+
+    case "unknown":
+      return {};
+
+    case "array":
+      return {
+        type: "array",
+        items: typeNodeToJsonSchema(node.element, defs, parentName, propName),
+      };
+
+    case "tuple":
+      return {
+        type: "array",
+        items: node.elements.length > 0
+          ? typeNodeToJsonSchema(node.elements[0], defs, parentName, propName)
+          : {},
+        minItems: node.elements.length,
+        maxItems: node.elements.length,
+      };
+
+    case "union": {
+      const schemas = node.members.map((m) =>
+        typeNodeToJsonSchema(m, defs, parentName, propName)
+      );
+      // Simplify nullable unions: { type: "string" } | null → nullable string
+      const nonNull = schemas.filter(
+        (s) => !("nullable" in s && (s as Record<string, unknown>).nullable === true),
+      );
+      if (nonNull.length === 1 && nonNull.length < schemas.length) {
+        return { ...nonNull[0], nullable: true };
+      }
+      return { oneOf: schemas };
+    }
+
+    case "map":
+      return {
+        type: "object",
+        additionalProperties: typeNodeToJsonSchema(node.value, defs, parentName, propName),
+      };
+
+    case "set":
+      return {
+        type: "array",
+        items: typeNodeToJsonSchema(node.element, defs, parentName, propName),
+        uniqueItems: true,
+      };
+
+    case "promise":
+      return typeNodeToJsonSchema(node.resolved, defs, parentName, propName);
+
+    case "function":
+      return { type: "object", description: "function" };
+
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) return { type: "object" };
+
+      // Extract complex objects as $ref to keep schemas readable
+      if (keys.length > 2 && propName) {
+        const schemaName = toPascalCase(parentName) + toPascalCase(propName);
+        if (!defs[schemaName]) {
+          // Placeholder to prevent infinite recursion
+          defs[schemaName] = {};
+          const properties: Record<string, object> = {};
+          const required: string[] = [];
+          for (const key of keys) {
+            properties[key] = typeNodeToJsonSchema(node.properties[key], defs, schemaName, key);
+            required.push(key);
+          }
+          defs[schemaName] = { type: "object", properties, required };
+        }
+        return { $ref: `#/components/schemas/${schemaName}` };
+      }
+
+      const properties: Record<string, object> = {};
+      const required: string[] = [];
+      for (const key of keys) {
+        properties[key] = typeNodeToJsonSchema(node.properties[key], defs, parentName, key);
+        required.push(key);
+      }
+      return { type: "object", properties, required };
+    }
+  }
+}
+
+/**
+ * Generate an OpenAPI 3.0 specification from runtime-observed route types.
+ */
+export function generateOpenApiSpec(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+  options?: { title?: string; version?: string; serverUrl?: string },
+): object {
+  const title = options?.title || "API";
+  const version = options?.version || "1.0.0";
+  const paths: Record<string, Record<string, object>> = {};
+  const schemas: Record<string, object> = {};
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (!parsed) continue;
+
+    const method = parsed.method.toLowerCase();
+    const baseName = parsed.typeName;
+
+    // Convert Express :param to OpenAPI {param}
+    const openApiPath = parsed.path.replace(/:(\w+)/g, "{$1}");
+
+    // Build response schema
+    const responseDefs: Record<string, object> = {};
+    const responseSchema = typeNodeToJsonSchema(fn.returnType, responseDefs, baseName + "Output", undefined);
+    Object.assign(schemas, responseDefs);
+
+    // If response is a complex object, extract to a named schema
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      const responseSchemaName = `${baseName}Response`;
+      schemas[responseSchemaName] = responseSchema;
+    }
+
+    const responseRef = fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0
+      ? { $ref: `#/components/schemas/${baseName}Response` }
+      : responseSchema;
+
+    // Build operation object
+    const operation: Record<string, unknown> = {
+      operationId: parsed.funcName,
+      summary: `${parsed.method} ${parsed.path}`,
+      responses: {
+        "200": {
+          description: "Successful response",
+          content: {
+            "application/json": {
+              schema: responseRef,
+            },
+          },
+        },
+      },
+    };
+
+    // Add path parameters
+    if (parsed.pathParams.length > 0) {
+      operation.parameters = parsed.pathParams.map((param) => ({
+        name: param,
+        in: "path",
+        required: true,
+        schema: { type: "string" },
+      }));
+    }
+
+    // Add query parameters from argsType
+    if (fn.argsType.kind === "object" && fn.argsType.properties["query"]) {
+      const queryNode = fn.argsType.properties["query"];
+      if (queryNode.kind === "object") {
+        const queryParams = Object.keys(queryNode.properties).map((param) => {
+          const paramSchema = typeNodeToJsonSchema(queryNode.properties[param], schemas, baseName, param);
+          return {
+            name: param,
+            in: "query" as const,
+            required: false,
+            schema: paramSchema,
+          };
+        });
+        const existing = (operation.parameters as Array<object>) || [];
+        operation.parameters = [...existing, ...queryParams];
+      }
+    }
+
+    // Add request body for POST/PUT/PATCH
+    if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+      let bodyNode: TypeNode | undefined;
+
+      if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+        bodyNode = fn.argsType.properties["body"];
+      } else if (fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1) {
+        const el = fn.argsType.elements[0];
+        if (el.kind === "object" && el.properties["body"]) {
+          bodyNode = el.properties["body"];
+        }
+      }
+
+      if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+        const bodyDefs: Record<string, object> = {};
+        const bodySchema = typeNodeToJsonSchema(bodyNode, bodyDefs, baseName + "Request", undefined);
+        Object.assign(schemas, bodyDefs);
+
+        const requestSchemaName = `${baseName}Request`;
+        schemas[requestSchemaName] = bodySchema;
+
+        operation.requestBody = {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: `#/components/schemas/${requestSchemaName}` },
+            },
+          },
+        };
+      }
+    }
+
+    // Add tags based on path prefix
+    const pathParts = parsed.path.split("/").filter(Boolean);
+    if (pathParts.length >= 2) {
+      operation.tags = [pathParts[1]]; // e.g., /api/users → "users" tag would be pathParts[1]
+      // But /api is the first meaningful segment, so use the one after /api
+      if (pathParts[0] === "api" && pathParts.length >= 2) {
+        operation.tags = [pathParts[1]];
+      }
+    }
+
+    if (!paths[openApiPath]) {
+      paths[openApiPath] = {};
+    }
+    paths[openApiPath][method] = operation;
+  }
+
+  const spec: Record<string, unknown> = {
+    openapi: "3.0.3",
+    info: { title, version },
+    paths,
+  };
+
+  if (Object.keys(schemas).length > 0) {
+    spec.components = { schemas };
+  }
+
+  if (options?.serverUrl) {
+    spec.servers = [{ url: options.serverUrl }];
+  }
+
+  return spec;
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

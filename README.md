@@ -24,6 +24,7 @@ npm run trickle:dev
 - [Code Generation](#code-generation)
 - [Mock Server](#mock-server)
 - [Type Drift Report](#type-drift-report)
+- [OpenAPI Spec Generation](#openapi-spec-generation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -79,6 +80,7 @@ npx trickle errors               # See what's failing
 npx trickle errors 1             # Inspect error with full type context
 npx trickle types processOrder   # See captured runtime types
 npx trickle diff                 # What types changed recently?
+npx trickle openapi              # Generate OpenAPI 3.0 spec
 npx trickle codegen --client     # Generate a typed API client
 npx trickle mock                 # Start a mock API server
 npx trickle tail                 # Live stream of events
@@ -499,6 +501,58 @@ npx trickle diff --since 1h
 
 ---
 
+## OpenAPI Spec Generation
+
+Generate an industry-standard OpenAPI 3.0 specification from your runtime-observed API types — with zero manual spec writing.
+
+```bash
+# Output to stdout
+npx trickle openapi
+
+# Write to file
+npx trickle openapi --out openapi.json
+
+# Customize metadata
+npx trickle openapi --title "My API" --api-version "2.0.0" --server "https://api.example.com"
+```
+
+The generated spec includes:
+- All observed API routes as OpenAPI paths
+- Request body schemas for POST/PUT/PATCH endpoints
+- Response schemas from runtime observations
+- Path parameters with `{param}` syntax
+- Auto-generated tags from URL structure (e.g., `/api/users` → tag "users")
+- Component schemas for reusable type definitions
+- All `$ref` references resolve correctly
+
+### Use cases
+
+- **Swagger UI**: Drop the spec into Swagger UI for instant API documentation
+- **Client SDKs**: Use OpenAPI Generator to create clients in any language (Go, Java, Rust, etc.)
+- **API validation**: Use the spec with express-openapi-validator to validate requests
+- **Testing**: Import into Postman, Insomnia, or any OpenAPI-compatible tool
+- **CI/CD**: Compare specs between versions to detect breaking changes
+
+### Testing it
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-openapi-e2e.js
+
+# Or manually:
+# Terminal 1: Start backend
+cd packages/backend && npm start
+
+# Terminal 2: Populate types
+node test-express-e2e.js
+
+# Terminal 3: Generate spec
+npx trickle openapi --out openapi.json
+cat openapi.json | jq '.paths | keys'
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle init`
@@ -614,6 +668,26 @@ npx trickle diff --env1 staging --env2 production   # Cross-env comparison
 | `--env <env>` | Filter by environment |
 | `--env1 <env>` | First environment for cross-env comparison |
 | `--env2 <env>` | Second environment for cross-env comparison |
+
+### `trickle openapi`
+
+Generate an OpenAPI 3.0 spec from runtime-observed routes.
+
+```bash
+npx trickle openapi                                          # Output to stdout
+npx trickle openapi --out openapi.json                       # Write to file
+npx trickle openapi --title "My API" --api-version "2.0.0"   # Custom metadata
+npx trickle openapi --server "https://api.example.com"       # Add server URL
+npx trickle openapi --env production                         # Filter by env
+```
+
+| Flag | Description |
+|------|-------------|
+| `-o, --out <path>` | Write spec to a file (JSON) |
+| `--env <env>` | Filter by environment |
+| `--title <title>` | API title (default: "API") |
+| `--api-version <version>` | API version (default: "1.0.0") |
+| `--server <url>` | Server URL to include in the spec |
 
 ### `trickle mock`
 
@@ -820,6 +894,7 @@ TypeNode =
 │  codegen         │  TypeScript/Python/client generation    │
 │  mock            │  mock API server from observed types    │
 │  diff            │  cross-function type drift report       │
+│  openapi         │  generate OpenAPI 3.0 spec              │
 │  functions       │  list observed functions                │
 │  types           │  inspect runtime types                  │
 │  errors          │  debug errors with type context         │
@@ -869,7 +944,7 @@ trickle/
 │   └── cli/                # Developer CLI tool
 │       └── src/
 │           ├── index.ts        # Commander setup
-│           ├── commands/       # init, functions, types, errors, codegen, mock, diff, tail
+│           ├── commands/       # init, functions, types, errors, codegen, mock, diff, openapi, tail
 │           ├── formatters/     # Type and diff formatting
 │           └── ui/             # Badges, helpers
 │
@@ -882,6 +957,7 @@ trickle/
 ├── test-mock-e2e.js        # Mock server test
 ├── test-init-e2e.js        # trickle init test
 ├── test-diff-e2e.js        # Type drift report test
+├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── package.json            # npm workspace root
 └── tsconfig.base.json      # Shared TypeScript config
 ```
@@ -915,6 +991,7 @@ node test-client-e2e.js      # Typed API client generation
 node test-mock-e2e.js        # Mock server
 node test-init-e2e.js        # trickle init (creates temp project)
 node test-diff-e2e.js        # Type drift report
+node test-openapi-e2e.js     # OpenAPI spec generation
 
 # Self-contained tests (start their own backend):
 node test-register-e2e.js    # Zero-code register hook

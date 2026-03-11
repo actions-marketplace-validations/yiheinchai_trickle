@@ -107,6 +107,7 @@ program
   .option("--react-query", "Generate typed TanStack React Query hooks")
   .option("--guards", "Generate runtime type guard functions")
   .option("--middleware", "Generate Express request validation middleware")
+  .option("--msw", "Generate Mock Service Worker (MSW) request handlers")
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);

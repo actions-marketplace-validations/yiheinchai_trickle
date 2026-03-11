@@ -2109,5 +2109,173 @@ export function generateMiddleware(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── MSW Handler Generation ──
+
+/**
+ * Generate a sample value literal string from a TypeNode.
+ * Used to create realistic mock responses in MSW handlers.
+ */
+function typeNodeToSampleLiteral(node: TypeNode, indent: number = 0): string {
+  const pad = "  ".repeat(indent);
+  const innerPad = "  ".repeat(indent + 1);
+
+  switch (node.kind) {
+    case "primitive":
+      switch (node.name) {
+        case "string": return '""';
+        case "number": return "0";
+        case "boolean": return "true";
+        case "null": return "null";
+        case "undefined": return "undefined";
+        case "bigint": return "0";
+        case "symbol": return '"symbol"';
+        default: return "null";
+      }
+
+    case "array":
+      return `[${typeNodeToSampleLiteral(node.element, indent)}]`;
+
+    case "tuple": {
+      const elements = node.elements.map((el) => typeNodeToSampleLiteral(el, indent));
+      return `[${elements.join(", ")}]`;
+    }
+
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) return "{}";
+      const entries = keys.map(
+        (key) => `${innerPad}${key}: ${typeNodeToSampleLiteral(node.properties[key], indent + 1)}`
+      );
+      return `{\n${entries.join(",\n")}\n${pad}}`;
+    }
+
+    case "union":
+      // Use the first non-null/undefined member
+      for (const m of node.members) {
+        if (m.kind === "primitive" && (m.name === "null" || m.name === "undefined")) continue;
+        return typeNodeToSampleLiteral(m, indent);
+      }
+      return "null";
+
+    case "map":
+      return "new Map()";
+
+    case "set":
+      return "new Set()";
+
+    case "promise":
+      return typeNodeToSampleLiteral(node.resolved, indent);
+
+    case "function":
+      return "() => {}";
+
+    case "unknown":
+      return "null";
+
+    default:
+      return "null";
+  }
+}
+
+/**
+ * Generate Mock Service Worker (MSW) request handlers from observed API routes.
+ *
+ * Output:
+ * - Import from 'msw'
+ * - Response type interfaces for each route
+ * - Individual handler exports (e.g. getApiUsersHandler)
+ * - A combined `handlers` array for setupServer/setupWorker
+ */
+export function generateMswHandlers(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  const routes: Array<{
+    parsed: ParsedRoute;
+    fn: (typeof functions)[number];
+  }> = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+    if (parsed) {
+      routes.push({ parsed, fn });
+    }
+  }
+
+  if (routes.length === 0) {
+    return "// No API routes found. Instrument your Express app to generate MSW handlers.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated MSW request handlers by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --msw` to update");
+  sections.push("");
+  sections.push('import { http, HttpResponse } from "msw";');
+  sections.push("");
+
+  // Generate response type interfaces
+  const extracted: ExtractedInterface[] = [];
+
+  for (const { parsed, fn } of routes) {
+    const responseName = `${parsed.typeName}Response`;
+    if (fn.returnType.kind === "object" && Object.keys(fn.returnType.properties).length > 0) {
+      sections.push(renderInterface(responseName, fn.returnType as Extract<TypeNode, { kind: "object" }>, extracted));
+    } else {
+      const tsType = typeNodeToTS(fn.returnType, extracted, responseName, undefined, 0);
+      sections.push(`export type ${responseName} = ${tsType};`);
+    }
+    sections.push("");
+  }
+
+  // Render extracted sub-interfaces
+  for (const ext of extracted) {
+    if (ext.node.kind === "object") {
+      sections.push(renderInterface(ext.name, ext.node, extracted));
+      sections.push("");
+    }
+  }
+
+  // Generate individual handler exports
+  const handlerNames: string[] = [];
+
+  for (const { parsed, fn } of routes) {
+    const handlerName = `${parsed.funcName}Handler`;
+    handlerNames.push(handlerName);
+    const method = parsed.method.toLowerCase();
+
+    // Convert Express-style :param to MSW-style :param (same format, already compatible)
+    const mswPath = parsed.path;
+
+    // Generate sample response from returnType
+    const sampleResponse = typeNodeToSampleLiteral(fn.returnType, 1);
+
+    sections.push(`/**`);
+    sections.push(` * Mock handler for ${parsed.method} ${parsed.path}`);
+    sections.push(` */`);
+    sections.push(`export const ${handlerName} = http.${method}("${mswPath}", () => {`);
+    sections.push(`  return HttpResponse.json(${sampleResponse} satisfies ${parsed.typeName}Response);`);
+    sections.push(`});`);
+    sections.push("");
+  }
+
+  // Export combined handlers array
+  sections.push("/** All mock handlers — use with setupServer(...handlers) or setupWorker(...handlers) */");
+  sections.push("export const handlers = [");
+  for (const name of handlerNames) {
+    sections.push(`  ${name},`);
+  }
+  sections.push("];");
+  sections.push("");
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

@@ -37,6 +37,7 @@ trickle dev
 - [API Documentation Generation](#api-documentation-generation)
 - [Test Fixtures](#test-fixtures)
 - [Request Validation Middleware](#request-validation-middleware)
+- [MSW Mock Handlers](#msw-mock-handlers)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -98,6 +99,7 @@ npx trickle codegen --handlers   # Generate typed Express handlers
 npx trickle codegen --zod        # Generate Zod validation schemas
 npx trickle codegen --react-query # Generate React Query hooks
 npx trickle codegen --middleware  # Generate Express validation middleware
+npx trickle codegen --msw        # Generate MSW mock handlers
 npx trickle test --generate      # Generate API test files
 npx trickle mock                 # Start a mock API server
 npx trickle proxy -t http://localhost:3000  # Zero-change type capture
@@ -1526,6 +1528,72 @@ node test-middleware-e2e.js
 
 ---
 
+## MSW Mock Handlers
+
+Generate [Mock Service Worker](https://mswjs.io/) request handlers from observed runtime types — the most popular way to mock APIs in frontend tests and development.
+
+```bash
+npx trickle codegen --msw
+npx trickle codegen --msw --out .trickle/handlers.ts
+```
+
+trickle observes your actual API responses, then generates type-safe MSW handlers with realistic mock data:
+
+```typescript
+import { http, HttpResponse } from "msw";
+
+export interface GetApiUsersResponse {
+  users: { id: number; name: string; email: string }[];
+  total: number;
+}
+
+export const getApiUsersHandler = http.get("/api/users", () => {
+  return HttpResponse.json({
+    users: [{ id: 0, name: "", email: "" }],
+    total: 0
+  } satisfies GetApiUsersResponse);
+});
+
+export const postApiUsersHandler = http.post("/api/users", () => {
+  return HttpResponse.json({
+    id: 0,
+    name: "",
+    created: true
+  } satisfies PostApiUsersResponse);
+});
+
+// Drop-in array for setupServer/setupWorker
+export const handlers = [
+  getApiUsersHandler,
+  postApiUsersHandler,
+];
+```
+
+Use in tests:
+
+```typescript
+import { setupServer } from "msw/node";
+import { handlers } from "./.trickle/handlers";
+
+const server = setupServer(...handlers);
+beforeAll(() => server.listen());
+afterAll(() => server.close());
+```
+
+Key behaviors:
+- Generates handlers for all HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- Response types are derived from actual runtime data
+- Sample response values match observed type shapes
+- `satisfies` assertions ensure type safety
+- Exports individual handlers and a combined `handlers` array
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-msw-e2e.js
+```
+
+---
+
 ## CLI Reference
 
 ### `trickle dev [command]`
@@ -1634,6 +1702,7 @@ npx trickle codegen --zod --out .trickle/schemas.ts          # Zod validation sc
 npx trickle codegen --react-query --out .trickle/hooks.ts    # React Query hooks
 npx trickle codegen --guards --out .trickle/guards.ts       # Runtime type guards
 npx trickle codegen --middleware --out .trickle/middleware.ts # Express validation middleware
+npx trickle codegen --msw --out .trickle/handlers.ts         # MSW mock handlers
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -1648,6 +1717,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--zod` | Generate Zod validation schemas with inferred types |
 | `--guards` | Generate runtime type guard functions |
 | `--middleware` | Generate Express request validation middleware |
+| `--msw` | Generate Mock Service Worker (MSW) request handlers |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -2109,6 +2179,7 @@ trickle/
 ├── test-sample-e2e.js      # Test fixture generation test
 ├── test-guards-e2e.js      # Type guard generation test
 ├── test-middleware-e2e.js   # Express validation middleware test
+├── test-msw-e2e.js          # MSW mock handler generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -2162,6 +2233,7 @@ node test-replay-e2e.js      # API replay regression tests
 node test-sample-e2e.js      # Test fixture generation
 node test-guards-e2e.js      # Type guard generation
 node test-middleware-e2e.js   # Express validation middleware
+node test-msw-e2e.js          # MSW mock handler generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

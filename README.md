@@ -224,7 +224,10 @@ Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for
 
 **Deep observation** — trickle doesn't just capture exported functions. It observes ALL function declarations in your code, including functions defined in the entry file and non-exported internal helpers. No blind spots.
 
-**HTTP response types** — trickle automatically captures types from `fetch()` calls. When your code calls an external API, trickle infers the response type and captures it alongside function types:
+**HTTP response types** — trickle automatically captures types from HTTP calls in both JavaScript and Python. When your code calls an external API, trickle infers the response type and captures it alongside function types:
+
+- **JavaScript**: Patches `global.fetch()` to capture JSON response types
+- **Python**: Patches `requests` and `httpx` to capture JSON response types
 
 ```
 + GET /api/users() → { id: number; name: string; email: string; role: string }[]
@@ -233,15 +236,16 @@ Run `trickle init` to auto-generate `.tricklerc.json` with sensible defaults for
   api.example.com module
 ```
 
-No extra setup needed — just `trickle run app.js` and HTTP types appear automatically.
+No extra setup needed — just `trickle run app.js` or `trickle run script.py` and HTTP types appear automatically. POST/PUT/PATCH request body types are captured too.
 
 **Test:**
 
 ```bash
-node test-run-e2e.js   # CJS test
-node test-esm-e2e.js   # ESM test
-node test-deep-e2e.js  # Deep observation (entry file + non-exported functions)
-node test-fetch-e2e.js # HTTP fetch response type capture
+node test-run-e2e.js      # CJS test
+node test-esm-e2e.js      # ESM test
+node test-deep-e2e.js     # Deep observation (entry file + non-exported functions)
+node test-fetch-e2e.js    # JS HTTP fetch response type capture
+node test-py-http-e2e.js  # Python HTTP requests type capture
 ```
 
 ---

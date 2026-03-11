@@ -27,6 +27,15 @@ def main() -> None:
     from trickle._observe_auto import install
     install()
 
+    # Patch HTTP libraries (requests, httpx) for API type capture
+    import os as _os
+    _debug = _os.environ.get("TRICKLE_DEBUG", "").lower() in ("1", "true", "yes")
+    try:
+        from trickle.http_observer import patch_http
+        patch_http(environment="default", debug=_debug)
+    except Exception:
+        pass  # Never block the user's app
+
     target = sys.argv[1]
     sys.argv = sys.argv[1:]
 

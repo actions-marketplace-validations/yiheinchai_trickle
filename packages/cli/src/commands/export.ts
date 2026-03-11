@@ -25,6 +25,7 @@ interface ExportResult {
  * - handlers.d.ts — Express handler type aliases
  * - schemas.ts — Zod validation schemas
  * - hooks.ts — TanStack React Query hooks
+ * - guards.ts — Runtime type guard functions
  * - openapi.json — OpenAPI 3.0 specification
  * - api.test.ts — Generated API test scaffolds
  */
@@ -89,7 +90,15 @@ export async function exportCommand(opts: ExportOptions): Promise<void> {
     countHooks,
   ));
 
-  // 6. OpenAPI spec
+  // 6. Type guards
+  results.push(await generateFile(
+    path.join(outDir, "guards.ts"),
+    "Type guards",
+    () => fetchCodegen({ ...queryOpts, format: "guards" }).then((r) => r.types),
+    countGuards,
+  ));
+
+  // OpenAPI spec
   results.push(await generateFile(
     path.join(outDir, "openapi.json"),
     "OpenAPI 3.0 spec",
@@ -100,7 +109,7 @@ export async function exportCommand(opts: ExportOptions): Promise<void> {
     countPaths,
   ));
 
-  // 7. API tests
+  // API tests
   results.push(await generateFile(
     path.join(outDir, "api.test.ts"),
     "API test scaffolds",
@@ -196,6 +205,11 @@ function countPaths(content: string): string | undefined {
 function countTests(content: string): string | undefined {
   const count = (content.match(/it\("/g) || []).length;
   return count > 0 ? `${count} tests` : undefined;
+}
+
+function countGuards(content: string): string | undefined {
+  const count = (content.match(/export function is\w+/g) || []).length;
+  return count > 0 ? `${count} guards` : undefined;
 }
 
 // Simplified test generation (reuses the same logic as test-gen but inline)

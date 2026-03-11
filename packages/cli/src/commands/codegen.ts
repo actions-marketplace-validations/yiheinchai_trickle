@@ -11,6 +11,7 @@ export interface CodegenOptions {
   handlers?: boolean;
   zod?: boolean;
   reactQuery?: boolean;
+  guards?: boolean;
   watch?: boolean;
 }
 
@@ -19,7 +20,7 @@ export async function codegenCommand(
   opts: CodegenOptions,
 ): Promise<void> {
   const language = opts.python ? "python" : undefined;
-  const format = opts.reactQuery ? "react-query" : opts.zod ? "zod" : opts.handlers ? "handlers" : opts.client ? "client" : undefined;
+  const format = opts.guards ? "guards" : opts.reactQuery ? "react-query" : opts.zod ? "zod" : opts.handlers ? "handlers" : opts.client ? "client" : undefined;
 
   async function generate(): Promise<string> {
     const result = await fetchCodegen({

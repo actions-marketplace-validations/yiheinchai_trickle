@@ -1661,5 +1661,243 @@ export function generateReactQueryHooks(
   return sections.join("\n").trimEnd() + "\n";
 }
 
+// ── Type guard generation ──
+
+/**
+ * Generate a runtime type guard check expression for a TypeNode.
+ * Returns a string that evaluates to boolean when `varName` is the variable.
+ */
+function typeNodeToGuardCheck(node: TypeNode, varName: string, depth: number = 0): string {
+  if (depth > 4) return "true"; // Limit recursion depth
+
+  switch (node.kind) {
+    case "primitive": {
+      if (node.name === "null") return `${varName} === null`;
+      if (node.name === "undefined") return `${varName} === undefined`;
+      return `typeof ${varName} === "${node.name}"`;
+    }
+
+    case "unknown":
+      return "true";
+
+    case "array": {
+      const elemCheck = typeNodeToGuardCheck(node.element, `${varName}[0]`, depth + 1);
+      if (elemCheck === "true") {
+        return `Array.isArray(${varName})`;
+      }
+      return `(Array.isArray(${varName}) && (${varName}.length === 0 || ${elemCheck}))`;
+    }
+
+    case "tuple": {
+      const checks = [`Array.isArray(${varName})`];
+      checks.push(`${varName}.length === ${node.elements.length}`);
+      node.elements.forEach((el, i) => {
+        const c = typeNodeToGuardCheck(el, `${varName}[${i}]`, depth + 1);
+        if (c !== "true") checks.push(c);
+      });
+      return checks.join(" && ");
+    }
+
+    case "union": {
+      const memberChecks = node.members.map(
+        (m) => typeNodeToGuardCheck(m, varName, depth + 1),
+      );
+      return `(${memberChecks.join(" || ")})`;
+    }
+
+    case "object": {
+      const keys = Object.keys(node.properties);
+      if (keys.length === 0) {
+        return `(typeof ${varName} === "object" && ${varName} !== null)`;
+      }
+
+      const checks: string[] = [
+        `typeof ${varName} === "object"`,
+        `${varName} !== null`,
+      ];
+
+      for (const key of keys) {
+        checks.push(`"${key}" in ${varName}`);
+        if (depth < 3) {
+          const propCheck = typeNodeToGuardCheck(
+            node.properties[key],
+            `(${varName} as any).${key}`,
+            depth + 1,
+          );
+          if (propCheck !== "true") {
+            checks.push(propCheck);
+          }
+        }
+      }
+
+      return checks.join(" && ");
+    }
+
+    case "map":
+      return `${varName} instanceof Map`;
+
+    case "set":
+      return `${varName} instanceof Set`;
+
+    case "promise":
+      return `${varName} instanceof Promise`;
+
+    case "function":
+      return `typeof ${varName} === "function"`;
+  }
+}
+
+/**
+ * Generate TypeScript type guard functions from runtime-observed types.
+ *
+ * For each route:
+ * - `isGetApiUsersResponse(value): value is GetApiUsersResponse`
+ * - `isPostApiUsersRequest(value): value is PostApiUsersRequest`
+ *
+ * Type guards perform structural checks: verify typeof, key existence,
+ * array shapes, and nested object structure.
+ */
+export function generateTypeGuards(
+  functions: Array<{
+    name: string;
+    argsType: TypeNode;
+    returnType: TypeNode;
+    module?: string;
+    env?: string;
+    observedAt?: string;
+  }>,
+): string {
+  if (functions.length === 0) {
+    return "// No functions found. Instrument your app to generate type guards.\n";
+  }
+
+  const sections: string[] = [];
+  sections.push("// Auto-generated type guards by trickle");
+  sections.push(`// Generated at ${new Date().toISOString()}`);
+  sections.push("// Do not edit manually — re-run `trickle codegen --guards` to update");
+  sections.push("");
+
+  // First, collect all interfaces we'll need to reference
+  const interfaces: string[] = [];
+  const guards: string[] = [];
+
+  for (const fn of functions) {
+    const parsed = parseRouteName(fn.name);
+
+    if (parsed) {
+      const basePascal = parsed.typeName;
+      const baseCamel = toCamelCase(basePascal);
+
+      // Response type + guard
+      const responseTypeName = `${basePascal}Response`;
+      const responseInterface = generateGuardInterface(responseTypeName, fn.returnType);
+      if (responseInterface) interfaces.push(responseInterface);
+
+      const responseCheck = typeNodeToGuardCheck(fn.returnType, "value");
+      guards.push(`/** Type guard for ${parsed.method} ${parsed.path} response */`);
+      guards.push(`export function is${responseTypeName}(value: unknown): value is ${responseTypeName} {`);
+      guards.push(`  return ${responseCheck};`);
+      guards.push(`}`);
+      guards.push("");
+
+      // Request body type + guard (for POST/PUT/PATCH)
+      if (["POST", "PUT", "PATCH"].includes(parsed.method)) {
+        let bodyNode: TypeNode | undefined;
+        if (fn.argsType.kind === "object" && fn.argsType.properties["body"]) {
+          bodyNode = fn.argsType.properties["body"];
+        }
+        if (bodyNode && bodyNode.kind === "object" && Object.keys(bodyNode.properties).length > 0) {
+          const requestTypeName = `${basePascal}Request`;
+          const requestInterface = generateGuardInterface(requestTypeName, bodyNode);
+          if (requestInterface) interfaces.push(requestInterface);
+
+          const requestCheck = typeNodeToGuardCheck(bodyNode, "value");
+          guards.push(`/** Type guard for ${parsed.method} ${parsed.path} request body */`);
+          guards.push(`export function is${requestTypeName}(value: unknown): value is ${requestTypeName} {`);
+          guards.push(`  return ${requestCheck};`);
+          guards.push(`}`);
+          guards.push("");
+        }
+      }
+    } else {
+      // Non-route function
+      const basePascal = toPascalCase(fn.name);
+
+      // Output guard
+      const outputTypeName = `${basePascal}Output`;
+      const outputInterface = generateGuardInterface(outputTypeName, fn.returnType);
+      if (outputInterface) interfaces.push(outputInterface);
+
+      const outputCheck = typeNodeToGuardCheck(fn.returnType, "value");
+      guards.push(`/** Type guard for ${fn.name} output */`);
+      guards.push(`export function is${outputTypeName}(value: unknown): value is ${outputTypeName} {`);
+      guards.push(`  return ${outputCheck};`);
+      guards.push(`}`);
+      guards.push("");
+
+      // Input guard (if non-trivial)
+      if (fn.argsType.kind !== "unknown" && fn.argsType.kind !== "object" || (fn.argsType.kind === "object" && Object.keys(fn.argsType.properties).length > 0)) {
+        const inputTypeName = `${basePascal}Input`;
+        const inputNode = fn.argsType.kind === "tuple" && fn.argsType.elements.length === 1
+          ? fn.argsType.elements[0]
+          : fn.argsType;
+        const inputInterface = generateGuardInterface(inputTypeName, inputNode);
+        if (inputInterface) interfaces.push(inputInterface);
+
+        const inputCheck = typeNodeToGuardCheck(inputNode, "value");
+        guards.push(`/** Type guard for ${fn.name} input */`);
+        guards.push(`export function is${inputTypeName}(value: unknown): value is ${inputTypeName} {`);
+        guards.push(`  return ${inputCheck};`);
+        guards.push(`}`);
+        guards.push("");
+      }
+    }
+  }
+
+  // Output: interfaces first, then guards
+  sections.push("// ── Type Interfaces ──");
+  sections.push("");
+  sections.push(...interfaces);
+  sections.push("// ── Type Guards ──");
+  sections.push("");
+  sections.push(...guards);
+
+  return sections.join("\n").trimEnd() + "\n";
+}
+
+/**
+ * Generate a simple interface declaration for use with type guards.
+ */
+function generateGuardInterface(name: string, node: TypeNode): string | null {
+  if (node.kind !== "object") {
+    // For non-object types, generate a type alias
+    const extracted: ExtractedInterface[] = [];
+    const tsType = typeNodeToTS(node, extracted, name, undefined, 0);
+    return `export type ${name} = ${tsType};\n`;
+  }
+
+  const keys = Object.keys(node.properties);
+  if (keys.length === 0) return `export type ${name} = Record<string, unknown>;\n`;
+
+  const extracted: ExtractedInterface[] = [];
+  const lines: string[] = [];
+  lines.push(`export interface ${name} {`);
+  for (const key of keys) {
+    const val = typeNodeToTS(node.properties[key], extracted, name, key, 1);
+    lines.push(`  ${key}: ${val};`);
+  }
+  lines.push(`}`);
+
+  // Include any extracted sub-interfaces
+  const subInterfaces: string[] = [];
+  for (const ext of extracted) {
+    if (ext.node.kind === "object") {
+      subInterfaces.push(renderInterface(ext.name, ext.node, extracted));
+    }
+  }
+
+  return [...subInterfaces, lines.join("\n")].join("\n\n") + "\n";
+}
+
 // Public re-export for single-node conversion (used in tests)
 export { typeNodeToTS as typeNodeToTSPublic };

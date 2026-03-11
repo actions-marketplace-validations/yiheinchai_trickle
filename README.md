@@ -27,6 +27,7 @@ trickle dev
 - [React Query Hooks](#react-query-hooks)
 - [Zod Schema Generation](#zod-schema-generation)
 - [Express Handler Types](#express-handler-types)
+- [Type Guards](#type-guards)
 - [API Test Generation](#api-test-generation)
 - [Breaking Change Detection](#breaking-change-detection)
 - [Web Dashboard](#web-dashboard)
@@ -961,6 +962,59 @@ node test-handlers-e2e.js
 
 ---
 
+## Type Guards
+
+Generate runtime type guard functions from observed types. Type guards perform structural validation and work with TypeScript's type narrowing — when the guard passes, TypeScript knows the exact type.
+
+```bash
+npx trickle codegen --guards                     # Print to stdout
+npx trickle codegen --guards --out .trickle/guards.ts  # Write to file
+```
+
+Example output:
+```typescript
+export interface GetApiUsersResponse {
+  users: GetApiUsersResponseUsers[];
+  total: number;
+}
+
+/** Type guard for GET /api/users response */
+export function isGetApiUsersResponse(value: unknown): value is GetApiUsersResponse {
+  return typeof value === "object" && value !== null
+    && "users" in value && "total" in value
+    && (Array.isArray((value as any).users))
+    && typeof (value as any).total === "number";
+}
+
+/** Type guard for POST /api/users request body */
+export function isPostApiUsersRequest(value: unknown): value is PostApiUsersRequest {
+  return typeof value === "object" && value !== null
+    && "name" in value && "email" in value
+    && typeof (value as any).name === "string"
+    && typeof (value as any).email === "string";
+}
+```
+
+Usage in your code:
+```typescript
+import { isGetApiUsersResponse } from './.trickle/guards';
+
+const data = await fetch('/api/users').then(r => r.json());
+if (isGetApiUsersResponse(data)) {
+  // TypeScript knows: data.users is Array<{ id: number, name: string }>
+  console.log(data.users[0].name);
+}
+```
+
+Type guards are also included in `trickle export` as `guards.ts`.
+
+```bash
+# Run the dedicated E2E test (starts its own backend):
+node test-guards-e2e.js
+```
+
+---
+
 ## API Test Generation
 
 Generate ready-to-run API test files from runtime-observed routes and real sample data. No more writing boilerplate fetch calls and assertions manually.
@@ -1178,6 +1232,7 @@ This creates 7 files at once:
 | `handlers.d.ts` | Express `RequestHandler` type aliases for route handlers |
 | `schemas.ts` | Zod validation schemas inferred from runtime types |
 | `hooks.ts` | TanStack React Query hooks (`useQuery`/`useMutation`) |
+| `guards.ts` | Runtime type guard functions for TypeScript narrowing |
 | `openapi.json` | OpenAPI 3.0 specification |
 | `api.test.ts` | Vitest test scaffolds with shape assertions |
 
@@ -1450,6 +1505,7 @@ npx trickle codegen --client --out .trickle/client.ts  # Typed API client
 npx trickle codegen --handlers --out .trickle/handlers.d.ts  # Express handler types
 npx trickle codegen --zod --out .trickle/schemas.ts          # Zod validation schemas
 npx trickle codegen --react-query --out .trickle/hooks.ts    # React Query hooks
+npx trickle codegen --guards --out .trickle/guards.ts       # Runtime type guards
 npx trickle codegen --watch --out .trickle/types.d.ts  # Watch mode
 npx trickle codegen --env prod                         # Filter by env
 ```
@@ -1462,6 +1518,7 @@ npx trickle codegen --env prod                         # Filter by env
 | `--client` | Generate typed fetch-based API client |
 | `--handlers` | Generate typed Express handler types |
 | `--zod` | Generate Zod validation schemas with inferred types |
+| `--guards` | Generate runtime type guard functions |
 | `--watch` | Re-generate when new types are observed |
 
 ### `trickle diff`
@@ -1904,6 +1961,7 @@ trickle/
 ├── test-openapi-e2e.js     # OpenAPI spec generation test
 ├── test-check-e2e.js       # Breaking change detection test
 ├── test-proxy-e2e.js       # Transparent proxy type capture test
+├── test-guards-e2e.js      # Type guard generation test
 ├── test-docs-e2e.js        # API documentation generation test
 ├── test-replay-e2e.js      # API replay regression test
 ├── test-coverage-e2e.js    # Type coverage report test
@@ -1954,6 +2012,7 @@ node test-dashboard-e2e.js   # Web dashboard
 node test-export-e2e.js      # Export all formats
 node test-coverage-e2e.js    # Type coverage report
 node test-replay-e2e.js      # API replay regression tests
+node test-guards-e2e.js      # Type guard generation
 node test-docs-e2e.js        # API documentation generation
 node test-test-gen-e2e.js    # API test generation
 node test-react-query-e2e.js # React Query hook generation

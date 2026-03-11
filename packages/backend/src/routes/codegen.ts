@@ -1,7 +1,7 @@
 import { Router, Request, Response } from "express";
 import { db } from "../db/connection";
 import { listFunctions, getFunctionByName, getLatestSnapshot } from "../db/queries";
-import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes, generateZodSchemas, generateReactQueryHooks } from "../services/type-generator";
+import { generateAllTypes, generatePythonTypes, generateApiClient, generateOpenApiSpec, generateHandlerTypes, generateZodSchemas, generateReactQueryHooks, generateTypeGuards } from "../services/type-generator";
 import { TypeNode } from "../types";
 
 const router = Router();
@@ -126,6 +126,10 @@ router.get("/", (req: Request, res: Response) => {
       return;
     } else if (format === "react-query") {
       types = generateReactQueryHooks(functions);
+      res.json({ types });
+      return;
+    } else if (format === "guards") {
+      types = generateTypeGuards(functions);
       res.json({ types });
       return;
     } else if (format === "client") {

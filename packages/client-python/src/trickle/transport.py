@@ -2,12 +2,18 @@
 
 All transport errors are silently swallowed so they never crash the
 instrumented application.
+
+Supports local file-based mode via TRICKLE_LOCAL=1 env var —
+observations are appended to .trickle/observations.jsonl instead of
+being sent to the HTTP backend.
 """
 
 from __future__ import annotations
 
 import atexit
+import json
 import logging
+import os
 import queue
 import threading
 import time
@@ -25,6 +31,10 @@ _batch_interval: float = 2.0
 _enabled: bool = True
 _max_batch_size: int = 100
 _max_retries: int = 3
+
+# Local file-based mode
+_local_mode: bool = os.environ.get("TRICKLE_LOCAL") == "1"
+_local_file_path: str = ""
 
 # ---------------------------------------------------------------------------
 # Queue & worker
@@ -47,6 +57,7 @@ def configure(
     Can be called at any point; settings take effect immediately.
     """
     global _backend_url, _batch_interval, _enabled, _max_batch_size, _max_retries
+    global _local_mode, _local_file_path
 
     with _config_lock:
         if backend_url is not None:
@@ -60,11 +71,29 @@ def configure(
         if max_retries is not None:
             _max_retries = max_retries
 
+        # Check for local file-based mode
+        if os.environ.get("TRICKLE_LOCAL") == "1":
+            _local_mode = True
+            local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+            os.makedirs(local_dir, exist_ok=True)
+            _local_file_path = os.path.join(local_dir, "observations.jsonl")
+            logger.debug("Local mode: writing to %s", _local_file_path)
+
 
 def enqueue(payload: Dict[str, Any]) -> None:
     """Add a payload to the send queue.  Starts the worker on first call."""
     if not _enabled:
         return
+
+    # Local file mode: append directly to JSONL file
+    if _local_mode and _local_file_path:
+        try:
+            with open(_local_file_path, "a") as f:
+                f.write(json.dumps(payload) + "\n")
+        except Exception:
+            pass  # Never crash user's app
+        return
+
     try:
         _queue.put_nowait(payload)
     except queue.Full:

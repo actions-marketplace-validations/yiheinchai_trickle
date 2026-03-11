@@ -218,23 +218,25 @@ export async function runCommand(
 
   const backendUrl = getBackendUrl();
 
-  // Auto-start backend if not running
+  // Auto-start backend if not running — fall back to local mode
   let backendProc: ChildProcess | null = null;
+  let localMode = false;
   const backendRunning = await checkBackend(backendUrl);
   if (!backendRunning) {
     backendProc = await autoStartBackend();
     if (!backendProc) {
-      console.error(
-        chalk.red(
-          `\n  Cannot reach trickle backend at ${chalk.bold(backendUrl)}`,
+      // Fall back to local/offline mode instead of exiting
+      localMode = true;
+      console.log(
+        chalk.yellow(
+          `\n  Backend not available — using local mode (offline)`,
         ),
       );
-      console.error(
+      console.log(
         chalk.gray(
-          "  Start the backend: cd packages/backend && npm start\n",
+          "  Observations will be saved to .trickle/observations.jsonl",
         ),
       );
-      process.exit(1);
     }
   }
 
@@ -258,7 +260,11 @@ export async function runCommand(
   if (instrumentedCommand !== resolvedCommand) {
     console.log(chalk.gray(`  Injected:  ${instrumentedCommand}`));
   }
-  console.log(chalk.gray(`  Backend:   ${backendUrl}`));
+  if (localMode) {
+    console.log(chalk.gray(`  Mode:      local (offline)`));
+  } else {
+    console.log(chalk.gray(`  Backend:   ${backendUrl}`));
+  }
   if (config) {
     console.log(chalk.gray(`  Config:    .tricklerc.json`));
   }
@@ -275,11 +281,16 @@ export async function runCommand(
   console.log("");
 
   // Shared env for all runs
-  const runEnv = {
+  const runEnv: Record<string, string> = {
     ...extraEnv,
     TRICKLE_BACKEND_URL: backendUrl,
     TRICKLE_DEBUG: process.env.TRICKLE_DEBUG || "",
   };
+
+  // In local mode, set TRICKLE_LOCAL=1 so the client writes to JSONL
+  if (localMode) {
+    runEnv.TRICKLE_LOCAL = "1";
+  }
 
   // Execute the single-run flow
   const exitCode = await executeSingleRun(
@@ -287,11 +298,12 @@ export async function runCommand(
     runEnv,
     opts,
     singleFile,
+    localMode,
   );
 
   // If --watch, enter watch loop instead of exiting
   if (opts.watch) {
-    await enterWatchLoop(command, instrumentedCommand, runEnv, opts, singleFile, backendProc);
+    await enterWatchLoop(command, instrumentedCommand, runEnv, opts, singleFile, backendProc, localMode);
     // enterWatchLoop never returns (handles its own exit)
   }
 
@@ -312,44 +324,99 @@ async function executeSingleRun(
   env: Record<string, string>,
   opts: RunOptions,
   singleFile?: string | null,
+  localMode?: boolean,
 ): Promise<number> {
-  // Snapshot functions before run (to compute delta)
-  let functionsBefore: FunctionRow[] = [];
-  let errorsBefore: ErrorRow[] = [];
-  try {
-    const fb = await listFunctions();
-    functionsBefore = fb.functions;
-    const eb = await listErrors();
-    errorsBefore = eb.errors;
-  } catch {
-    // Backend might not have data yet
+  if (!localMode) {
+    // Snapshot functions before run (to compute delta)
+    let functionsBefore: FunctionRow[] = [];
+    let errorsBefore: ErrorRow[] = [];
+    try {
+      const fb = await listFunctions();
+      functionsBefore = fb.functions;
+      const eb = await listErrors();
+      errorsBefore = eb.errors;
+    } catch {
+      // Backend might not have data yet
+    }
+
+    // Run the instrumented command
+    const exitCode = await runProcess(instrumentedCommand, env);
+
+    // Wait for transport to flush
+    console.log(chalk.gray("\n  Waiting for type data to flush..."));
+    await sleep(3000);
+
+    // Show summary with inline type signatures
+    await showSummary(functionsBefore, errorsBefore);
+
+    // Auto-generate stubs if --stubs was specified
+    if (opts.stubs) {
+      await autoGenerateStubs(opts.stubs);
+    }
+
+    // Auto-annotate if --annotate was specified
+    if (opts.annotate) {
+      await autoAnnotateFiles(opts.annotate);
+    }
+
+    // Auto-generate sidecar type file when invoked with a single file
+    // (unless --stubs was explicitly specified, which overrides this)
+    if (singleFile && !opts.stubs) {
+      await autoGenerateSidecar(singleFile);
+    }
+
+    return exitCode;
   }
+
+  // ── Local/offline mode ──
 
   // Run the instrumented command
   const exitCode = await runProcess(instrumentedCommand, env);
 
-  // Wait for transport to flush
-  console.log(chalk.gray("\n  Waiting for type data to flush..."));
-  await sleep(3000);
+  // Brief pause for any async file writes to complete
+  await sleep(500);
 
-  // Show summary with inline type signatures
-  await showSummary(functionsBefore, errorsBefore);
+  // Generate types from local JSONL
+  const jsonlPath = path.join(
+    env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), ".trickle"),
+    "observations.jsonl",
+  );
 
-  // Auto-generate stubs if --stubs was specified
-  if (opts.stubs) {
-    await autoGenerateStubs(opts.stubs);
+  const { generateLocalStubs, generateFromJsonl } = await import("../local-codegen");
+
+  if (!fs.existsSync(jsonlPath)) {
+    console.log(chalk.gray("\n  No observations captured."));
+    return exitCode;
   }
 
-  // Auto-annotate if --annotate was specified
-  if (opts.annotate) {
-    await autoAnnotateFiles(opts.annotate);
+  // Show local summary
+  const stubs = generateFromJsonl(jsonlPath);
+  const allModules = Object.keys(stubs);
+  let totalFunctions = 0;
+  for (const mod of allModules) {
+    const lines = stubs[mod].ts.split("\n");
+    totalFunctions += lines.filter((l) => l.startsWith("export declare function")).length;
   }
 
-  // Auto-generate sidecar type file when invoked with a single file
-  // (unless --stubs was explicitly specified, which overrides this)
-  if (singleFile && !opts.stubs) {
-    await autoGenerateSidecar(singleFile);
+  console.log("");
+  console.log(chalk.bold("  Summary (local mode)"));
+  console.log(chalk.gray("  " + "─".repeat(50)));
+  console.log(`  Functions observed: ${chalk.bold(String(totalFunctions))}`);
+  console.log(`  Data saved to: ${chalk.gray(jsonlPath)}`);
+
+  // Auto-generate sidecar type file
+  if (singleFile) {
+    const { written } = generateLocalStubs(singleFile, jsonlPath);
+    if (written.length > 0) {
+      for (const w of written) {
+        const relPath = path.relative(process.cwd(), w);
+        console.log(chalk.green(`  Types written to ${chalk.bold(relPath)}`));
+      }
+    }
   }
+
+  console.log(chalk.gray("  " + "─".repeat(50)));
+  console.log("");
 
   return exitCode;
 }
@@ -421,6 +488,7 @@ async function enterWatchLoop(
   opts: RunOptions,
   singleFile: string | null,
   backendProc: ChildProcess | null,
+  localMode?: boolean,
 ): Promise<void> {
   const { dir: watchDir, file: watchFile } = findWatchTargets(originalCommand);
 
@@ -447,7 +515,7 @@ async function enterWatchLoop(
       console.log(chalk.gray("  " + "─".repeat(50)));
 
       try {
-        await executeSingleRun(instrumentedCommand, env, opts, singleFile);
+        await executeSingleRun(instrumentedCommand, env, opts, singleFile, localMode);
       } catch {
         console.log(chalk.red("  Run failed. Waiting for next change..."));
       }

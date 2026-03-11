@@ -59,6 +59,7 @@ trickle dev
 - [Universal Function Observation](#universal-function-observation)
 - [Source Code Annotation](#source-code-annotation)
 - [Sidecar Type Stubs](#sidecar-type-stubs)
+- [Local/Offline Mode](#localoffline-mode)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -2972,6 +2973,77 @@ trickle stubs src/ --dry-run
 ```bash
 npm run build --workspace=packages/backend && npm run build --workspace=packages/cli
 node test-stubs-e2e.js
+```
+
+---
+
+## Local/Offline Mode
+
+Trickle works without a backend. When the backend is not reachable, `trickle run` automatically falls back to **local mode** — observations are saved to `.trickle/observations.jsonl` and type stubs are generated directly from that file.
+
+This means trickle works in:
+- **Docker containers** — no sidecar process needed
+- **CI/CD pipelines** — observe types during tests, generate stubs as build artifacts
+- **Serverless functions** — capture types locally, sync later
+- **Air-gapped / offline environments** — no network dependency
+
+### Usage
+
+```bash
+# Just run your code — if no backend is available, local mode kicks in automatically
+trickle run app.js
+
+# Or force local mode explicitly
+TRICKLE_LOCAL=1 trickle run app.js
+
+# Works with Python too
+trickle run script.py
+```
+
+Output:
+```
+  trickle run
+  ──────────────────────────────────────────────────
+  File:      app.js
+  Resolved:  node app.js
+  Mode:      local (offline)
+  ──────────────────────────────────────────────────
+
+  Config: localhost 3000
+  Done!
+
+  Summary (local mode)
+  ──────────────────────────────────────────────────
+  Functions observed: 3
+  Data saved to: .trickle/observations.jsonl
+  Types written to test-local-mode-app.d.ts
+  ──────────────────────────────────────────────────
+```
+
+### How it works
+
+1. Client detects `TRICKLE_LOCAL=1` (set automatically when backend is unreachable)
+2. Instead of HTTP transport, observations are appended to `.trickle/observations.jsonl`
+3. After your code exits, the CLI reads the JSONL file and generates `.d.ts` / `.pyi` type stubs
+4. Your IDE picks up the sidecar type files immediately
+
+### Environment variables
+
+| Variable | Description |
+|---|---|
+| `TRICKLE_LOCAL=1` | Force local file-based mode (set automatically when backend is down) |
+| `TRICKLE_LOCAL_DIR=path` | Custom directory for observations (default: `.trickle/`) |
+
+### JSONL format
+
+Each line in `observations.jsonl` is a JSON object:
+```json
+{"functionName":"parseConfig","module":"app","language":"js","typeHash":"abc123","argsType":{"kind":"tuple","elements":[...]},"returnType":{"kind":"object","properties":{...}}}
+```
+
+**E2E test:**
+```bash
+npm run build && node test-local-mode-e2e.js
 ```
 
 ---

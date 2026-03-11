@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as pathMod from 'path';
 import { IngestPayload, GlobalOpts } from './types';
 
 const MAX_RETRIES = 3;
@@ -10,6 +12,8 @@ let batchIntervalMs = DEFAULT_BATCH_INTERVAL_MS;
 let maxBatchSize = DEFAULT_MAX_BATCH_SIZE;
 let enabled = true;
 let debug = false;
+let localMode = process.env.TRICKLE_LOCAL === '1';
+let localFilePath = '';
 
 let queue: IngestPayload[] = [];
 let flushTimer: ReturnType<typeof setInterval> | null = null;
@@ -25,6 +29,18 @@ export function configure(opts: GlobalOpts): void {
   enabled = opts.enabled !== false;
   debug = opts.debug === true;
 
+  // Check for local/file-based mode
+  if (process.env.TRICKLE_LOCAL === '1') {
+    localMode = true;
+    const dir = process.env.TRICKLE_LOCAL_DIR || pathMod.join(process.cwd(), '.trickle');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+    localFilePath = pathMod.join(dir, 'observations.jsonl');
+    if (debug) {
+      console.log(`[trickle] Local mode: writing to ${localFilePath}`);
+    }
+    return; // no timer needed for file mode
+  }
+
   // Restart the flush timer with new interval
   stopTimer();
   startTimer();
@@ -35,6 +51,16 @@ export function configure(opts: GlobalOpts): void {
  */
 export function enqueue(payload: IngestPayload): void {
   if (!enabled) return;
+
+  // Local file mode: append directly to JSONL file
+  if (localMode && localFilePath) {
+    try {
+      fs.appendFileSync(localFilePath, JSON.stringify(payload) + '\n');
+    } catch {
+      // Never crash user's app
+    }
+    return;
+  }
 
   queue.push(payload);
 

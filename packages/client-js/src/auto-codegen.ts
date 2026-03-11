@@ -310,6 +310,172 @@ function generateDts(functions: FunctionData[]): string {
   return sections.join('\n').trimEnd() + '\n';
 }
 
+// ── JSDoc type formatting ──
+
+function typeToJSDoc(node: TypeNode): string {
+  switch (node.kind) {
+    case 'primitive': return node.name || '*';
+    case 'unknown': return '*';
+    case 'array': {
+      const inner = typeToJSDoc(node.element!);
+      return `${inner}[]`;
+    }
+    case 'tuple':
+      return `[${(node.elements || []).map(typeToJSDoc).join(', ')}]`;
+    case 'union':
+      return (node.members || []).map(typeToJSDoc).join(' | ');
+    case 'map': return `Map<${typeToJSDoc(node.key!)}, ${typeToJSDoc(node.value!)}>`;
+    case 'set': return `Set<${typeToJSDoc(node.element!)}>`;
+    case 'promise': return `Promise<${typeToJSDoc(node.resolved!)}>`;
+    case 'function': {
+      const params = (node.params || []).map((p, i) => `arg${i}: ${typeToJSDoc(p)}`);
+      return `function(${params.join(', ')}): ${typeToJSDoc(node.returnType!)}`;
+    }
+    case 'object': {
+      const props = node.properties || {};
+      const keys = Object.keys(props);
+      if (keys.length === 0) return 'Object';
+      const entries = keys.map(k => {
+        const { isOptional, innerType } = extractOptional(props[k]);
+        return isOptional ? `${k}?: ${typeToJSDoc(innerType)}` : `${k}: ${typeToJSDoc(innerType)}`;
+      });
+      return `{ ${entries.join(', ')} }`;
+    }
+    default: return '*';
+  }
+}
+
+// ── JSDoc injection into source files ──
+
+const funcDeclRe = /^(\s*(?:export\s+)?(?:async\s+)?function\s+)(\w+)\s*(?:<[^>]*>)?\s*\(/;
+const arrowRe = /^(\s*(?:export\s+)?(?:const|let|var)\s+)(\w+)\s*=\s*(?:async\s+)?\(/;
+const methodRe = /^(\s+)(\w+)\s*\(([^)]*)\)\s*\{/;
+
+function injectJSDocIntoFile(filePath: string, functions: FunctionData[]): boolean {
+  const source = fs.readFileSync(filePath, 'utf-8');
+  const lines = source.split('\n');
+  const fnMap = new Map(functions.map(f => [f.name, f]));
+  const result: string[] = [];
+  let changed = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+
+    // Try to match a function declaration
+    let fnName: string | null = null;
+    let m = trimmed.match(funcDeclRe);
+    if (m) fnName = m[2];
+    if (!fnName) {
+      m = trimmed.match(arrowRe);
+      if (m) fnName = m[2];
+    }
+    if (!fnName) {
+      m = trimmed.match(methodRe);
+      if (m) fnName = m[2];
+    }
+
+    if (!fnName || !fnMap.has(fnName)) {
+      result.push(line);
+      continue;
+    }
+
+    // Check if there's already a JSDoc comment above
+    const prevIdx = result.length - 1;
+    if (prevIdx >= 0) {
+      const prev = result[prevIdx].trim();
+      if (prev === '*/' || prev.endsWith('*/')) {
+        let j = prevIdx;
+        while (j >= 0 && !result[j].trim().startsWith('/**')) j--;
+        if (j >= 0) {
+          const block = result.slice(j, prevIdx + 1).join('\n');
+          if (block.includes('@param') || block.includes('@returns') || block.includes('@trickle')) {
+            result.push(line);
+            continue;
+          }
+        }
+      }
+    }
+
+    const fn = fnMap.get(fnName)!;
+    const indent = line.match(/^(\s*)/)?.[1] || '';
+
+    // Build JSDoc
+    const jsdocLines: string[] = [`${indent}/** @trickle — auto-generated from runtime observations`];
+
+    // Params
+    const argElements = fn.argsType.kind === 'tuple' ? (fn.argsType.elements || []) : [];
+    const paramNames = fn.paramNames || [];
+    for (let pi = 0; pi < argElements.length; pi++) {
+      const pName = paramNames[pi] || `arg${pi}`;
+      const pType = typeToJSDoc(argElements[pi]);
+      jsdocLines.push(`${indent} * @param {${pType}} ${pName}`);
+    }
+
+    // Return type
+    const retType = typeToJSDoc(fn.returnType);
+    if (retType !== 'undefined' && retType !== 'void') {
+      jsdocLines.push(`${indent} * @returns {${retType}}`);
+    }
+
+    jsdocLines.push(`${indent} */`);
+
+    if (jsdocLines.length > 2) {
+      result.push(...jsdocLines);
+      changed = true;
+    }
+
+    result.push(line);
+  }
+
+  if (changed) {
+    fs.writeFileSync(filePath, result.join('\n'), 'utf-8');
+  }
+  return changed;
+}
+
+/**
+ * Inject JSDoc comments into JS source files based on observations.
+ * Only runs when TRICKLE_INJECT=1.
+ */
+export function injectTypes(): number {
+  if (process.env.TRICKLE_INJECT !== '1') return 0;
+
+  const trickleDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  const jsonlPath = path.join(trickleDir, 'observations.jsonl');
+  if (!fs.existsSync(jsonlPath)) return 0;
+
+  const functions = readAndMerge(jsonlPath);
+  if (functions.length === 0) return 0;
+
+  const byModule = new Map<string, FunctionData[]>();
+  for (const fn of functions) {
+    const mod = fn.module || '_default';
+    if (!byModule.has(mod)) byModule.set(mod, []);
+    byModule.get(mod)!.push(fn);
+  }
+
+  let injected = 0;
+  for (const [mod, fns] of byModule) {
+    if (mod.includes('.') && !mod.includes('/') && !mod.includes('\\')) continue;
+
+    const sourceFile = findSourceFile(mod);
+    if (!sourceFile) continue;
+
+    const ext = path.extname(sourceFile);
+    // Only inject into JS files (not .ts — those already have types)
+    if (!['.js', '.jsx', '.mjs', '.cjs'].includes(ext)) continue;
+
+    try {
+      if (injectJSDocIntoFile(sourceFile, fns)) {
+        injected += fns.length;
+      }
+    } catch { /* don't crash user's app */ }
+  }
+
+  return injected;
+}
+
 // ── Public API ──
 
 let lastSize = 0;

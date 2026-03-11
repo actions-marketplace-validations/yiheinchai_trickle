@@ -513,3 +513,220 @@ def _iso_now() -> str:
     """Get current time in ISO format."""
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── Inline type annotation for Python source ──
+
+def _type_to_inline_python(node: Dict[str, Any]) -> str:
+    """Convert a TypeNode to a simple inline Python type string (no TypedDict extraction)."""
+    kind = node.get("kind", "unknown")
+    if kind == "primitive":
+        name = node.get("name", "unknown")
+        mapping = {
+            "string": "str", "number": "float", "boolean": "bool",
+            "null": "None", "undefined": "None", "bigint": "int",
+        }
+        return mapping.get(name, "Any")
+    if kind == "unknown":
+        return "Any"
+    if kind == "array":
+        inner = _type_to_inline_python(node.get("element", {}))
+        return f"list[{inner}]"
+    if kind == "tuple":
+        els = [_type_to_inline_python(e) for e in node.get("elements", [])]
+        return f"tuple[{', '.join(els)}]"
+    if kind == "union":
+        members = [_type_to_inline_python(m) for m in node.get("members", [])]
+        non_none = [m for m in members if m != "None"]
+        if len(members) == 2 and "None" in members and non_none:
+            return f"{non_none[0]} | None"
+        return " | ".join(members)
+    if kind == "object":
+        return "dict"
+    if kind == "function":
+        return "Callable"
+    if kind == "set":
+        inner = _type_to_inline_python(node.get("element", {}))
+        return f"set[{inner}]"
+    return "Any"
+
+
+_FUNC_DEF_RE = re.compile(
+    r"^(\s*(?:async\s+)?def\s+)(\w+)\s*\(([^)]*)\)(\s*(?:->.*?)?)(\s*:\s*)$"
+)
+
+
+def inject_python_types() -> int:
+    """Inject type annotations into Python source files based on observations.
+
+    Only runs when TRICKLE_INJECT=1 is set.
+    Returns the number of functions annotated.
+    """
+    if os.environ.get("TRICKLE_INJECT") != "1":
+        return 0
+
+    local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+    jsonl_path = os.path.join(local_dir, "observations.jsonl")
+    if not os.path.exists(jsonl_path):
+        return 0
+
+    try:
+        with open(jsonl_path, "r", encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return 0
+
+    lines_raw = [l for l in content.strip().split("\n") if l.strip()]
+
+    # Group by function
+    by_function: Dict[str, List[Dict[str, Any]]] = {}
+    for line in lines_raw:
+        try:
+            payload = json.loads(line)
+            fn_name = payload.get("functionName")
+            if fn_name and payload.get("argsType") and payload.get("returnType"):
+                by_function.setdefault(fn_name, []).append(payload)
+        except (json.JSONDecodeError, KeyError):
+            continue
+
+    if not by_function:
+        return 0
+
+    # Merge types for each function
+    functions: List[Dict[str, Any]] = []
+    for fn_name, payloads in by_function.items():
+        merged_args = payloads[0]["argsType"]
+        merged_return = payloads[0]["returnType"]
+        first_hash = payloads[0].get("typeHash", "")
+        for p in payloads[1:]:
+            if p.get("typeHash", "") != first_hash:
+                merged_args = _merge_type_nodes(merged_args, p["argsType"])
+                merged_return = _merge_type_nodes(merged_return, p["returnType"])
+        param_names = None
+        for p in payloads:
+            if p.get("paramNames"):
+                param_names = p["paramNames"]
+        entry: Dict[str, Any] = {
+            "name": fn_name,
+            "argsType": merged_args,
+            "returnType": merged_return,
+            "module": payloads[-1].get("module", ""),
+        }
+        if param_names:
+            entry["paramNames"] = param_names
+        functions.append(entry)
+
+    # Group by module
+    by_module: Dict[str, List[Dict[str, Any]]] = {}
+    for fn in functions:
+        mod = fn.get("module") or "_default"
+        by_module.setdefault(mod, []).append(fn)
+
+    total_injected = 0
+    for mod, fns in by_module.items():
+        source_file = _find_source_file(mod)
+        if not source_file:
+            continue
+        if not source_file.endswith(".py"):
+            continue
+
+        try:
+            with open(source_file, "r", encoding="utf-8") as f:
+                source = f.read()
+        except OSError:
+            continue
+
+        fn_map = {fn["name"]: fn for fn in fns}
+        source_lines = source.split("\n")
+        result: List[str] = []
+        changed = False
+
+        for line in source_lines:
+            m = _FUNC_DEF_RE.match(line)
+            if not m:
+                result.append(line)
+                continue
+
+            prefix = m.group(1)  # e.g. "def " or "async def "
+            fn_name = m.group(2)
+            params_str = m.group(3)
+            return_anno = m.group(4).strip()
+            colon = m.group(5)
+
+            if fn_name not in fn_map:
+                result.append(line)
+                continue
+
+            fn = fn_map[fn_name]
+            args_type = fn["argsType"]
+            return_type = fn["returnType"]
+            param_names_obs = fn.get("paramNames", [])
+
+            # Check if params already have type annotations
+            params_parts = [p.strip() for p in params_str.split(",") if p.strip()]
+            already_typed = any(":" in p for p in params_parts if p != "self" and p != "cls")
+
+            if already_typed and return_anno:
+                # Already fully typed — skip
+                result.append(line)
+                continue
+
+            # Build new params with types
+            arg_elements = args_type.get("elements", []) if args_type.get("kind") == "tuple" else []
+            new_params: List[str] = []
+            param_idx = 0
+
+            for p in params_parts:
+                p_stripped = p.strip()
+                # Keep self/cls as-is
+                if p_stripped in ("self", "cls"):
+                    new_params.append(p_stripped)
+                    continue
+
+                # Get base name (strip existing annotation and default)
+                base = p_stripped.split(":")[0].split("=")[0].strip()
+                has_default = "=" in p_stripped
+                default_val = p_stripped.split("=", 1)[1].strip() if has_default else None
+
+                # If already has a type annotation, keep it
+                if ":" in p_stripped and not already_typed:
+                    new_params.append(p_stripped)
+                    param_idx += 1
+                    continue
+
+                # Get type from observations
+                if param_idx < len(arg_elements):
+                    py_type = _type_to_inline_python(arg_elements[param_idx])
+                else:
+                    py_type = None
+
+                if py_type:
+                    if default_val is not None:
+                        new_params.append(f"{base}: {py_type} = {default_val}")
+                    else:
+                        new_params.append(f"{base}: {py_type}")
+                    changed = True
+                else:
+                    new_params.append(p_stripped)
+
+                param_idx += 1
+
+            # Build return annotation
+            if not return_anno:
+                ret_type = _type_to_inline_python(return_type)
+                if ret_type and ret_type != "Any":
+                    return_anno = f" -> {ret_type}"
+                    changed = True
+
+            new_line = f"{prefix}{fn_name}({', '.join(new_params)}){return_anno}{colon}"
+            result.append(new_line)
+
+        if changed:
+            try:
+                with open(source_file, "w", encoding="utf-8") as f:
+                    f.write("\n".join(result))
+                total_injected += len(fns)
+            except OSError:
+                pass
+
+    return total_injected

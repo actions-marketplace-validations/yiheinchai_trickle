@@ -21,7 +21,7 @@ process.env.TRICKLE_LOCAL = '1';
 import './observe-register';
 
 // Import the auto codegen
-import { generateTypes } from './auto-codegen';
+import { generateTypes, injectTypes } from './auto-codegen';
 
 const debug = process.env.TRICKLE_DEBUG === '1' || process.env.TRICKLE_DEBUG === 'true';
 let lastFunctionCount = 0;
@@ -49,6 +49,13 @@ function runGeneration(isFinal: boolean): void {
 
     if (isFinal && lastFunctionCount > 0) {
       console.log(`[trickle/auto] ${lastFunctionCount} function type(s) written to .d.ts`);
+      // Inject JSDoc into source files if TRICKLE_INJECT=1
+      try {
+        const injected = injectTypes();
+        if (injected > 0) {
+          console.log(`[trickle/auto] ${injected} function(s) annotated with JSDoc in source`);
+        }
+      } catch { /* don't crash */ }
     }
   } catch {
     // Never crash user's app

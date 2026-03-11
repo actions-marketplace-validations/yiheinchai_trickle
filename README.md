@@ -63,6 +63,7 @@ trickle dev
 - [Continuous Type Generation](#continuous-type-generation)
 - [Zero-Config Auto-Typing (`trickle/auto` / `trickle.auto`)](#zero-config-auto-typing-trickleauto--trickleauto)
   - [Zero-Code Activation (no source changes)](#zero-code-activation-no-source-changes-at-all)
+  - [Auto Type Injection (`TRICKLE_INJECT=1`)](#auto-type-injection-trickle_inject1)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3295,6 +3296,62 @@ npm run build --workspace=packages/client-js && node test-ts-auto-e2e.js
 
 # Python (zero-code — no source changes)
 PYTHONPATH=packages/client-python/src:. python test-zerocode-py-e2e.py
+```
+
+### Auto Type Injection (`TRICKLE_INJECT=1`)
+
+Instead of generating sidecar files (`.d.ts` / `.pyi`), inject types **directly into your source code**. Set `TRICKLE_INJECT=1` and trickle writes JSDoc comments into JavaScript files and type annotations into Python function signatures — automatically, at exit.
+
+**JavaScript** — JSDoc comments are added above each function:
+```bash
+TRICKLE_INJECT=1 node -r trickle/auto app.js
+```
+
+Before:
+```js
+function calculateTax(amount, rate) {
+  return { amount, rate, tax: amount * (rate / 100), total: amount + amount * (rate / 100) };
+}
+```
+
+After:
+```js
+/**
+ * @trickle
+ * @param {number} amount
+ * @param {number} rate
+ * @returns {{ amount: number; rate: number; tax: number; total: number }}
+ */
+function calculateTax(amount, rate) {
+  return { amount, rate, tax: amount * (rate / 100), total: amount + amount * (rate / 100) };
+}
+```
+
+**Python** — type annotations are added to function signatures:
+```bash
+TRICKLE_INJECT=1 PYTHONPATH=packages/client-python/src:. python -c "import trickle.auto" && python app.py
+```
+
+Or from within the script:
+```python
+import trickle.auto  # with TRICKLE_INJECT=1 set
+
+def calculate_tax(amount, rate):
+    ...
+
+# After running, the source file is modified to:
+def calculate_tax(amount: float, rate: float) -> dict:
+    ...
+```
+
+**Key features:**
+- **Idempotent** — running multiple times won't duplicate JSDoc or annotations. The `@trickle` marker prevents re-injection.
+- **Non-breaking** — injected code still runs exactly the same. JSDoc is valid JS, Python type hints are valid syntax.
+- **Works with all activation modes** — `require('trickle/auto')`, `node -r trickle/auto`, `--import trickle/auto-esm`, `import trickle.auto`, `python -m trickle.auto_run`.
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-inject-e2e.js
 ```
 
 ---

@@ -90,6 +90,19 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
             pass
         if hasattr(value, "grad_fn") and value.grad_fn is not None:
             props["grad_fn"] = {"kind": "primitive", "name": type(value.grad_fn).__name__}
+        # Memory footprint
+        try:
+            nbytes = value.nelement() * value.element_size()
+            if nbytes >= 1_073_741_824:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1_073_741_824:.1f} GB"}
+            elif nbytes >= 1_048_576:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1_048_576:.1f} MB"}
+            elif nbytes >= 1024:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1024:.1f} KB"}
+            else:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes} B"}
+        except Exception:
+            pass
         # Scalar tensors: capture actual value
         if value.numel() <= 1:
             try:

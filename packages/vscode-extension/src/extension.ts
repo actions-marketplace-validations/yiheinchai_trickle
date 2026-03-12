@@ -1049,11 +1049,19 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
 /** Format tensor statistics (min/max/mean) for hover display. */
 function formatTensorStats(type: TypeNode): string {
   if (!type.properties) return '';
+  const parts: string[] = [];
   const min = type.properties['min'];
   const max = type.properties['max'];
   const mean = type.properties['mean'];
-  if (!min || !max || !mean) return '';
-  return ` \`min=${min.name} max=${max.name} mean=${mean.name}\``;
+  if (min && max && mean) {
+    parts.push(`min=${min.name} max=${max.name} mean=${mean.name}`);
+  }
+  const mem = type.properties['memory'];
+  if (mem?.kind === 'primitive' && mem.name) {
+    parts.push(`mem=${mem.name}`);
+  }
+  if (parts.length === 0) return '';
+  return ` \`${parts.join(' | ')}\``;
 }
 
 /** Format a sample value for display */

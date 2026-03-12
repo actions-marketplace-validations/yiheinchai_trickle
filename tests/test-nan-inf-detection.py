@@ -149,7 +149,7 @@ print("NAN_INF_OK")
         if nan:
             display += f" NaN!({nan})"
         if inf:
-            display += f" Inf!({inf})"
+            display += f" [{inf} inf]"
         print(f"  {name:15s}: {display}")
 
     shutil.rmtree(test_dir)

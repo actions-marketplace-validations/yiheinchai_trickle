@@ -606,7 +606,7 @@ function extractShapeStr(type: TypeNode): string {
   }
   const inf = type.properties['inf_count'];
   if (inf?.kind === 'primitive' && inf.name && inf.name !== '0') {
-    result += ` Inf!(${inf.name})`;
+    result += ` [${inf.name} inf]`;
   }
   return result;
 }
@@ -773,11 +773,13 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
   // NaN/Inf warnings — show prominently at the end
   const nanProp = properties['nan_count'];
   const infProp = properties['inf_count'];
+  // NaN is always a bug — show prominently
   if (nanProp?.kind === 'primitive' && nanProp.name && nanProp.name !== '0') {
     parts.push(`NaN!(${nanProp.name})`);
   }
+  // Inf can be intentional (attention masking uses -inf) — show less alarming
   if (infProp?.kind === 'primitive' && infProp.name && infProp.name !== '0') {
-    parts.push(`Inf!(${infProp.name})`);
+    parts.push(`[${infProp.name} inf]`);
   }
 
   return parts.join(' ');

@@ -413,17 +413,39 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         const afterVar = lineText.substring(varEnd).trimStart();
 
         if (isPython) {
-          // Python: match `varName = ...` or `varName: type = ...` or tuple unpacking `a, b = ...`
-          // Also match inside for loops: `for x in ...`, with statements: `with ... as x:`
+          // Python patterns where we show inlay hints:
+          // 1. Assignment: `x = ...`, `a, b = ...`
+          // 2. For-loop: `for x in ...`, `for i, (a, b) in ...`
+          // 3. With-as: `with ... as x:`
+          // 4. Function param: `def fn(x, y=None):` or `def fn(self, x):`
+          // 5. Annotated: `x: int = ...` (skip — already has annotation)
           const isAssignment = afterVar.startsWith('=') && !afterVar.startsWith('==');
           const isAnnotated = afterVar.startsWith(':');
           const isForVar = /\bfor\s+$/.test(beforeVar) || /\bfor\s+.*,\s*$/.test(beforeVar);
           const isWithAs = /\bas\s+$/.test(beforeVar);
           const isBareAssignment = /^\s*$/.test(beforeVar) || /,\s*$/.test(beforeVar);
-          if (!((isBareAssignment || isForVar || isWithAs) && (isAssignment || isAnnotated))) continue;
+
+          // Function parameter: `def fn(x` or `def fn(self, x` or `def fn(x,`
+          // Also handles `async def fn(x`
+          const isFuncParam = /\b(?:async\s+)?def\s+\w+\s*\(/.test(beforeVar) &&
+            (afterVar.startsWith(',') || afterVar.startsWith(')') ||
+             afterVar.startsWith('=') || afterVar.startsWith(':'));
+
+          // Tuple unpacking middle elements: `, x, ` or `, x =`
+          const isTupleElement = /,\s*$/.test(beforeVar) &&
+            (afterVar.startsWith(',') || afterVar.startsWith('=') || afterVar.startsWith(')'));
+
+          const isValidPattern =
+            ((isBareAssignment || isForVar || isWithAs) && (isAssignment || isAnnotated)) ||
+            isFuncParam ||
+            (isTupleElement && !isFuncParam);  // Tuple elements in assignments
+
+          if (!isValidPattern) continue;
 
           // Skip if already has a type annotation (x: int = ...)
-          if (isAnnotated) continue;
+          if (isAnnotated && !isFuncParam) continue;
+          // For function params with annotation (x: Tensor), skip
+          if (isFuncParam && afterVar.startsWith(':')) continue;
         } else {
           // JS/TS: check for const/let/var
           if (!/\b(const|let|var)\s+$/.test(beforeVar) && !/\bexport\s+(const|let|var)\s+$/.test(beforeVar)) continue;

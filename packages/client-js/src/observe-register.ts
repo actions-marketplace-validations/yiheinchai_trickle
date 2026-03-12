@@ -34,6 +34,7 @@ import { detectEnvironment } from './env-detect';
 import { wrapFunction } from './wrap';
 import { WrapOptions } from './types';
 import { patchFetch } from './fetch-observer';
+import { instrumentExpress } from './express';
 
 const M = Module as any;
 const originalLoad = M._load;
@@ -195,7 +196,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     `    trackArgs: true,`,
     `    trackReturn: true,`,
     `    sampleRate: 1,`,
-    `    maxDepth: 5,`,
+    `    maxDepth: 3,`,
     `    environment: ${JSON.stringify(env)},`,
     `    enabled: true,`,
     `  };`,
@@ -291,8 +292,61 @@ if (enabled) {
   // (e.g. module.exports = { foo: function() {} }).
   // The double-wrap guard in wrapFunction prevents redundant wrapping.
 
+  // Track whether we've already patched Express to avoid double-patching
+  const expressPatched = new Set<string>();
+
   M._load = function hookedLoad(request: string, parent: any, isMain: boolean): any {
     const exports = originalLoad.apply(this, arguments);
+
+    // ── Express auto-detection: wrap Express factory to capture route types ──
+    // When someone requires 'express', wrap the factory so every app.get/post/etc
+    // automatically captures { body, params, query } → res.json() type data.
+    if (request === 'express' && !expressPatched.has('express')) {
+      expressPatched.add('express');
+      try {
+        const origExpress = exports;
+        const wrappedExpress = function (this: any, ...args: any[]): any {
+          const app = origExpress.apply(this, args);
+          try {
+            instrumentExpress(app, { environment });
+            if (debug) {
+              console.log('[trickle/observe] Auto-instrumented Express app (route types will be captured)');
+            }
+          } catch { /* don't crash */ }
+          return app;
+        };
+        // Copy all static properties (express.json, express.static, express.Router, etc.)
+        for (const key of Object.keys(origExpress)) {
+          (wrappedExpress as any)[key] = origExpress[key];
+        }
+        Object.setPrototypeOf(wrappedExpress, Object.getPrototypeOf(origExpress));
+
+        // Also wrap express.Router() to instrument route handlers on Router instances.
+        // Most real Express apps define routes on Routers, not directly on the app.
+        if (typeof origExpress.Router === 'function') {
+          const origRouter = origExpress.Router;
+          (wrappedExpress as any).Router = function (this: any, ...rArgs: any[]): any {
+            const router = origRouter.apply(this, rArgs);
+            try {
+              instrumentExpress(router, { environment });
+              if (debug) {
+                console.log('[trickle/observe] Auto-instrumented Express Router');
+              }
+            } catch { /* don't crash */ }
+            return router;
+          };
+        }
+
+        // Update require cache
+        try {
+          const resolvedPath = M._resolveFilename(request, parent);
+          if (require.cache[resolvedPath]) {
+            require.cache[resolvedPath]!.exports = wrappedExpress;
+          }
+        } catch { /* non-critical */ }
+        return wrappedExpress;
+      } catch { /* fall through to normal processing */ }
+    }
 
     // Resolve to absolute path for dedup — do this FIRST since bundlers like
     // tsx/esbuild may use path aliases (e.g., @config/env) that don't start
@@ -358,7 +412,7 @@ if (enabled) {
             trackArgs: true,
             trackReturn: true,
             sampleRate: 1,
-            maxDepth: 5,
+            maxDepth: 3,
             environment,
             enabled: true,
             paramNames: paramNames.length > 0 ? paramNames : undefined,
@@ -403,7 +457,7 @@ if (enabled) {
             trackArgs: true,
             trackReturn: true,
             sampleRate: 1,
-            maxDepth: 5,
+            maxDepth: 3,
             environment,
             enabled: true,
             paramNames: paramNames.length > 0 ? paramNames : undefined,
@@ -431,6 +485,8 @@ if (enabled) {
             protoNames = Object.getOwnPropertyNames(val.prototype)
               .filter(m => { try { return m !== 'constructor' && typeof val.prototype[m] === 'function'; } catch { return false; } });
           } catch { continue; }
+          // Use the class's actual name, not the export key (avoids "default.method")
+          const className = val.name || key;
           for (const method of protoNames) {
             if (method.startsWith('_')) continue;
             try {
@@ -438,12 +494,12 @@ if (enabled) {
               if ((origMethod as any)[Symbol.for('__trickle_wrapped')]) continue;
               const methodParamNames = extractParamNames(origMethod);
               const methodOpts: WrapOptions = {
-                functionName: `${key}.${method}`,
+                functionName: `${className}.${method}`,
                 module: moduleName,
                 trackArgs: true,
                 trackReturn: true,
                 sampleRate: 1,
-                maxDepth: 5,
+                maxDepth: 3,
                 environment,
                 enabled: true,
                 paramNames: methodParamNames.length > 0 ? methodParamNames : undefined,
@@ -474,7 +530,7 @@ if (enabled) {
         trackArgs: true,
         trackReturn: true,
         sampleRate: 1,
-        maxDepth: 5,
+        maxDepth: 3,
         environment,
         enabled: true,
         paramNames: fnParamNames.length > 0 ? fnParamNames : undefined,

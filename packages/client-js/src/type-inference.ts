@@ -187,11 +187,21 @@ function inferArray(arr: unknown[], depth: number, seen: WeakSet<object>): TypeN
   return { kind: 'array', element: unifyTypes(elementTypes) };
 }
 
+const MAX_PROPERTIES = 20;
+
 function inferPlainObject(obj: object, depth: number, seen: WeakSet<object>): TypeNode {
   const properties: Record<string, TypeNode> = {};
   const keys = Object.keys(obj);
 
-  for (const key of keys) {
+  // Skip internal/private properties (common in Node.js built-in objects like
+  // http.Server, streams, etc.) — they make generated types unusably verbose.
+  const publicKeys = keys.filter(k => !k.startsWith('_'));
+  // If filtering removed everything, use all keys (it's a plain data object with _ keys)
+  const effectiveKeys = publicKeys.length > 0 ? publicKeys : keys;
+  // Cap the number of properties to keep types manageable
+  const cappedKeys = effectiveKeys.slice(0, MAX_PROPERTIES);
+
+  for (const key of cappedKeys) {
     try {
       properties[key] = infer((obj as Record<string, unknown>)[key], depth - 1, seen);
     } catch {

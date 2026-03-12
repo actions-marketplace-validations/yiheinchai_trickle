@@ -3165,10 +3165,10 @@ utils.calculateDiscount(99.99, 15);
 
 ```bash
 node app.js
-# [trickle/auto] 3 function type(s) written to .d.ts
+# [trickle/auto] 3 function type(s) written to .trickle/types/
 ```
 
-A `.d.ts` file appears next to each source file with types for every function that was called.
+Type files appear in `.trickle/types/` — one per module. On first run, trickle auto-patches your `tsconfig.json` to include `.trickle/types`, so **types are immediately visible in VSCode** (hover, autocomplete, go-to-definition on the generated types).
 
 ### Python
 
@@ -3304,7 +3304,7 @@ This works with Express 4 and 5, Router-based route definitions, and middleware 
 node --import trickle/auto-esm app.ts
 ```
 
-No `tsx`, no `ts-node`, no compilation step needed. TypeScript generics (`function paginate<T>(...)`), multiline signatures, `export interface`/`export type` (correctly skipped), and all TS syntax are handled. Generated types go to `.trickle.d.ts` (not `.d.ts`) to avoid conflicts with TypeScript's own type resolution.
+No `tsx`, no `ts-node`, no compilation step needed. TypeScript generics (`function paginate<T>(...)`), multiline signatures, `export interface`/`export type` (correctly skipped), and all TS syntax are handled. Generated types go to `.trickle/types/` and `tsconfig.json` is auto-patched to include them.
 
 **Conditional activation** — use `trickle/auto-env` to activate only when `TRICKLE_AUTO=1`:
 ```bash

@@ -426,6 +426,7 @@ program
   .option("-f, --file <file>", "Filter by file path or module name")
   .option("-m, --module <module>", "Filter by module name")
   .option("--json", "Output raw JSON")
+  .option("--tensors", "Show only tensor/ndarray variables")
   .action(async (opts) => {
     await varsCommand(opts);
   });

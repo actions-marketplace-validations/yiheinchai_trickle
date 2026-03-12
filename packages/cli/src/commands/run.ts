@@ -452,6 +452,17 @@ async function executeSingleRun(
     }
   }
 
+  // Show variable/tensor summary if variables.jsonl exists
+  const varsJsonlPath = path.join(localDir, "variables.jsonl");
+  if (fs.existsSync(varsJsonlPath)) {
+    try {
+      const { showVarsSummary } = await import("./vars");
+      showVarsSummary(varsJsonlPath);
+    } catch {
+      // vars module not available, skip
+    }
+  }
+
   console.log(chalk.gray("  " + "─".repeat(50)));
   console.log("");
 

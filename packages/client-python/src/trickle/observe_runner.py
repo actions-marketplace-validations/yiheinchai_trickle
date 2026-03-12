@@ -116,6 +116,14 @@ def main() -> None:
         except BaseException as exc:
             _user_code_error = exc
 
+    # Print summary after run (success or failure)
+    if _trace_vars:
+        try:
+            from trickle._run_summary import print_run_summary
+            print_run_summary()
+        except Exception:
+            pass
+
     if _user_code_error is not None:
         # Print tensor shape context for the error before re-raising
         if _trace_vars:

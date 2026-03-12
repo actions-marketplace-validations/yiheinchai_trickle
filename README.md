@@ -68,6 +68,7 @@ trickle dev
   - [Type Summary (`TRICKLE_SUMMARY=1`)](#type-summary-trickle_summary1)
   - [Class Method Observation](#class-method-observation)
   - [IPython & Jupyter Notebook Support](#ipython--jupyter-notebook-support)
+  - [Async Function Types](#async-function-types)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3563,6 +3564,66 @@ In [2]: from my_lib import calculate
 **E2E test:**
 ```bash
 node test-jupyter-e2e.js
+```
+
+### Async Function Types
+
+Async functions (Promise-returning in JS, `async def` in Python) are detected automatically and generate correct return types. Previously, async functions would show the resolved value directly (e.g., `fetchUser(): UserData`) — now they correctly show `Promise<UserData>` / `Awaitable[UserData]`.
+
+**JavaScript:**
+```js
+// lib.js
+async function fetchUser(id) {
+  return { id, name: 'Alice', active: true };
+}
+function formatName(first, last) {
+  return { display: `${first} ${last}` };
+}
+module.exports = { fetchUser, formatName };
+```
+
+Generated `lib.d.ts`:
+```ts
+export declare function fetchUser(id: string): Promise<FetchUserOutput>;
+export declare function formatName(first: string, last: string): FormatNameOutput;
+```
+
+**Python:**
+```python
+# lib.py
+async def fetch_user(user_id):
+    return {"id": user_id, "name": "Alice"}
+def format_name(first, last):
+    return {"display": f"{first} {last}"}
+```
+
+Generated `lib.pyi`:
+```python
+async def fetch_user(user_id: str) -> Awaitable[FetchUserOutput]: ...
+def format_name(first: str, last: str) -> FormatNameOutput: ...
+```
+
+**Class methods too:**
+```ts
+// JS .d.ts
+export declare class ApiClient {
+  getProfile(userId: string): Promise<{ displayName: string; role: string; }>;
+  getVersion(): { version: string; build: number; };
+}
+```
+
+```python
+# Python .pyi
+class ApiClient:
+    async def get_profile(self, user_id: str) -> Awaitable[Dict[str, Any]]: ...
+    def get_version(self) -> Dict[str, Any]: ...
+```
+
+Detection works via duck-typing (JS: checks if return value has `.then()`) and `inspect.iscoroutinefunction()` (Python). Works with all activation modes.
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-async-e2e.js
 ```
 
 ---

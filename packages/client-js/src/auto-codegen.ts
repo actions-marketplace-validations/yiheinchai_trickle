@@ -30,6 +30,7 @@ interface Observation {
   typeHash: string;
   argsType: TypeNode;
   returnType: TypeNode;
+  isAsync?: boolean;
   paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;
@@ -40,6 +41,7 @@ interface FunctionData {
   argsType: TypeNode;
   returnType: TypeNode;
   module: string;
+  isAsync?: boolean;
   paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;
@@ -158,9 +160,12 @@ function readAndMerge(jsonlPath: string): FunctionData[] {
     );
     // Use sample data from the first observation that has it
     const sampleObs = observations.find(obs => obs.sampleInput != null || obs.sampleOutput != null);
+    // isAsync if any observation marked it as async
+    const isAsync = observations.some(obs => obs.isAsync === true);
     results.push({
       name, argsType: args, returnType: ret,
       module: observations[observations.length - 1].module,
+      isAsync: isAsync || undefined,
       paramNames,
       sampleInput: sampleObs?.sampleInput,
       sampleOutput: sampleObs?.sampleOutput,
@@ -313,7 +318,8 @@ function generateClassDts(className: string, methods: FunctionData[]): string[] 
     }
 
     // Return type
-    const retType = typeToTS(fn.returnType, ext, base, undefined, 1);
+    let retType = typeToTS(fn.returnType, ext, base, undefined, 1);
+    if (fn.isAsync) retType = `Promise<${retType}>`;
 
     // Build params string
     const params = argEntries.map(e => {
@@ -417,16 +423,17 @@ function generateDts(functions: FunctionData[]): string {
 
     // Function declaration
     const ident = base.charAt(0).toLowerCase() + base.slice(1);
+    const retDecl = fn.isAsync ? `Promise<${outName}>` : outName;
     let decl: string;
     if (singleObj) {
-      decl = `export declare function ${ident}(input: ${base}Input): ${outName};`;
+      decl = `export declare function ${ident}(input: ${base}Input): ${retDecl};`;
     } else {
       const params = argEntries.map(e => {
         if (e.typeNode.kind === 'object' && Object.keys(e.typeNode.properties || {}).length > 0)
           return `${e.paramName}: ${base}${toPascalCase(e.paramName)}`;
         return `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 0)}`;
       });
-      decl = `export declare function ${ident}(${params.join(', ')}): ${outName};`;
+      decl = `export declare function ${ident}(${params.join(', ')}): ${retDecl};`;
     }
 
     if (extLines.length > 0) sections.push(...extLines);
@@ -830,7 +837,9 @@ function buildSignature(fn: FunctionData): string {
   }
 
   const ret = typeToCompact(fn.returnType);
-  return `${fn.name}(${params}) → ${ret}`;
+  const retDisplay = fn.isAsync ? `Promise<${ret}>` : ret;
+  const prefix = fn.isAsync ? 'async ' : '';
+  return `${prefix}${fn.name}(${params}) → ${retDisplay}`;
 }
 
 interface TypeSnapshot {

@@ -18,6 +18,7 @@ export interface IngestPayload {
   typeHash: string;
   argsType: TypeNode;
   returnType: TypeNode;
+  isAsync?: boolean;
   paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;

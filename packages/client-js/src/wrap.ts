@@ -67,7 +67,7 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
       return result.then(
         (resolved: unknown) => {
           try {
-            capturePayload(functionKey, opts, args, trackers, resolved);
+            capturePayload(functionKey, opts, args, trackers, resolved, true);
           } catch {
             // Never let our instrumentation interfere
           }
@@ -114,6 +114,7 @@ function capturePayload(
   originalArgs: unknown[],
   trackers: Array<{ proxy: unknown; getAccessedPaths: () => Map<string, TypeNode> }>,
   returnValue: unknown,
+  isAsync: boolean = false,
 ): void {
   // Build args type as a tuple
   const argsType = buildArgsType(originalArgs, trackers, opts.maxDepth);
@@ -139,6 +140,10 @@ function capturePayload(
     sampleInput: sanitizeSample(originalArgs),
     sampleOutput: sanitizeSample(returnValue),
   };
+
+  if (isAsync) {
+    payload.isAsync = true;
+  }
 
   if (opts.paramNames && opts.paramNames.length > 0) {
     payload.paramNames = opts.paramNames;

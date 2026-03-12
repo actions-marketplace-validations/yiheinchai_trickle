@@ -92,10 +92,10 @@ def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kw
         result = fn(*tracked_args, **tracked_kwargs)
     except Exception as exc:
         error_exc = exc
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc)
+        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=False)
         raise
     else:
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None)
+        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False)
     return result
 
 
@@ -108,10 +108,10 @@ async def _invoke_async(fn: Callable, func_name: str, func_module: str, args: tu
         result = await fn(*tracked_args, **tracked_kwargs)
     except Exception as exc:
         error_exc = exc
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc)
+        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=True)
         raise
     else:
-        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None)
+        _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=True)
     return result
 
 
@@ -183,6 +183,7 @@ def _emit(
     result: Any,
     all_paths_fns: list,
     error_exc: Optional[Exception],
+    is_async: bool = False,
 ) -> None:
     """Build and enqueue an ingest payload.  Never raises."""
     try:
@@ -238,6 +239,9 @@ def _emit(
             "sampleInput": sample_args,
             "sampleOutput": _sanitize_sample(result),
         }
+
+        if is_async:
+            payload["isAsync"] = True
 
         if param_names:
             payload["paramNames"] = param_names

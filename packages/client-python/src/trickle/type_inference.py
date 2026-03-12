@@ -89,7 +89,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
                 props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
             except Exception:
                 pass
-        # NaN/Inf detection for floating-point tensors
+        # Stats and NaN/Inf detection for floating-point tensors
         if value.is_floating_point() and value.numel() > 0:
             try:
                 import torch
@@ -99,6 +99,13 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
                     props["nan_count"] = {"kind": "primitive", "name": str(nan_count)}
                 if inf_count > 0:
                     props["inf_count"] = {"kind": "primitive", "name": str(inf_count)}
+                # Min/max/mean for non-scalar tensors (only on finite values)
+                if value.numel() > 1:
+                    finite = value[torch.isfinite(value)] if (nan_count + inf_count) > 0 else value
+                    if finite.numel() > 0:
+                        props["min"] = {"kind": "primitive", "name": f"{finite.min().item():.4g}"}
+                        props["max"] = {"kind": "primitive", "name": f"{finite.max().item():.4g}"}
+                        props["mean"] = {"kind": "primitive", "name": f"{finite.mean().item():.4g}"}
             except Exception:
                 pass
         return {"kind": "object", "properties": props, "class_name": "Tensor"}
@@ -115,7 +122,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
                 props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
             except Exception:
                 pass
-        # NaN/Inf detection for floating-point arrays
+        # Stats and NaN/Inf detection for floating-point arrays
         if value.dtype.kind == 'f' and value.size > 0:
             try:
                 import numpy as np
@@ -125,6 +132,12 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
                     props["nan_count"] = {"kind": "primitive", "name": str(nan_count)}
                 if inf_count > 0:
                     props["inf_count"] = {"kind": "primitive", "name": str(inf_count)}
+                if value.size > 1:
+                    finite = value[np.isfinite(value)] if (nan_count + inf_count) > 0 else value
+                    if finite.size > 0:
+                        props["min"] = {"kind": "primitive", "name": f"{finite.min():.4g}"}
+                        props["max"] = {"kind": "primitive", "name": f"{finite.max():.4g}"}
+                        props["mean"] = {"kind": "primitive", "name": f"{finite.mean():.4g}"}
             except Exception:
                 pass
         return {"kind": "object", "properties": props, "class_name": "ndarray"}

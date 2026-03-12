@@ -392,21 +392,20 @@ class TrickleHoverProvider implements vscode.HoverProvider {
           const flowLines: string[] = [];
           for (const fo of flowObs) {
             const shape = extractShapeStr(fo.type);
+            const stats = formatTensorStats(fo.type);
             const marker = fo.line === obs.line ? ' **←**' : '';
-            flowLines.push(`  L${fo.line}: \`${shape}\`${marker}`);
+            flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${marker}`);
           }
           parts.push(flowLines.join('\n\n'));
         } else {
           parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
-          if (showSamples && obs.sample !== undefined) {
-            parts.push(`\n*Value:* \`${obs.sample}\``);
-          }
+          const stats = formatTensorStats(obs.type);
+          if (stats) parts.push(stats);
         }
       } else if (className === 'Tensor' || className === 'ndarray') {
         parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
-        if (showSamples && obs.sample !== undefined) {
-          parts.push(`\n*Value:* \`${obs.sample}\``);
-        }
+        const stats = formatTensorStats(obs.type);
+        if (stats) parts.push(stats);
       } else {
         parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
         if (showSamples && obs.sample !== undefined) {
@@ -783,6 +782,16 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
   }
 
   return parts.join(' ');
+}
+
+/** Format tensor statistics (min/max/mean) for hover display. */
+function formatTensorStats(type: TypeNode): string {
+  if (!type.properties) return '';
+  const min = type.properties['min'];
+  const max = type.properties['max'];
+  const mean = type.properties['mean'];
+  if (!min || !max || !mean) return '';
+  return ` \`min=${min.name} max=${max.name} mean=${mean.name}\``;
 }
 
 /** Format a sample value for display */

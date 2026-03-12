@@ -35,6 +35,7 @@ import { wrapFunction } from './wrap';
 import { WrapOptions } from './types';
 import { patchFetch } from './fetch-observer';
 import { instrumentExpress, trickleMiddleware } from './express';
+import { initVarTracer, traceVar } from './trace-var';
 
 const M = Module as any;
 const originalLoad = M._load;
@@ -147,6 +148,92 @@ function findClosingBrace(source: string, openBrace: number): number {
  * which is critical for entry files where functions are defined and used
  * in the same top-level scope.
  */
+/**
+ * Find variable declarations in source and return insertions for tracing.
+ * Handles: const x = ...; let x = ...; var x = ...;
+ * Skips: destructuring, for-loop vars, require() calls, imports.
+ */
+function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: string; lineNo: number }> {
+  const varInsertions: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
+
+  // Match: const/let/var <identifier> = <something>
+  // We look for lines containing a simple variable declaration with an assignment
+  const varRegex = /^([ \t]*)(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=[^=]/gm;
+  let vmatch;
+
+  while ((vmatch = varRegex.exec(source)) !== null) {
+    const varName = vmatch[3];
+
+    // Skip common noise
+    if (varName === '__trickle_mod' || varName === '__trickle_wrap' || varName === '__trickle_tv') continue;
+    if (varName.startsWith('__trickle')) continue;
+    if (varName === '_a' || varName === '_b' || varName === '_c') continue; // TS compiled vars
+
+    // Check if this is a require() call — skip those (they're imports, not interesting values)
+    const restOfLine = source.slice(vmatch.index + vmatch[0].length - 1, vmatch.index + vmatch[0].length + 200);
+    if (/^\s*require\s*\(/.test(restOfLine)) continue;
+
+    // Calculate line number (count newlines before this position)
+    let lineNo = 1;
+    for (let i = 0; i < vmatch.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    // Find the end of this statement — look for the semicolon at depth 0
+    // or the end of the line for semicolon-free code
+    const startPos = vmatch.index + vmatch[0].length - 1; // position of the '='
+    let pos = startPos;
+    let depth = 0;
+    let foundEnd = -1;
+
+    while (pos < source.length) {
+      const ch = source[pos];
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth < 0) break; // we've gone past our scope
+      } else if (ch === ';' && depth === 0) {
+        foundEnd = pos;
+        break;
+      } else if (ch === '\n' && depth === 0) {
+        // For semicolon-free code, the newline is the end
+        // But only if the next non-whitespace isn't a continuation (., +, etc.)
+        const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
+        if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          foundEnd = pos;
+          break;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        // Skip strings
+        const quote = ch;
+        pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') { pos++; }
+          else if (source[pos] === quote) break;
+          pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
+        // Skip line comment
+        while (pos < source.length && source[pos] !== '\n') pos++;
+        continue;
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
+        // Skip block comment
+        pos += 2;
+        while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
+        pos++;
+      }
+      pos++;
+    }
+
+    if (foundEnd === -1) continue; // couldn't find statement end
+
+    varInsertions.push({ lineEnd: foundEnd + 1, varName, lineNo });
+  }
+
+  return varInsertions;
+}
+
 function transformCjsSource(source: string, filename: string, moduleName: string, env: string): string {
   const funcRegex = /^[ \t]*(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
   const insertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
@@ -181,13 +268,17 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     insertions.push({ position: closeBrace + 1, name, paramNames });
   }
 
-  if (insertions.length === 0) return source;
+  // Also find variable declarations for tracing
+  const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0';
+  const varInsertions = varTraceEnabled ? findVarDeclarations(source) : [];
+
+  if (insertions.length === 0 && varInsertions.length === 0) return source;
 
   // Resolve the path to the wrap helper (compiled JS)
   const wrapHelperPath = path.join(__dirname, 'wrap.js');
 
   // Prepend: load the wrapper and create the wrap helper
-  const prefix = [
+  const prefixLines = [
     `var __trickle_mod = require(${JSON.stringify(wrapHelperPath)});`,
     `var __trickle_wrap = function(fn, name, paramNames) {`,
     `  var opts = {`,
@@ -203,16 +294,45 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     `  if (paramNames && paramNames.length) opts.paramNames = paramNames;`,
     `  return __trickle_mod.wrapFunction(fn, opts);`,
     `};`,
-    '',
-  ].join('\n');
+  ];
 
-  // Insert wrapper calls immediately after each function body (reverse order to preserve positions)
-  let result = source;
-  for (let i = insertions.length - 1; i >= 0; i--) {
-    const { position, name, paramNames } = insertions[i];
+  // Add variable tracing helper if we have var insertions
+  if (varInsertions.length > 0) {
+    const traceVarPath = path.join(__dirname, 'trace-var.js');
+    prefixLines.push(
+      `var __trickle_tv_mod = require(${JSON.stringify(traceVarPath)});`,
+      `var __trickle_tv = function(v, n, l) { try { __trickle_tv_mod.traceVar(v, n, l, ${JSON.stringify(moduleName)}, ${JSON.stringify(filename)}); } catch(e){} };`,
+    );
+  }
+
+  prefixLines.push('');
+  const prefix = prefixLines.join('\n');
+
+  // Merge all insertions (function wraps + variable traces) and sort by position descending
+  type Insertion = { position: number; code: string };
+  const allInsertions: Insertion[] = [];
+
+  for (const { position, name, paramNames } of insertions) {
     const paramNamesArg = paramNames.length > 0 ? JSON.stringify(paramNames) : 'null';
-    const wrapperCall = `\ntry{${name}=__trickle_wrap(${name},'${name}',${paramNamesArg})}catch(__e){}\n`;
-    result = result.slice(0, position) + wrapperCall + result.slice(position);
+    allInsertions.push({
+      position,
+      code: `\ntry{${name}=__trickle_wrap(${name},'${name}',${paramNamesArg})}catch(__e){}\n`,
+    });
+  }
+
+  for (const { lineEnd, varName, lineNo } of varInsertions) {
+    allInsertions.push({
+      position: lineEnd,
+      code: `\ntry{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+    });
+  }
+
+  // Sort by position descending (insert from end to preserve earlier positions)
+  allInsertions.sort((a, b) => b.position - a.position);
+
+  let result = source;
+  for (const { position, code } of allInsertions) {
+    result = result.slice(0, position) + code + result.slice(position);
   }
 
   return prefix + result;
@@ -253,8 +373,13 @@ if (enabled) {
     console.log(`[trickle/observe] Auto-observation enabled (backend: ${backendUrl})`);
   }
 
-  // ── Hook 0: Patch global.fetch to capture HTTP response types ──
+  // ── Hook 0a: Patch global.fetch to capture HTTP response types ──
   patchFetch(environment, debug);
+
+  // ── Hook 0b: Initialize variable tracer ──
+  if (process.env.TRICKLE_TRACE_VARS !== '0') {
+    initVarTracer({ debug });
+  }
 
   // ── Hook 1: Module._compile — transform source to wrap function declarations ──
   // This catches ALL functions including entry file and non-exported helpers.

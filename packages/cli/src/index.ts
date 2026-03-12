@@ -35,6 +35,7 @@ import { unpackCommand } from "./commands/unpack";
 import { runCommand } from "./commands/run";
 import { annotateCommand } from "./commands/annotate";
 import { stubsCommand } from "./commands/stubs";
+import { varsCommand } from "./commands/vars";
 
 const program = new Command();
 
@@ -416,6 +417,17 @@ program
   .option("--dry-run", "Preview which files would be created without writing them")
   .action(async (dir: string, opts) => {
     await stubsCommand(dir, opts);
+  });
+
+// trickle vars
+program
+  .command("vars")
+  .description("Show captured variable types and sample values from runtime observations")
+  .option("-f, --file <file>", "Filter by file path or module name")
+  .option("-m, --module <module>", "Filter by module name")
+  .option("--json", "Output raw JSON")
+  .action(async (opts) => {
+    await varsCommand(opts);
   });
 
 // trickle annotate <file>

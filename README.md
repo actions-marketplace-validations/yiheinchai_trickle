@@ -57,6 +57,10 @@ trickle dev
 - [Type-Annotated API Tracing](#type-annotated-api-tracing)
 - [Portable Type Bundles](#portable-type-bundles)
 - [Universal Function Observation](#universal-function-observation)
+- [Variable Tracing](#variable-tracing)
+  - [With Vitest / Vite](#with-vitest--vite)
+  - [With Node.js (CJS)](#with-nodejs-cjs)
+  - [Viewing Captured Variables](#viewing-captured-variables)
 - [Source Code Annotation](#source-code-annotation)
 - [Sidecar Type Stubs](#sidecar-type-stubs)
 - [Local/Offline Mode](#localoffline-mode) (with type accumulation across runs)
@@ -2870,6 +2874,83 @@ trickle errors                     # See which calls threw + with what args
 node test-observe-e2e.js      # JavaScript
 node test-observe-py-e2e.js   # Python
 ```
+
+---
+
+## Variable Tracing
+
+Capture the runtime type and sample value of **every variable** in your code — not just function arguments and return values. After running your code, hover over any variable in your IDE to see what type it actually had and what value it held.
+
+This eliminates the need for `console.log` debugging or stepping through code with a debugger. Just run your code normally and inspect the results.
+
+### With Vitest / Vite
+
+Add the trickle Vite plugin to your `vitest.config.ts` (or `vite.config.ts`) with `traceVars: true`:
+
+```typescript
+// vitest.config.ts
+import { defineConfig } from "vitest/config";
+import { tricklePlugin } from "trickle-observe/vite-plugin";
+
+export default defineConfig({
+  plugins: [tricklePlugin({ traceVars: true })],
+  test: {
+    // your test config...
+  },
+});
+```
+
+Then run your tests normally:
+
+```bash
+npx vitest run src/my-test.test.ts
+```
+
+Variable types and sample values are captured to `.trickle/variables.jsonl`.
+
+### With Node.js (CJS)
+
+For regular Node.js scripts and test runners that use CommonJS:
+
+```bash
+# Variable tracing is enabled by default with observe mode
+node -r trickle-observe/observe my-script.js
+
+# Or with trickle run
+trickle run node my-script.js
+```
+
+### Viewing Captured Variables
+
+Use the `trickle vars` CLI command to see captured variables:
+
+```bash
+trickle vars
+
+# Filter by file
+trickle vars --file src/services/payment.ts
+
+# Filter by variable name
+trickle vars --name result
+```
+
+Output shows variables grouped by file with their types and sample values:
+
+```
+📦 src/services/payment.ts
+  Line  Variable       Type                    Sample
+  ───── ────────────── ─────────────────────── ──────────────────
+  12    config         { apiKey: string, ... }  { apiKey: "sk-..." }
+  15    response       { status: number, ... }  { status: 200, ... }
+  23    amount         number                   4999
+```
+
+### What Gets Captured
+
+- `const`, `let`, and `var` declarations with initializers
+- Skips destructuring patterns, `require()` calls, and function/arrow definitions
+- Deduplicates by file + line + variable name + type hash (same variable with same type is only recorded once)
+- Sample values are truncated for safety (strings to 100 chars, arrays to 3 elements, objects to 10 keys)
 
 ---
 

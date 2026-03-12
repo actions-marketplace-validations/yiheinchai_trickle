@@ -2,8 +2,9 @@
  * Vite plugin for trickle observation.
  *
  * Integrates into Vite's (and Vitest's) transform pipeline to wrap
- * user functions with trickle observation — the same thing observe-register.ts
- * does for Node's Module._compile, but for Vite/Vitest.
+ * user functions with trickle observation AND trace variable assignments —
+ * the same thing observe-register.ts does for Node's Module._compile,
+ * but for Vite/Vitest.
  *
  * Usage in vitest.config.ts:
  *
@@ -28,6 +29,8 @@ export interface TricklePluginOptions {
   backendUrl?: string;
   /** Enable debug logging */
   debug?: boolean;
+  /** Disable variable tracing (default: enabled) */
+  traceVars?: boolean;
 }
 
 export function tricklePlugin(options: TricklePluginOptions = {}) {
@@ -44,6 +47,7 @@ export function tricklePlugin(options: TricklePluginOptions = {}) {
     ?? 'http://localhost:4888';
   const debug = options.debug
     ?? (process.env.TRICKLE_DEBUG === '1' || process.env.TRICKLE_DEBUG === 'true');
+  const traceVars = options.traceVars ?? (process.env.TRICKLE_TRACE_VARS !== '0');
 
   function shouldTransform(id: string): boolean {
     // Only JS/TS files
@@ -77,7 +81,7 @@ export function tricklePlugin(options: TricklePluginOptions = {}) {
       if (!shouldTransform(id)) return null;
 
       const moduleName = path.basename(id).replace(/\.[jt]sx?$/, '');
-      const transformed = transformEsmSource(code, id, moduleName, backendUrl, debug);
+      const transformed = transformEsmSource(code, id, moduleName, backendUrl, debug, traceVars);
       if (transformed === code) return null;
 
       if (debug) {
@@ -133,11 +137,91 @@ function findClosingBrace(source: string, openBrace: number): number {
 }
 
 /**
- * Transform ESM source code to wrap function declarations with trickle observation.
+ * Find variable declarations in source and return insertions for tracing.
+ * Handles: const x = ...; let x = ...; var x = ...;
+ * Skips: destructuring, for-loop vars, require() calls, imports, type annotations.
+ */
+function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: string; lineNo: number }> {
+  const varInsertions: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
+
+  // Match: const/let/var <identifier> = <something>
+  const varRegex = /^([ \t]*)(export\s+)?(const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::\s*[^=]+?)?\s*=[^=]/gm;
+  let vmatch;
+
+  while ((vmatch = varRegex.exec(source)) !== null) {
+    const varName = vmatch[4];
+
+    // Skip trickle internals
+    if (varName.startsWith('__trickle')) continue;
+    // Skip TS compiled vars
+    if (varName === '_a' || varName === '_b' || varName === '_c') continue;
+
+    // Check if this is a require() call or import — skip those
+    const restOfLine = source.slice(vmatch.index + vmatch[0].length - 1, vmatch.index + vmatch[0].length + 200);
+    if (/^\s*require\s*\(/.test(restOfLine)) continue;
+    // Skip function/class assignments (those are handled by function wrapping)
+    if (/^\s*(?:async\s+)?(?:function\s|\([^)]*\)\s*(?::\s*[^=]+?)?\s*=>|\w+\s*=>)/.test(restOfLine)) continue;
+
+    // Calculate line number
+    let lineNo = 1;
+    for (let i = 0; i < vmatch.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    // Find the end of this statement
+    const startPos = vmatch.index + vmatch[0].length - 1;
+    let pos = startPos;
+    let depth = 0;
+    let foundEnd = -1;
+
+    while (pos < source.length) {
+      const ch = source[pos];
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth < 0) break;
+      } else if (ch === ';' && depth === 0) {
+        foundEnd = pos;
+        break;
+      } else if (ch === '\n' && depth === 0) {
+        const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
+        if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          foundEnd = pos;
+          break;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        const quote = ch;
+        pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') { pos++; }
+          else if (source[pos] === quote) break;
+          pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
+        while (pos < source.length && source[pos] !== '\n') pos++;
+        continue;
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
+        pos += 2;
+        while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
+        pos++;
+      }
+      pos++;
+    }
+
+    if (foundEnd === -1) continue;
+
+    varInsertions.push({ lineEnd: foundEnd + 1, varName, lineNo });
+  }
+
+  return varInsertions;
+}
+
+/**
+ * Transform ESM source code to wrap function declarations and trace variables.
  *
- * Prepends an import of the wrap helper, then inserts wrapper calls after
- * each function declaration body — same approach as observe-register's
- * transformCjsSource but using ESM imports.
+ * Prepends imports of the wrap/trace helpers, then inserts wrapper calls after
+ * each function declaration body and trace calls after variable declarations.
  */
 function transformEsmSource(
   source: string,
@@ -145,10 +229,11 @@ function transformEsmSource(
   moduleName: string,
   backendUrl: string,
   debug: boolean,
+  traceVars: boolean,
 ): string {
   // Match top-level and nested function declarations (including async, export)
   const funcRegex = /^[ \t]*(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
-  const insertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
+  const funcInsertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
   let match;
 
   while ((match = funcRegex.exec(source)) !== null) {
@@ -172,7 +257,7 @@ function transformEsmSource(
     const closeBrace = findClosingBrace(source, openBrace);
     if (closeBrace === -1) continue;
 
-    insertions.push({ position: closeBrace + 1, name, paramNames });
+    funcInsertions.push({ position: closeBrace + 1, name, paramNames });
   }
 
   // Also match arrow functions assigned to const/let/var
@@ -183,7 +268,6 @@ function transformEsmSource(
     const openBrace = source.indexOf('{', match.index + match[0].length - 1);
     if (openBrace === -1) continue;
 
-    // Extract param names from the arrow function
     const arrowStr = match[0];
     const arrowParamMatch = arrowStr.match(/=\s*(?:async\s+)?(?:\(([^)]*)\)|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*(?::\s*[^=]+?)?\s*=>/);
     let paramNames: string[] = [];
@@ -201,15 +285,27 @@ function transformEsmSource(
     const closeBrace = findClosingBrace(source, openBrace);
     if (closeBrace === -1) continue;
 
-    insertions.push({ position: closeBrace + 1, name, paramNames });
+    funcInsertions.push({ position: closeBrace + 1, name, paramNames });
   }
 
-  if (insertions.length === 0) return source;
+  // Find variable declarations for tracing
+  const varInsertions = traceVars ? findVarDeclarations(source) : [];
 
-  // Prepend ESM import of the wrap helper + configure transport
-  const prefix = [
-    `import { wrapFunction as __trickle_wrapFn } from 'trickle-observe';`,
-    `import { configure as __trickle_configure } from 'trickle-observe';`,
+  if (funcInsertions.length === 0 && varInsertions.length === 0) return source;
+
+  // Build prefix — ALL imports first (ESM requires imports before any statements)
+  const importLines: string[] = [
+    `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
+  ];
+  if (varInsertions.length > 0) {
+    importLines.push(
+      `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
+      `import { join as __trickle_join } from 'node:path';`,
+    );
+  }
+
+  const prefixLines = [
+    ...importLines,
     `__trickle_configure({ backendUrl: ${JSON.stringify(backendUrl)}, batchIntervalMs: 2000, debug: ${debug}, enabled: true, environment: 'node' });`,
     `function __trickle_wrap(fn, name, paramNames) {`,
     `  const opts = {`,
@@ -225,16 +321,93 @@ function transformEsmSource(
     `  if (paramNames && paramNames.length) opts.paramNames = paramNames;`,
     `  return __trickle_wrapFn(fn, opts);`,
     `}`,
-    '',
-  ].join('\n');
+  ];
 
-  // Insert wrapper calls after each function body (reverse order)
-  let result = source;
-  for (let i = insertions.length - 1; i >= 0; i--) {
-    const { position, name, paramNames } = insertions[i];
+  // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
+  // Uses synchronous writes (appendFileSync) to guarantee data persists even if Vitest
+  // kills the worker abruptly without firing exit events.
+  if (varInsertions.length > 0) {
+    prefixLines.push(
+      `if (!globalThis.__trickle_var_tracer) {`,
+      `  const _cache = new Set();`,
+      `  let _varsFile = null;`,
+      `  function _inferType(v, d) {`,
+      `    if (d <= 0) return { kind: 'primitive', name: 'unknown' };`,
+      `    if (v === null) return { kind: 'primitive', name: 'null' };`,
+      `    if (v === undefined) return { kind: 'primitive', name: 'undefined' };`,
+      `    const t = typeof v;`,
+      `    if (t === 'string' || t === 'number' || t === 'boolean' || t === 'bigint' || t === 'symbol') return { kind: 'primitive', name: t };`,
+      `    if (t === 'function') return { kind: 'function' };`,
+      `    if (Array.isArray(v)) { return v.length === 0 ? { kind: 'array', element: { kind: 'primitive', name: 'unknown' } } : { kind: 'array', element: _inferType(v[0], d-1) }; }`,
+      `    if (t === 'object') {`,
+      `      if (v instanceof Date) return { kind: 'object', properties: { __date: { kind: 'primitive', name: 'string' } } };`,
+      `      if (v instanceof RegExp) return { kind: 'object', properties: { __regexp: { kind: 'primitive', name: 'string' } } };`,
+      `      if (v instanceof Error) return { kind: 'object', properties: { __error: { kind: 'primitive', name: 'string' } } };`,
+      `      if (v instanceof Promise) return { kind: 'promise', resolved: { kind: 'primitive', name: 'unknown' } };`,
+      `      const props = {}; const keys = Object.keys(v).slice(0, 20);`,
+      `      for (const k of keys) { try { props[k] = _inferType(v[k], d-1); } catch(e) { props[k] = { kind: 'primitive', name: 'unknown' }; } }`,
+      `      return { kind: 'object', properties: props };`,
+      `    }`,
+      `    return { kind: 'primitive', name: 'unknown' };`,
+      `  }`,
+      `  function _sanitize(v, d) {`,
+      `    if (d <= 0) return '[truncated]'; if (v === null || v === undefined) return v; const t = typeof v;`,
+      `    if (t === 'string') return v.length > 100 ? v.substring(0, 100) + '...' : v;`,
+      `    if (t === 'number' || t === 'boolean') return v; if (t === 'bigint') return String(v);`,
+      `    if (t === 'function') return '[Function: ' + (v.name || 'anonymous') + ']';`,
+      `    if (Array.isArray(v)) return v.slice(0, 3).map(i => _sanitize(i, d-1));`,
+      `    if (t === 'object') { if (v instanceof Date) return v.toISOString(); if (v instanceof RegExp) return String(v); if (v instanceof Error) return { error: v.message }; if (v instanceof Promise) return '[Promise]';`,
+      `      const r = {}; const keys = Object.keys(v).slice(0, 10); for (const k of keys) { try { r[k] = _sanitize(v[k], d-1); } catch(e) { r[k] = '[unreadable]'; } } return r; }`,
+      `    return String(v);`,
+      `  }`,
+      `  globalThis.__trickle_var_tracer = function(v, n, l, mod, file) {`,
+      `    try {`,
+      `      if (!_varsFile) {`,
+      `        const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
+      `        try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e) {}`,
+      `        _varsFile = __trickle_join(dir, 'variables.jsonl');`,
+      `      }`,
+      `      const type = _inferType(v, 3);`,
+      `      const th = JSON.stringify(type).substring(0, 32);`,
+      `      const ck = file + ':' + l + ':' + n + ':' + th;`,
+      `      if (_cache.has(ck)) return;`,
+      `      _cache.add(ck);`,
+      `      __trickle_appendFileSync(_varsFile, JSON.stringify({ kind: 'variable', varName: n, line: l, module: mod, file: file, type: type, typeHash: th, sample: _sanitize(v, 2) }) + '\\n');`,
+      `    } catch(e) {}`,
+      `  };`,
+      `}`,
+      `function __trickle_tv(v, n, l) { try { globalThis.__trickle_var_tracer(v, n, l, ${JSON.stringify(moduleName)}, ${JSON.stringify(filename)}); } catch(e) {} }`,
+    );
+  }
+
+  prefixLines.push('');
+  const prefix = prefixLines.join('\n');
+
+  // Merge all insertions and sort by position descending
+  type Insertion = { position: number; code: string };
+  const allInsertions: Insertion[] = [];
+
+  for (const { position, name, paramNames } of funcInsertions) {
     const paramNamesArg = paramNames.length > 0 ? JSON.stringify(paramNames) : 'null';
-    const wrapperCall = `\ntry{${name}=__trickle_wrap(${name},'${name}',${paramNamesArg})}catch(__e){}\n`;
-    result = result.slice(0, position) + wrapperCall + result.slice(position);
+    allInsertions.push({
+      position,
+      code: `\ntry{${name}=__trickle_wrap(${name},'${name}',${paramNamesArg})}catch(__e){}\n`,
+    });
+  }
+
+  for (const { lineEnd, varName, lineNo } of varInsertions) {
+    allInsertions.push({
+      position: lineEnd,
+      code: `\n;try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+    });
+  }
+
+  // Sort by position descending (insert from end to preserve earlier positions)
+  allInsertions.sort((a, b) => b.position - a.position);
+
+  let result = source;
+  for (const { position, code } of allInsertions) {
+    result = result.slice(0, position) + code + result.slice(position);
   }
 
   return prefix + result;

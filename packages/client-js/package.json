@@ -12,7 +12,8 @@
     "./auto": "./auto.js",
     "./auto-env": "./auto-env.js",
     "./auto-esm": "./auto-esm.mjs",
-    "./vite-plugin": "./dist/vite-plugin.js"
+    "./vite-plugin": "./dist/vite-plugin.js",
+    "./trace-var": "./dist/trace-var.js"
   },
   "scripts": {
     "build": "tsc",

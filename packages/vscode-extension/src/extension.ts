@@ -234,20 +234,73 @@ function getLineMapForDocument(document: vscode.TextDocument): Map<number, Varia
     const cellId1 = `${notebookPath}#cell_${cellIndex}`;
     const cellId2 = path.join(path.dirname(notebookPath), `__notebook__cell_${cellIndex}.py`);
 
-    return notebookCellIndex.get(cellId1) || notebookCellIndex.get(cellId2);
+    const result = notebookCellIndex.get(cellId1) || notebookCellIndex.get(cellId2);
+    if (result) return result;
+
+    // Fallback: Python's _cell_counter only counts executed code cells,
+    // but VSCode's cell index counts all cells (including markdown).
+    // Also, the __notebook__ path uses Python's CWD which may differ from
+    // the notebook directory. Try matching by scanning all keys.
+    const cellSuffix1 = `#cell_${cellIndex}`;
+    const cellSuffix2 = `__notebook__cell_${cellIndex}.py`;
+
+    for (const [key, lineMap] of notebookCellIndex) {
+      if (key.endsWith(cellSuffix1) || key.endsWith(cellSuffix2)) {
+        return lineMap;
+      }
+    }
+
+    // If cell index doesn't match (markdown cells shift the count),
+    // try matching by document content: find the cell whose observations
+    // best match the variable names visible in this cell's text.
+    const cellText = document.getText();
+    return findBestMatchingCell(cellText);
   }
 
   return undefined;
 }
 
-/** Get the 1-based cell index for a notebook cell document. */
+/** Find the notebook cell index entry that best matches the given cell text. */
+function findBestMatchingCell(cellText: string): Map<number, VariableObservation[]> | undefined {
+  let bestMatch: Map<number, VariableObservation[]> | undefined;
+  let bestScore = 0;
+
+  for (const [, lineMap] of notebookCellIndex) {
+    let score = 0;
+    let total = 0;
+    for (const obsArr of lineMap.values()) {
+      for (const obs of obsArr) {
+        total++;
+        // Check if this variable name appears in the cell text at roughly the right line
+        const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
+        if (varPattern.test(cellText)) {
+          score++;
+        }
+      }
+    }
+    if (total > 0 && score > bestScore) {
+      bestScore = score;
+      bestMatch = lineMap;
+    }
+  }
+
+  // Only return if we have a reasonable match (at least half the variables found)
+  if (bestMatch && bestScore > 0) return bestMatch;
+  return undefined;
+}
+
+/** Get the 1-based code cell index for a notebook cell document.
+ * Only counts code cells (not markdown) to match Python's _cell_counter. */
 function getNotebookCellIndex(document: vscode.TextDocument): number | undefined {
-  // Try to find the cell in open notebooks
   for (const notebook of vscode.workspace.notebookDocuments) {
+    let codeCellIndex = 0;
     for (let i = 0; i < notebook.cellCount; i++) {
       const cell = notebook.cellAt(i);
-      if (cell.document === document) {
-        return i + 1; // 1-based to match Python's _cell_counter
+      if (cell.kind === vscode.NotebookCellKind.Code) {
+        codeCellIndex++;
+        if (cell.document === document) {
+          return codeCellIndex; // 1-based to match Python's _cell_counter
+        }
       }
     }
   }

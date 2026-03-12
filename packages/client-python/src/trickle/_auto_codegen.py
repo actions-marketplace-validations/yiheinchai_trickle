@@ -332,6 +332,66 @@ def _build_example_docstring(fn: Dict[str, Any]) -> Optional[str]:
     return "\n".join(lines)
 
 
+def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str:
+    """Generate a Python class stub with method types."""
+    extracted: List[Tuple[str, Dict[str, Any]]] = []
+    lines: List[str] = [f"class {cls_name}:"]
+
+    for fn in methods:
+        method_name = fn["name"].split(".", 1)[1] if "." in fn["name"] else fn["name"]
+        method_snake = _to_snake_case(method_name)
+        base_name = _to_pascal_case(cls_name) + _to_pascal_case(method_name)
+
+        args_type = fn["argsType"]
+        return_type = fn["returnType"]
+        param_names = fn.get("paramNames", [])
+
+        # Build params (skip 'self' from observed param names)
+        params: List[str] = ["self"]
+        if args_type.get("kind") == "tuple":
+            elements = args_type.get("elements", [])
+            param_idx = 0
+            for i, el in enumerate(elements):
+                pname = param_names[i] if i < len(param_names) else f"arg{i}"
+                if pname == "self":
+                    continue
+                py_type = _type_to_python(el, extracted, base_name, pname)
+                params.append(f"{pname}: {py_type}")
+                param_idx += 1
+
+        # Return type
+        ret_type = _type_to_python(return_type, extracted, base_name, None)
+        if ret_type == "None":
+            ret_str = " -> None"
+        else:
+            ret_str = f" -> {ret_type}"
+
+        lines.append(f"    def {method_snake}({', '.join(params)}){ret_str}: ...")
+
+    if len(lines) == 1:
+        lines.append("    pass")
+
+    # Emit extracted TypedDicts before the class
+    emitted: Set[str] = set()
+    extracted_lines: List[str] = []
+    i = 0
+    while i < len(extracted):
+        ex_name, ex_node = extracted[i]
+        i += 1
+        if ex_name in emitted:
+            continue
+        emitted.add(ex_name)
+        extracted_lines.append(_render_typed_dict(ex_name, ex_node, extracted))
+        extracted_lines.append("")
+        extracted_lines.append("")
+
+    result: List[str] = []
+    if extracted_lines:
+        result.extend(extracted_lines)
+    result.extend(lines)
+    return "\n".join(result)
+
+
 def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     """Generate Python stub for a single function."""
     name = fn["name"]
@@ -530,7 +590,24 @@ def generate_types() -> int:
             "",
             "",
         ]
+        # Separate class methods from standalone functions
+        class_methods: Dict[str, List[Dict[str, Any]]] = {}
+        standalone_fns: List[Dict[str, Any]] = []
         for fn in fns:
+            if "." in fn["name"]:
+                cls_name = fn["name"].split(".")[0]
+                class_methods.setdefault(cls_name, []).append(fn)
+            else:
+                standalone_fns.append(fn)
+
+        # Generate class stubs
+        for cls_name, methods in class_methods.items():
+            sections.append(_generate_py_class_stub(cls_name, methods))
+            sections.append("")
+            sections.append("")
+
+        # Generate standalone function stubs
+        for fn in standalone_fns:
             sections.append(_generate_py_for_function(fn))
             sections.append("")
             sections.append("")

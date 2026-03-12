@@ -110,8 +110,27 @@ def _wrap_module_functions(module: types.ModuleType, fullname: str) -> None:
         except AttributeError:
             continue
 
+        # Handle classes: wrap their public methods
+        if isinstance(val, type):
+            cls = val
+            for method_name in list(vars(cls)):
+                if method_name.startswith("_"):
+                    continue
+                method_val = getattr(cls, method_name, None)
+                if method_val is None:
+                    continue
+                if not (inspect.isfunction(method_val) or inspect.iscoroutinefunction(method_val)):
+                    continue
+                try:
+                    wrapped_method = _wrap(method_val, name=f"{name}.{method_name}", module=module_name)
+                    setattr(cls, method_name, wrapped_method)
+                    count += 1
+                except Exception:
+                    logger.debug("trickle: failed to wrap %s.%s.%s", fullname, name, method_name, exc_info=True)
+            continue
+
         # Only wrap plain functions and coroutine functions
-        if not callable(val) or isinstance(val, type):
+        if not callable(val):
             continue
 
         if not (inspect.isfunction(val) or inspect.iscoroutinefunction(val)):

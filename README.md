@@ -66,6 +66,7 @@ trickle dev
   - [Auto Type Injection (`TRICKLE_INJECT=1`)](#auto-type-injection-trickle_inject1)
   - [Type Coverage Report (`TRICKLE_COVERAGE=1`)](#type-coverage-report-trickle_coverage1)
   - [Type Summary (`TRICKLE_SUMMARY=1`)](#type-summary-trickle_summary1)
+  - [Class Method Observation](#class-method-observation)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3436,6 +3437,76 @@ Type signatures use a compact inline format showing parameter names, types, and 
 **E2E test:**
 ```bash
 npm run build --workspace=packages/client-js && node test-summary-e2e.js
+```
+
+### Class Method Observation
+
+Classes are fully supported — trickle automatically detects ES6 classes (JS) and Python classes, wraps their prototype/instance methods, and generates proper `class` declarations in type files instead of standalone functions.
+
+**JavaScript:**
+```js
+// lib.js
+class Calculator {
+  add(a, b) { return { result: a + b }; }
+  multiply(a, b) { return { result: a * b }; }
+}
+module.exports = { Calculator };
+```
+
+```js
+// app.js
+require('trickle/auto');
+const { Calculator } = require('./lib');
+const calc = new Calculator();
+calc.add(10, 5);
+calc.multiply(3, 4);
+```
+
+Generated `lib.d.ts`:
+```ts
+export declare class Calculator {
+  add(a: number, b: number): { result: number; };
+  multiply(a: number, b: number): { result: number; };
+}
+```
+
+**Python:**
+```python
+# lib.py
+class Calculator:
+    def add(self, a, b):
+        return {"result": a + b}
+    def multiply(self, a, b):
+        return {"result": a * b}
+```
+
+```python
+# app.py
+import trickle.auto
+from lib import Calculator
+calc = Calculator()
+calc.add(10, 5)
+calc.multiply(3, 4)
+```
+
+Generated `lib.pyi`:
+```python
+class Calculator:
+    def add(self, a: float, b: float) -> Dict[str, Any]: ...
+    def multiply(self, a: float, b: float) -> Dict[str, Any]: ...
+```
+
+**How it works:**
+- Classes are detected by checking for prototype methods (JS) or `isinstance(val, type)` (Python)
+- Class constructors are NOT wrapped — only their methods are observed, so `new` / instantiation works normally
+- Methods are recorded with `ClassName.methodName` convention (e.g. `Calculator.add`)
+- The `self` parameter (Python) is automatically skipped in generated type stubs
+- Private methods (starting with `_`) are skipped
+- Works with all activation modes: `require('trickle/auto')`, `node -r trickle/auto`, `--import trickle/auto-esm`, `import trickle.auto`
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-class-e2e.js
 ```
 
 ---

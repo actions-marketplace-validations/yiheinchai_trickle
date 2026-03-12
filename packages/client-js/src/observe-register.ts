@@ -223,7 +223,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
 function extractParamNames(fn: Function): string[] {
   try {
     const src = fn.toString();
-    const parenMatch = src.match(/^(?:async\s+)?(?:function\s*\w*)?\s*\(([^)]*)\)/);
+    const parenMatch = src.match(/^(?:async\s+)?(?:function\s*\w*|\w+)\s*\(([^)]*)\)/);
     if (!parenMatch) return [];
     const paramStr = parenMatch[1].trim();
     if (!paramStr) return [];
@@ -335,6 +335,10 @@ if (enabled) {
       for (const key of Object.keys(exports)) {
         if (typeof exports[key] === 'function' && key !== 'default') {
           const fn = exports[key];
+          // Skip classes — their prototype methods are wrapped separately below
+          const isClass = fn.prototype && fn.prototype.constructor === fn &&
+            Object.getOwnPropertyNames(fn.prototype).some(m => m !== 'constructor' && typeof fn.prototype[m] === 'function');
+          if (isClass) continue;
           const paramNames = extractParamNames(fn);
           const wrapOpts: WrapOptions = {
             functionName: key,
@@ -369,6 +373,36 @@ if (enabled) {
         };
         exports.default = wrapFunction(fn, wrapOpts);
         count++;
+      }
+
+      // Wrap class prototype methods for exported classes
+      for (const key of Object.keys(exports)) {
+        const val = exports[key];
+        if (typeof val === 'function' && val.prototype && val.prototype.constructor === val) {
+          const protoNames = Object.getOwnPropertyNames(val.prototype)
+            .filter(m => m !== 'constructor' && typeof val.prototype[m] === 'function');
+          for (const method of protoNames) {
+            if (method.startsWith('_')) continue;
+            try {
+              const origMethod = val.prototype[method];
+              if ((origMethod as any)[Symbol.for('__trickle_wrapped')]) continue;
+              const methodParamNames = extractParamNames(origMethod);
+              const methodOpts: WrapOptions = {
+                functionName: `${key}.${method}`,
+                module: moduleName,
+                trackArgs: true,
+                trackReturn: true,
+                sampleRate: 1,
+                maxDepth: 5,
+                environment,
+                enabled: true,
+                paramNames: methodParamNames.length > 0 ? methodParamNames : undefined,
+              };
+              val.prototype[method] = wrapFunction(origMethod, methodOpts);
+              count++;
+            } catch { /* skip methods that can't be wrapped */ }
+          }
+        }
       }
 
       if (debug && count > 0) {

@@ -818,14 +818,16 @@ function typeNodeToString(node, depth = 3, dimLabels) {
             if (node.class_name === 'Tensor' || node.class_name === 'ndarray') {
                 return formatTensorType(node.class_name, node.properties, dimLabels);
             }
-            // nn.Module types: show key params, omit 'params'/'training' from inline props
+            // nn.Module types: show key params, omit 'params'/'training'/'memory' from inline props
             if (node.class_name && node.properties['params']) {
                 const paramCount = node.properties['params']?.name;
                 const trainingMode = node.properties['training']?.name;
+                const memorySize = node.properties['memory']?.name;
                 const modeBadge = trainingMode === 'False' ? ' [eval]' : '';
-                const displayEntries = entries.filter(([k]) => k !== 'params' && k !== 'training' && k !== 'param_groups');
+                const memBadge = memorySize ? ` ${memorySize}` : '';
+                const displayEntries = entries.filter(([k]) => k !== 'params' && k !== 'training' && k !== 'param_groups' && k !== 'memory');
                 if (displayEntries.length === 0) {
-                    return paramCount ? `${node.class_name}(${paramCount} params)${modeBadge}` : `${node.class_name}${modeBadge}`;
+                    return paramCount ? `${node.class_name}(${paramCount} params${memBadge})${modeBadge}` : `${node.class_name}${modeBadge}`;
                 }
                 const props = displayEntries.slice(0, 4).map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
                 const suffix = displayEntries.length > 4 ? ', ...' : '';

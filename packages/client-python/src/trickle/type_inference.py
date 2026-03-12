@@ -152,6 +152,19 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
             "shape": {"kind": "primitive", "name": str(list(value.shape))},
             "dtype": {"kind": "primitive", "name": str(value.dtype)},
         }
+        # Memory footprint
+        try:
+            nbytes = value.nbytes
+            if nbytes >= 1_073_741_824:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1_073_741_824:.1f} GB"}
+            elif nbytes >= 1_048_576:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1_048_576:.1f} MB"}
+            elif nbytes >= 1024:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes / 1024:.1f} KB"}
+            else:
+                props["memory"] = {"kind": "primitive", "name": f"{nbytes} B"}
+        except Exception:
+            pass
         if value.size <= 1:
             try:
                 props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
@@ -403,10 +416,23 @@ def _infer_nn_module(value: Any) -> Dict[str, Any]:
     except Exception:
         pass
 
-    # Count parameters
+    # Count parameters and compute model memory
     try:
-        n_params = sum(p.numel() for p in value.parameters())
+        params_list = list(value.parameters())
+        n_params = sum(p.numel() for p in params_list)
         props["params"] = {"kind": "primitive", "name": str(n_params)}
+        # Total model memory (parameters + buffers)
+        param_bytes = sum(p.numel() * p.element_size() for p in params_list)
+        buffer_bytes = sum(b.numel() * b.element_size() for b in value.buffers())
+        total_bytes = param_bytes + buffer_bytes
+        if total_bytes >= 1_073_741_824:
+            props["memory"] = {"kind": "primitive", "name": f"{total_bytes / 1_073_741_824:.1f} GB"}
+        elif total_bytes >= 1_048_576:
+            props["memory"] = {"kind": "primitive", "name": f"{total_bytes / 1_048_576:.1f} MB"}
+        elif total_bytes >= 1024:
+            props["memory"] = {"kind": "primitive", "name": f"{total_bytes / 1024:.1f} KB"}
+        else:
+            props["memory"] = {"kind": "primitive", "name": f"{total_bytes} B"}
     except Exception:
         pass
 

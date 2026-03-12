@@ -31,7 +31,18 @@ function processOrder(orderId) {
 }
 
 const result = processOrder("ORD-123");
-console.log("Order processed:", result.orderId, "total:", result.total);
+
+// Test destructuring - object
+const { orderId, total: orderTotal, customer: orderCustomer } = result;
+
+// Test destructuring - array
+const [first, second, ...remaining] = ["a", "b", "c", "d"];
+
+// Test nested destructuring
+const { name: customerName, email } = result.customer;
+
+console.log("Order processed:", orderId, "total:", orderTotal, "customer:", customerName);
+console.log("Array:", first, second, remaining);
 `);
 
 console.log('Running test app with trickle/observe...');
@@ -78,7 +89,8 @@ for (const obs of observations) {
 
 // Verify we captured the expected variables
 const varNames = observations.map(o => o.varName);
-const expected = ['price', 'quantity', 'total', 'customer', 'items', 'isVip', 'discount', 'finalTotal', 'result'];
+const expected = ['price', 'quantity', 'total', 'customer', 'items', 'isVip', 'discount', 'finalTotal', 'result',
+  'orderId', 'orderTotal', 'orderCustomer', 'first', 'second', 'remaining', 'customerName', 'email'];
 
 let pass = true;
 for (const name of expected) {

@@ -218,6 +218,148 @@ function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: 
 }
 
 /**
+ * Find destructured variable declarations: const { a, b } = ... and const [a, b] = ...
+ * Extracts the individual variable names from the destructuring pattern.
+ */
+function findDestructuredDeclarations(source: string): Array<{ lineEnd: number; varNames: string[]; lineNo: number }> {
+  const results: Array<{ lineEnd: number; varNames: string[]; lineNo: number }> = [];
+
+  // Match: const/let/var { ... } = ... or const/let/var [ ... ] = ...
+  const destructRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+(\{[^}]*\}|\[[^\]]*\])\s*(?::\s*[^=]+?)?\s*=[^=]/gm;
+  let match;
+
+  while ((match = destructRegex.exec(source)) !== null) {
+    const pattern = match[1];
+
+    // Extract variable names from the destructuring pattern
+    const varNames = extractDestructuredNames(pattern);
+    if (varNames.length === 0) continue;
+
+    // Skip if it's a require() call
+    const restOfLine = source.slice(match.index + match[0].length - 1, match.index + match[0].length + 200);
+    if (/^\s*require\s*\(/.test(restOfLine)) continue;
+
+    // Calculate line number
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    // Find the end of this statement (same logic as findVarDeclarations)
+    const startPos = match.index + match[0].length - 1;
+    let pos = startPos;
+    let depth = 0;
+    let foundEnd = -1;
+
+    while (pos < source.length) {
+      const ch = source[pos];
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth < 0) break;
+      } else if (ch === ';' && depth === 0) {
+        foundEnd = pos;
+        break;
+      } else if (ch === '\n' && depth === 0) {
+        const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
+        if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          foundEnd = pos;
+          break;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        const quote = ch;
+        pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') { pos++; }
+          else if (source[pos] === quote) break;
+          pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
+        while (pos < source.length && source[pos] !== '\n') pos++;
+        continue;
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
+        pos += 2;
+        while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
+        pos++;
+      }
+      pos++;
+    }
+
+    if (foundEnd === -1) continue;
+    results.push({ lineEnd: foundEnd + 1, varNames, lineNo });
+  }
+
+  return results;
+}
+
+/**
+ * Extract variable names from a destructuring pattern.
+ * Handles: { a, b, c: d } → ['a', 'b', 'd']  (renamed vars use the local name)
+ * Handles: [a, b, ...rest] → ['a', 'b', 'rest']
+ * Handles: { a: { b, c } } → ['b', 'c']  (nested destructuring)
+ */
+function extractDestructuredNames(pattern: string): string[] {
+  const names: string[] = [];
+  // Remove outer braces/brackets
+  const inner = pattern.slice(1, -1).trim();
+  if (!inner) return names;
+
+  // Split by commas at depth 0
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of inner) {
+    if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') depth--;
+    else if (ch === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  for (let part of parts) {
+    // Remove type annotations: `a: Type` vs `a: b` (rename)
+    // Skip rest elements for now: ...rest → rest
+    if (part.startsWith('...')) {
+      const restName = part.slice(3).trim().split(/[\s:]/)[0];
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(restName)) {
+        names.push(restName);
+      }
+      continue;
+    }
+
+    // Check for rename pattern: key: localName or key: { nested }
+    const colonIdx = part.indexOf(':');
+    if (colonIdx !== -1) {
+      const afterColon = part.slice(colonIdx + 1).trim();
+      // Nested destructuring: key: { a, b } or key: [a, b]
+      if (afterColon.startsWith('{') || afterColon.startsWith('[')) {
+        const nestedNames = extractDestructuredNames(afterColon);
+        names.push(...nestedNames);
+      } else {
+        // Rename: key: localName — extract localName (skip if it has another colon for type annotation)
+        const localName = afterColon.split(/[\s=]/)[0].trim();
+        if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(localName)) {
+          names.push(localName);
+        }
+      }
+    } else {
+      // Simple: just the identifier (possibly with default: `a = defaultVal`)
+      const name = part.split(/[\s=]/)[0].trim();
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
+        names.push(name);
+      }
+    }
+  }
+
+  return names;
+}
+
+/**
  * Transform ESM source code to wrap function declarations and trace variables.
  *
  * Prepends imports of the wrap/trace helpers, then inserts wrapper calls after
@@ -291,7 +433,10 @@ function transformEsmSource(
   // Find variable declarations for tracing
   const varInsertions = traceVars ? findVarDeclarations(source) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0) return source;
+  // Find destructured variable declarations for tracing
+  const destructInsertions = traceVars ? findDestructuredDeclarations(source) : [];
+
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0) return source;
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
   const importLines: string[] = [
@@ -399,6 +544,14 @@ function transformEsmSource(
     allInsertions.push({
       position: lineEnd,
       code: `\n;try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+    });
+  }
+
+  for (const { lineEnd, varNames, lineNo } of destructInsertions) {
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: lineEnd,
+      code: `\n;try{${calls}}catch(__e){}\n`,
     });
   }
 

@@ -234,6 +234,124 @@ function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: 
   return varInsertions;
 }
 
+/**
+ * Find destructured variable declarations: const { a, b } = ... and const [a, b] = ...
+ */
+function findDestructuredDeclarations(source: string): Array<{ lineEnd: number; varNames: string[]; lineNo: number }> {
+  const results: Array<{ lineEnd: number; varNames: string[]; lineNo: number }> = [];
+
+  const destructRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+(\{[^}]*\}|\[[^\]]*\])\s*(?::\s*[^=]+?)?\s*=[^=]/gm;
+  let match;
+
+  while ((match = destructRegex.exec(source)) !== null) {
+    const pattern = match[1];
+    const varNames = extractDestructuredNames(pattern);
+    if (varNames.length === 0) continue;
+
+    const restOfLine = source.slice(match.index + match[0].length - 1, match.index + match[0].length + 200);
+    if (/^\s*require\s*\(/.test(restOfLine)) continue;
+
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    const startPos = match.index + match[0].length - 1;
+    let pos = startPos;
+    let depth = 0;
+    let foundEnd = -1;
+
+    while (pos < source.length) {
+      const ch = source[pos];
+      if (ch === '(' || ch === '[' || ch === '{') {
+        depth++;
+      } else if (ch === ')' || ch === ']' || ch === '}') {
+        depth--;
+        if (depth < 0) break;
+      } else if (ch === ';' && depth === 0) {
+        foundEnd = pos;
+        break;
+      } else if (ch === '\n' && depth === 0) {
+        const nextNonWs = source.slice(pos + 1).match(/^\s*(\S)/);
+        if (nextNonWs && !'.+=-|&?:,'.includes(nextNonWs[1])) {
+          foundEnd = pos;
+          break;
+        }
+      } else if (ch === '"' || ch === "'" || ch === '`') {
+        const quote = ch;
+        pos++;
+        while (pos < source.length) {
+          if (source[pos] === '\\') { pos++; }
+          else if (source[pos] === quote) break;
+          pos++;
+        }
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '/') {
+        while (pos < source.length && source[pos] !== '\n') pos++;
+        continue;
+      } else if (ch === '/' && pos + 1 < source.length && source[pos + 1] === '*') {
+        pos += 2;
+        while (pos < source.length - 1 && !(source[pos] === '*' && source[pos + 1] === '/')) pos++;
+        pos++;
+      }
+      pos++;
+    }
+
+    if (foundEnd === -1) continue;
+    results.push({ lineEnd: foundEnd + 1, varNames, lineNo });
+  }
+
+  return results;
+}
+
+/**
+ * Extract variable names from a destructuring pattern.
+ * { a, b, c: d } → ['a', 'b', 'd'], [a, b, ...rest] → ['a', 'b', 'rest']
+ */
+function extractDestructuredNames(pattern: string): string[] {
+  const names: string[] = [];
+  const inner = pattern.slice(1, -1).trim();
+  if (!inner) return names;
+
+  const parts: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of inner) {
+    if (ch === '{' || ch === '[') depth++;
+    else if (ch === '}' || ch === ']') depth--;
+    else if (ch === ',' && depth === 0) {
+      parts.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) parts.push(current.trim());
+
+  for (const part of parts) {
+    if (part.startsWith('...')) {
+      const restName = part.slice(3).trim().split(/[\s:]/)[0];
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(restName)) names.push(restName);
+      continue;
+    }
+
+    const colonIdx = part.indexOf(':');
+    if (colonIdx !== -1) {
+      const afterColon = part.slice(colonIdx + 1).trim();
+      if (afterColon.startsWith('{') || afterColon.startsWith('[')) {
+        names.push(...extractDestructuredNames(afterColon));
+      } else {
+        const localName = afterColon.split(/[\s=]/)[0].trim();
+        if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(localName)) names.push(localName);
+      }
+    } else {
+      const name = part.split(/[\s=]/)[0].trim();
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) names.push(name);
+    }
+  }
+
+  return names;
+}
+
 function transformCjsSource(source: string, filename: string, moduleName: string, env: string): string {
   const funcRegex = /^[ \t]*(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
   const insertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
@@ -271,8 +389,9 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   // Also find variable declarations for tracing
   const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0';
   const varInsertions = varTraceEnabled ? findVarDeclarations(source) : [];
+  const destructInsertions = varTraceEnabled ? findDestructuredDeclarations(source) : [];
 
-  if (insertions.length === 0 && varInsertions.length === 0) return source;
+  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0) return source;
 
   // Resolve the path to the wrap helper (compiled JS)
   const wrapHelperPath = path.join(__dirname, 'wrap.js');
@@ -297,7 +416,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   ];
 
   // Add variable tracing helper if we have var insertions
-  if (varInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0) {
     const traceVarPath = path.join(__dirname, 'trace-var.js');
     prefixLines.push(
       `var __trickle_tv_mod = require(${JSON.stringify(traceVarPath)});`,
@@ -324,6 +443,14 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     allInsertions.push({
       position: lineEnd,
       code: `\ntry{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+    });
+  }
+
+  for (const { lineEnd, varNames, lineNo } of destructInsertions) {
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: lineEnd,
+      code: `\n;try{${calls}}catch(__e){}\n`,
     });
   }
 

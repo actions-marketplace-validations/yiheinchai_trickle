@@ -346,32 +346,76 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
         args_type = fn["argsType"]
         return_type = fn["returnType"]
         param_names = fn.get("paramNames", [])
+        variants = fn.get("variants")
 
-        # Build params (skip 'self' from observed param names)
-        params: List[str] = ["self"]
-        if args_type.get("kind") == "tuple":
-            elements = args_type.get("elements", [])
-            param_idx = 0
-            for i, el in enumerate(elements):
-                pname = param_names[i] if i < len(param_names) else f"arg{i}"
-                if pname == "self":
-                    continue
-                py_type = _type_to_python(el, extracted, base_name, pname)
-                params.append(f"{pname}: {py_type}")
-                param_idx += 1
+        if variants and len(variants) >= 2:
+            # Generate overloaded method signatures
+            for variant in variants:
+                v_args = variant["argsType"]
+                v_ret = variant["returnType"]
+                v_names = variant.get("paramNames", param_names)
+                v_async = variant.get("isAsync", False)
+                v_def = "async def" if v_async else "def"
+                v_ext: List[Tuple[str, Dict[str, Any]]] = []
+                v_ret_type = _type_to_python(v_ret, v_ext, base_name, None)
+                if v_async:
+                    v_ret_str = f" -> Awaitable[{v_ret_type}]"
+                else:
+                    v_ret_str = f" -> {v_ret_type}"
+                v_params: List[str] = ["self"]
+                if v_args.get("kind") == "tuple":
+                    for i, el in enumerate(v_args.get("elements", [])):
+                        pname = v_names[i] if i < len(v_names) else f"arg{i}"
+                        if pname == "self":
+                            continue
+                        py_type = _type_to_python(el, extracted, base_name, pname)
+                        v_params.append(f"{pname}: {py_type}")
+                lines.append("    @overload")
+                lines.append(f"    {v_def} {method_snake}({', '.join(v_params)}){v_ret_str}: ...")
 
-        # Return type
-        is_async = fn.get("isAsync", False)
-        ret_type = _type_to_python(return_type, extracted, base_name, None)
-        if ret_type == "None":
-            ret_str = " -> None"
-        elif is_async:
-            ret_str = f" -> Awaitable[{ret_type}]"
+            # Implementation signature (merged types)
+            params: List[str] = ["self"]
+            if args_type.get("kind") == "tuple":
+                for i, el in enumerate(args_type.get("elements", [])):
+                    pname = param_names[i] if i < len(param_names) else f"arg{i}"
+                    if pname == "self":
+                        continue
+                    py_type = _type_to_python(el, extracted, base_name, pname)
+                    params.append(f"{pname}: {py_type}")
+            is_async = fn.get("isAsync", False)
+            def_keyword = "async def" if is_async else "def"
+            ret_type = _type_to_python(return_type, extracted, base_name, None)
+            if ret_type == "None":
+                ret_str = " -> None"
+            elif is_async:
+                ret_str = f" -> Awaitable[{ret_type}]"
+            else:
+                ret_str = f" -> {ret_type}"
+            lines.append(f"    {def_keyword} {method_snake}({', '.join(params)}){ret_str}: ...")
         else:
-            ret_str = f" -> {ret_type}"
+            # Build params (skip 'self' from observed param names)
+            params_list: List[str] = ["self"]
+            if args_type.get("kind") == "tuple":
+                elements = args_type.get("elements", [])
+                for i, el in enumerate(elements):
+                    pname = param_names[i] if i < len(param_names) else f"arg{i}"
+                    if pname == "self":
+                        continue
+                    py_type = _type_to_python(el, extracted, base_name, pname)
+                    params_list.append(f"{pname}: {py_type}")
 
-        def_keyword = "async def" if is_async else "def"
-        lines.append(f"    {def_keyword} {method_snake}({', '.join(params)}){ret_str}: ...")
+            # Return type
+            is_async = fn.get("isAsync", False)
+            ret_type = _type_to_python(return_type, extracted, base_name, None)
+            if ret_type == "None":
+                ret_str = " -> None"
+            elif is_async:
+                ret_str = f" -> Awaitable[{ret_type}]"
+            else:
+                ret_str = f" -> {ret_type}"
+
+            def_keyword = "async def" if is_async else "def"
+            lines.append(f"    {def_keyword} {method_snake}({', '.join(params_list)}){ret_str}: ...")
 
     if len(lines) == 1:
         lines.append("    pass")
@@ -450,22 +494,6 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     def_keyword = "async def" if is_async else "def"
     ret_type = f"Awaitable[{base_name}Output]" if is_async else f"{base_name}Output"
     param_names = fn.get("paramNames", [])
-    if args_type.get("kind") == "tuple":
-        elements = args_type.get("elements", [])
-        if len(elements) == 1 and elements[0].get("kind") == "object":
-            pname = param_names[0] if param_names else "input"
-            sig = f"{def_keyword} {func_name}({pname}: {base_name}Input) -> {ret_type}: ..."
-        else:
-            params = []
-            for idx, el in enumerate(elements):
-                pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
-                py_type = _type_to_python(el, extracted, base_name, pname)
-                params.append(f"{pname}: {py_type}")
-            sig = f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ..."
-    elif args_type.get("kind") == "object" and args_type.get("properties"):
-        sig = f"{def_keyword} {func_name}(input: {base_name}Input) -> {ret_type}: ..."
-    else:
-        sig = f"{def_keyword} {func_name}() -> {ret_type}: ..."
 
     result: List[str] = []
     if extracted_lines:
@@ -473,14 +501,66 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     result.extend(sections)
     result.append("")
 
-    # Add docstring with example if sample data is available
-    example_docstring = _build_example_docstring(fn)
-    if example_docstring:
-        result.append(sig.replace(": ...", ":"))
-        result.append(example_docstring)
-        result.append("    ...")
+    # Generate overloads if we have multiple distinct type patterns
+    variants = fn.get("variants")
+    if variants and len(variants) >= 2:
+        for variant in variants:
+            v_args = variant["argsType"]
+            v_ret = variant["returnType"]
+            v_names = variant.get("paramNames", param_names)
+            v_async = variant.get("isAsync", False)
+            v_def = "async def" if v_async else "def"
+            v_ext: List[Tuple[str, Dict[str, Any]]] = []
+            # Use the Output type name for overload return types (already defined above)
+            v_ret_str = f"{base_name}Output"
+            if v_async:
+                v_ret_str = f"Awaitable[{v_ret_str}]"
+            v_params: List[str] = []
+            if v_args.get("kind") == "tuple":
+                for idx, el in enumerate(v_args.get("elements", [])):
+                    pname = v_names[idx] if idx < len(v_names) else f"arg{idx}"
+                    py_type = _type_to_python(el, v_ext, base_name, pname)
+                    v_params.append(f"{pname}: {py_type}")
+            result.append("@overload")
+            result.append(f"{v_def} {func_name}({', '.join(v_params)}) -> {v_ret_str}: ...")
+
+        # Implementation signature (merged types)
+        if args_type.get("kind") == "tuple":
+            elements = args_type.get("elements", [])
+            params = []
+            for idx, el in enumerate(elements):
+                pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
+                py_type = _type_to_python(el, extracted, base_name, pname)
+                params.append(f"{pname}: {py_type}")
+            result.append(f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ...")
+        else:
+            result.append(f"{def_keyword} {func_name}() -> {ret_type}: ...")
     else:
-        result.append(sig)
+        if args_type.get("kind") == "tuple":
+            elements = args_type.get("elements", [])
+            if len(elements) == 1 and elements[0].get("kind") == "object":
+                pname = param_names[0] if param_names else "input"
+                sig = f"{def_keyword} {func_name}({pname}: {base_name}Input) -> {ret_type}: ..."
+            else:
+                params = []
+                for idx, el in enumerate(elements):
+                    pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
+                    py_type = _type_to_python(el, extracted, base_name, pname)
+                    params.append(f"{pname}: {py_type}")
+                sig = f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ..."
+        elif args_type.get("kind") == "object" and args_type.get("properties"):
+            sig = f"{def_keyword} {func_name}(input: {base_name}Input) -> {ret_type}: ..."
+        else:
+            sig = f"{def_keyword} {func_name}() -> {ret_type}: ..."
+
+        # Add docstring with example if sample data is available
+        example_docstring = _build_example_docstring(fn)
+        if example_docstring:
+            result.append(sig.replace(": ...", ":"))
+            result.append(example_docstring)
+            result.append("    ...")
+        else:
+            result.append(sig)
 
     return "\n".join(result)
 
@@ -566,6 +646,23 @@ def generate_types() -> int:
         # isAsync if any observation marked it
         is_async = any(p.get("isAsync") for p in payloads)
 
+        # Collect unique type variants (by typeHash) for overload generation
+        seen_hashes: Set[str] = set()
+        variants: List[Dict[str, Any]] = []
+        for p in payloads:
+            h = p.get("typeHash", "")
+            if h not in seen_hashes:
+                seen_hashes.add(h)
+                v: Dict[str, Any] = {
+                    "argsType": p["argsType"],
+                    "returnType": p["returnType"],
+                }
+                if p.get("paramNames"):
+                    v["paramNames"] = p["paramNames"]
+                if p.get("isAsync"):
+                    v["isAsync"] = True
+                variants.append(v)
+
         entry: Dict[str, Any] = {
             "name": fn_name,
             "argsType": merged_args,
@@ -580,6 +677,9 @@ def generate_types() -> int:
             entry["sampleInput"] = sample_input
         if sample_output is not None:
             entry["sampleOutput"] = sample_output
+        # Only include variants if there are 2-5 distinct patterns
+        if 2 <= len(variants) <= 5:
+            entry["variants"] = variants
         functions.append(entry)
 
     # Group by module
@@ -599,7 +699,7 @@ def generate_types() -> int:
             f"# Generated at {_iso_now()}",
             "# Do not edit — types update automatically as your code runs",
             "",
-            "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union",
+            "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
             "",
             "",
         ]

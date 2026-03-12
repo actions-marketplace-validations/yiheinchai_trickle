@@ -36,6 +36,13 @@ interface Observation {
   sampleOutput?: unknown;
 }
 
+interface TypeVariant {
+  argsType: TypeNode;
+  returnType: TypeNode;
+  paramNames?: string[];
+  isAsync?: boolean;
+}
+
 interface FunctionData {
   name: string;
   argsType: TypeNode;
@@ -45,6 +52,7 @@ interface FunctionData {
   paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;
+  variants?: TypeVariant[];
 }
 
 // ── Type merging (same logic as CLI local-codegen) ──
@@ -162,6 +170,22 @@ function readAndMerge(jsonlPath: string): FunctionData[] {
     const sampleObs = observations.find(obs => obs.sampleInput != null || obs.sampleOutput != null);
     // isAsync if any observation marked it as async
     const isAsync = observations.some(obs => obs.isAsync === true);
+
+    // Collect unique type variants (by typeHash) for overload generation
+    const seenHashes = new Set<string>();
+    const variants: TypeVariant[] = [];
+    for (const obs of observations) {
+      if (!seenHashes.has(obs.typeHash)) {
+        seenHashes.add(obs.typeHash);
+        variants.push({
+          argsType: obs.argsType,
+          returnType: obs.returnType,
+          paramNames: obs.paramNames,
+          isAsync: obs.isAsync || undefined,
+        });
+      }
+    }
+
     results.push({
       name, argsType: args, returnType: ret,
       module: observations[observations.length - 1].module,
@@ -169,6 +193,8 @@ function readAndMerge(jsonlPath: string): FunctionData[] {
       paramNames,
       sampleInput: sampleObs?.sampleInput,
       sampleOutput: sampleObs?.sampleOutput,
+      // Only include variants if there are 2-5 distinct patterns (overload-worthy)
+      variants: variants.length >= 2 && variants.length <= 5 ? variants : undefined,
     });
   }
   return results;
@@ -307,26 +333,46 @@ function generateClassDts(className: string, methods: FunctionData[]): string[] 
     const methodName = fn.name.split('.')[1] || fn.name;
     const base = toPascalCase(className) + toPascalCase(methodName);
 
-    // Build params (skip 'this' if present)
-    let argEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
-    if (fn.argsType.kind === 'tuple') {
-      const names = fn.paramNames || [];
-      argEntries = (fn.argsType.elements || []).map((el, i) => ({
-        paramName: names[i] || `arg${i}`,
-        typeNode: el,
-      })).filter(e => e.paramName !== 'this');
+    // Generate overloads if we have multiple distinct type patterns
+    if (fn.variants && fn.variants.length >= 2) {
+      for (const variant of fn.variants) {
+        const vNames = variant.paramNames || fn.paramNames || [];
+        let vArgEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
+        if (variant.argsType.kind === 'tuple') {
+          vArgEntries = (variant.argsType.elements || []).map((el, i) => ({
+            paramName: vNames[i] || `arg${i}`,
+            typeNode: el,
+          })).filter(e => e.paramName !== 'this' && e.paramName !== 'self');
+        }
+        let vRet = typeToTS(variant.returnType, ext, base, undefined, 1);
+        if (variant.isAsync) vRet = `Promise<${vRet}>`;
+        const vParams = vArgEntries.map(e =>
+          `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 1)}`
+        );
+        classLines.push(`  ${methodName}(${vParams.join(', ')}): ${vRet};`);
+      }
+    } else {
+      // Build params (skip 'this' if present)
+      let argEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
+      if (fn.argsType.kind === 'tuple') {
+        const names = fn.paramNames || [];
+        argEntries = (fn.argsType.elements || []).map((el, i) => ({
+          paramName: names[i] || `arg${i}`,
+          typeNode: el,
+        })).filter(e => e.paramName !== 'this');
+      }
+
+      // Return type
+      let retType = typeToTS(fn.returnType, ext, base, undefined, 1);
+      if (fn.isAsync) retType = `Promise<${retType}>`;
+
+      // Build params string
+      const params = argEntries.map(e => {
+        return `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 1)}`;
+      });
+
+      classLines.push(`  ${methodName}(${params.join(', ')}): ${retType};`);
     }
-
-    // Return type
-    let retType = typeToTS(fn.returnType, ext, base, undefined, 1);
-    if (fn.isAsync) retType = `Promise<${retType}>`;
-
-    // Build params string
-    const params = argEntries.map(e => {
-      return `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 1)}`;
-    });
-
-    classLines.push(`  ${methodName}(${params.join(', ')}): ${retType};`);
   }
 
   classLines.push('}');
@@ -423,18 +469,6 @@ function generateDts(functions: FunctionData[]): string {
 
     // Function declaration
     const ident = base.charAt(0).toLowerCase() + base.slice(1);
-    const retDecl = fn.isAsync ? `Promise<${outName}>` : outName;
-    let decl: string;
-    if (singleObj) {
-      decl = `export declare function ${ident}(input: ${base}Input): ${retDecl};`;
-    } else {
-      const params = argEntries.map(e => {
-        if (e.typeNode.kind === 'object' && Object.keys(e.typeNode.properties || {}).length > 0)
-          return `${e.paramName}: ${base}${toPascalCase(e.paramName)}`;
-        return `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 0)}`;
-      });
-      decl = `export declare function ${ident}(${params.join(', ')}): ${retDecl};`;
-    }
 
     if (extLines.length > 0) sections.push(...extLines);
     sections.push(...lines);
@@ -443,7 +477,40 @@ function generateDts(functions: FunctionData[]): string {
     const exampleLines = buildExampleComment(fn);
     if (exampleLines.length > 0) sections.push(...exampleLines);
 
-    sections.push(decl);
+    // Generate overloads if we have multiple distinct type patterns
+    if (fn.variants && fn.variants.length >= 2) {
+      for (const variant of fn.variants) {
+        const vExt: Extracted[] = [];
+        const vRet = typeToTS(variant.returnType, vExt, base, undefined, 0);
+        const vRetDecl = variant.isAsync ? `Promise<${vRet}>` : vRet;
+        const vNames = variant.paramNames || fn.paramNames || [];
+        let vArgEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
+        if (variant.argsType.kind === 'tuple') {
+          vArgEntries = (variant.argsType.elements || []).map((el, i) => ({
+            paramName: vNames[i] || `arg${i}`,
+            typeNode: el,
+          }));
+        }
+        const vParams = vArgEntries.map(e =>
+          `${e.paramName}: ${typeToTS(e.typeNode, vExt, base, e.paramName, 0)}`
+        );
+        sections.push(`export declare function ${ident}(${vParams.join(', ')}): ${vRetDecl};`);
+      }
+    } else {
+      const retDecl = fn.isAsync ? `Promise<${outName}>` : outName;
+      let decl: string;
+      if (singleObj) {
+        decl = `export declare function ${ident}(input: ${base}Input): ${retDecl};`;
+      } else {
+        const params = argEntries.map(e => {
+          if (e.typeNode.kind === 'object' && Object.keys(e.typeNode.properties || {}).length > 0)
+            return `${e.paramName}: ${base}${toPascalCase(e.paramName)}`;
+          return `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 0)}`;
+        });
+        decl = `export declare function ${ident}(${params.join(', ')}): ${retDecl};`;
+      }
+      sections.push(decl);
+    }
     sections.push('');
   }
 

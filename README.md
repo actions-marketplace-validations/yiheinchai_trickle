@@ -70,6 +70,7 @@ trickle dev
   - [IPython & Jupyter Notebook Support](#ipython--jupyter-notebook-support)
   - [Async Function Types](#async-function-types)
   - [Python int vs float Type Narrowing](#python-int-vs-float-type-narrowing)
+  - [Function Overloads from Multiple Observations](#function-overloads-from-multiple-observations)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3663,6 +3664,48 @@ Works with standalone functions, class methods, and mixed JS+Python observation 
 **E2E test:**
 ```bash
 npm run build --workspace=packages/client-js && node test-intfloat-e2e.js
+```
+
+---
+
+### Function Overloads from Multiple Observations
+
+When a function is called with different argument types across multiple invocations, trickle generates **TypeScript overloads** and **Python `@overload` decorators** instead of flattening everything into union types. This preserves the correlation between input and output types.
+
+```javascript
+// Your code
+format("hello");  // string → { formatted: "HELLO", kind: "string" }
+format(42);       // number → { formatted: "42.00", kind: "number" }
+format(true);     // boolean → { formatted: "yes", kind: "boolean" }
+```
+
+```typescript
+// Generated .d.ts — overloads instead of unions
+export declare function format(value: string): { formatted: string; kind: string; };
+export declare function format(value: number): { formatted: string; kind: string; };
+export declare function format(value: boolean): { formatted: string; kind: string; };
+```
+
+```python
+# Generated .pyi — @overload decorators
+@overload
+def format_value(value: str) -> FormatValueOutput: ...
+@overload
+def format_value(value: int) -> FormatValueOutput: ...
+def format_value(value: Union[str, int]) -> FormatValueOutput: ...
+```
+
+How it works:
+- Each function call with different types produces a separate observation (tracked by `typeHash`)
+- When 2–5 distinct type patterns are observed, overloads are generated instead of unions
+- For TypeScript: multiple `export declare function` signatures
+- For Python: `@overload` decorators from `typing` plus an implementation signature with Union types
+- Works for standalone functions and class methods
+- >5 patterns falls back to union types to avoid noise
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-overload-e2e.js
 ```
 
 ---

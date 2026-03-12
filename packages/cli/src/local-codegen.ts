@@ -35,12 +35,19 @@ interface IngestPayload {
   sampleOutput?: unknown;
 }
 
+interface TypeVariant {
+  argsType: TypeNode;
+  returnType: TypeNode;
+  paramNames?: string[];
+}
+
 interface FunctionTypeData {
   name: string;
   argsType: TypeNode;
   returnType: TypeNode;
   module?: string;
   paramNames?: string[];
+  variants?: TypeVariant[];
 }
 
 // ── Type merging ──
@@ -243,12 +250,27 @@ function readObservations(jsonlPath: string): FunctionTypeData[] {
       undefined,
     );
 
+    // Collect unique type variants (by typeHash) for overload generation
+    const seenHashes = new Set<string>();
+    const variants: TypeVariant[] = [];
+    for (const p of payloads) {
+      if (!seenHashes.has(p.typeHash)) {
+        seenHashes.add(p.typeHash);
+        variants.push({
+          argsType: p.argsType,
+          returnType: p.returnType,
+          paramNames: p.paramNames,
+        });
+      }
+    }
+
     results.push({
       name,
       argsType: mergedArgs,
       returnType: mergedReturn,
       module: payloads[payloads.length - 1].module, // use latest module
       paramNames,
+      variants: variants.length >= 2 && variants.length <= 5 ? variants : undefined,
     });
   }
 
@@ -467,23 +489,44 @@ function generateTsForFunction(fn: FunctionTypeData): string {
 
   // Function declaration
   const funcIdent = baseName.charAt(0).toLowerCase() + baseName.slice(1);
-  let funcDecl: string;
-  if (singleObjectArg) {
-    funcDecl = `export declare function ${funcIdent}(input: ${baseName}Input): ${outputName};`;
-  } else {
-    const params = argEntries.map((entry) => {
-      if (entry.typeNode.kind === "object" && Object.keys(entry.typeNode.properties || {}).length > 0) {
-        return `${entry.paramName}: ${baseName}${toPascalCase(entry.paramName)}`;
-      }
-      return `${entry.paramName}: ${typeNodeToTS(entry.typeNode, extracted, baseName, entry.paramName, 0)}`;
-    });
-    funcDecl = `export declare function ${funcIdent}(${params.join(", ")}): ${outputName};`;
-  }
 
   const result: string[] = [];
   if (extractedLines.length > 0) result.push(...extractedLines);
   result.push(...lines);
-  result.push(funcDecl);
+
+  // Generate overloads if we have multiple distinct type patterns
+  if (fn.variants && fn.variants.length >= 2) {
+    for (const variant of fn.variants) {
+      const vExt: ExtractedInterface[] = [];
+      const vRet = typeNodeToTS(variant.returnType, vExt, baseName, undefined, 0);
+      const vNames = variant.paramNames || fn.paramNames || [];
+      let vArgEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
+      if (variant.argsType.kind === "tuple") {
+        vArgEntries = (variant.argsType.elements || []).map((el, i) => ({
+          paramName: vNames[i] || `arg${i}`,
+          typeNode: el,
+        }));
+      }
+      const vParams = vArgEntries.map(e =>
+        `${e.paramName}: ${typeNodeToTS(e.typeNode, vExt, baseName, e.paramName, 0)}`
+      );
+      result.push(`export declare function ${funcIdent}(${vParams.join(", ")}): ${vRet};`);
+    }
+  } else {
+    let funcDecl: string;
+    if (singleObjectArg) {
+      funcDecl = `export declare function ${funcIdent}(input: ${baseName}Input): ${outputName};`;
+    } else {
+      const params = argEntries.map((entry) => {
+        if (entry.typeNode.kind === "object" && Object.keys(entry.typeNode.properties || {}).length > 0) {
+          return `${entry.paramName}: ${baseName}${toPascalCase(entry.paramName)}`;
+        }
+        return `${entry.paramName}: ${typeNodeToTS(entry.typeNode, extracted, baseName, entry.paramName, 0)}`;
+      });
+      funcDecl = `export declare function ${funcIdent}(${params.join(", ")}): ${outputName};`;
+    }
+    result.push(funcDecl);
+  }
   return result.join("\n");
 }
 
@@ -690,7 +733,7 @@ export function generateFromJsonl(jsonlPath: string): Record<string, { ts: strin
       `# Generated at ${new Date().toISOString()}`,
       "# Do not edit manually — re-run your code with trickle to update",
       "",
-      "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union",
+      "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
       "",
       "",
     ];
@@ -767,7 +810,7 @@ export function generateLocalStubs(
           `# Generated at ${new Date().toISOString()}`,
           "# Do not edit manually — re-run your code with trickle to update",
           "",
-          "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union",
+          "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
           "",
           "",
         ];

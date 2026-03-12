@@ -2,7 +2,11 @@
 
 Runs a small GPT model forward pass through trickle's variable tracer,
 then verifies that .trickle/variables.jsonl contains tensor shape info
-for variables like q, k, v, logits, etc.
+for variables in both the entry script AND imported modules (model.py).
+
+Tests both:
+1. Entry file tracing (via _entry_transform.py AST rewriting)
+2. Imported module tracing (via _trace_import_hook.py meta_path hook)
 """
 
 import json
@@ -152,14 +156,35 @@ print("FORWARD PASS OK")
     tensor_var_names = {v["varName"] for v in tensor_vars}
     print(f"\nTensor variables found: {sorted(tensor_var_names)}")
 
-    expected_some = {"idx", "logits", "loss", "generated", "targets"}
+    expected_some = {"idx", "logits", "loss", "targets"}
     found = expected_some & tensor_var_names
     print(f"Expected tensor vars found: {sorted(found)}")
 
     if len(found) < 2:
-        print(f"WARN: only found {len(found)} of expected tensor vars (expected >=2)")
-    else:
-        print(f"OK: found {len(found)} expected tensor variables")
+        print(f"FAIL: only found {len(found)} of expected tensor vars (expected >=2)")
+        sys.exit(1)
+
+    # Check that model.py (imported module) was also traced
+    model_records = [r for r in lines if '"model.py"' in r or '/model.py"' in r]
+    model_parsed = [json.loads(r) for r in model_records if r.strip()]
+    model_tensors = [r for r in model_parsed if r.get("type", {}).get("class_name") == "Tensor"]
+    print(f"\nmodel.py: {len(model_parsed)} total vars, {len(model_tensors)} tensors")
+
+    # Should have q, k, v from CausalSelfAttention.forward
+    model_tensor_names = {r["varName"] for r in model_tensors}
+    expected_model = {"q", "k", "v", "x", "logits"}
+    found_model = expected_model & model_tensor_names
+    print(f"Expected model.py tensor vars found: {sorted(found_model)}")
+
+    if len(model_tensors) < 5:
+        print(f"FAIL: only {len(model_tensors)} tensor vars from model.py (expected >=5)")
+        sys.exit(1)
+
+    if len(found_model) < 3:
+        print(f"FAIL: only found {len(found_model)} of expected model tensor vars")
+        sys.exit(1)
+
+    print(f"OK: {len(found)} entry vars + {len(model_tensors)} model.py tensors traced")
 
     # Clean up
     shutil.rmtree(test_dir)

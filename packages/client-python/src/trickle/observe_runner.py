@@ -23,13 +23,16 @@ def main() -> None:
         print("All exported functions in user modules are auto-wrapped.")
         sys.exit(1)
 
-    # Install observe hooks BEFORE loading user code.
-    # When variable tracing is active, skip function-wrapping hooks — the variable
-    # tracer captures all values directly, and function wrapping breaks frameworks
-    # like PyTorch whose tensor methods don't survive proxy wrapping.
+    # Install hooks BEFORE loading user code.
     import os as _os2
     _trace_vars = _os2.environ.get("TRICKLE_TRACE_VARS", "1") not in ("0", "false")
-    if not _trace_vars:
+    if _trace_vars:
+        # Variable tracing mode: use AST import hook to trace variables
+        # in all imported user modules (captures tensor shapes, etc.)
+        from trickle._trace_import_hook import install_trace_hook
+        install_trace_hook()
+    else:
+        # Legacy function-wrapping mode
         from trickle._observe_auto import install
         install()
 

@@ -209,11 +209,15 @@ def _transform_to_source(source: str, filename: str, module_name: str, trace_var
 
 
 def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> str:
-    """Generate the Python source code that sets up __trickle_wrap and __trickle_tv."""
+    """Generate the Python source code that sets up __trickle_wrap and _trickle_tv.
+
+    Uses single-underscore prefix (_trickle_tv, not __trickle_tv) to avoid
+    Python's name mangling inside class bodies.
+    """
     lines = [
         "# --- trickle auto-instrumentation preamble ---",
-        "import os as __trickle_os",
-        "import json as __trickle_json",
+        "import os as _trickle_os",
+        "import json as _trickle_json",
     ]
 
     # Function wrapper — when variable tracing is active, function wrapping
@@ -234,42 +238,42 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
     if trace_vars:
         lines.extend([
             "# Variable tracer with tensor shape support",
-            "__trickle_tv_cache = set()",
-            "__trickle_tv_file = None",
-            "def __trickle_tv(__val, __name, __line):",
-            "    global __trickle_tv_file",
+            "_trickle_tv_cache = set()",
+            "_trickle_tv_file = None",
+            "def _trickle_tv(_val, _name, _line):",
+            "    global _trickle_tv_file",
             "    try:",
-            "        if __trickle_tv_file is None:",
-            "            __d = __trickle_os.environ.get('TRICKLE_LOCAL_DIR') or __trickle_os.path.join(__trickle_os.getcwd(), '.trickle')",
-            "            __trickle_os.makedirs(__d, exist_ok=True)",
-            "            __trickle_tv_file = __trickle_os.path.join(__d, 'variables.jsonl')",
+            "        if _trickle_tv_file is None:",
+            "            _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')",
+            "            _trickle_os.makedirs(_d, exist_ok=True)",
+            "            _trickle_tv_file = _trickle_os.path.join(_d, 'variables.jsonl')",
             "        from trickle.type_inference import infer_type",
-            "        __t = infer_type(__val, max_depth=3)",
-            "        __th = __trickle_json.dumps(__t, sort_keys=True)[:32]",
-            f"        __ck = {filename!r} + ':' + str(__line) + ':' + __name + ':' + __th",
-            "        if __ck in __trickle_tv_cache:",
+            "        _t = infer_type(_val, max_depth=3)",
+            "        _th = _trickle_json.dumps(_t, sort_keys=True)[:32]",
+            f"        _ck = {filename!r} + ':' + str(_line) + ':' + _name + ':' + _th",
+            "        if _ck in _trickle_tv_cache:",
             "            return",
-            "        __trickle_tv_cache.add(__ck)",
+            "        _trickle_tv_cache.add(_ck)",
             "        # Build sample",
-            "        __s = None",
-            "        if hasattr(__val, 'shape') and hasattr(__val, 'dtype'):",
-            "            __parts = [f'shape={list(__val.shape)}', f'dtype={__val.dtype}']",
-            "            if hasattr(__val, 'device'): __parts.append(f'device={__val.device}')",
-            "            __s = f'{type(__val).__name__}({\", \".join(__parts)})'",
-            "        elif isinstance(__val, (int, float, bool)):",
-            "            __s = __val",
-            "        elif isinstance(__val, str):",
-            "            __s = __val[:100]",
+            "        _s = None",
+            "        if hasattr(_val, 'shape') and hasattr(_val, 'dtype'):",
+            "            _parts = [f'shape={list(_val.shape)}', f'dtype={_val.dtype}']",
+            "            if hasattr(_val, 'device'): _parts.append(f'device={_val.device}')",
+            "            _s = f'{type(_val).__name__}({\", \".join(_parts)})'",
+            "        elif isinstance(_val, (int, float, bool)):",
+            "            _s = _val",
+            "        elif isinstance(_val, str):",
+            "            _s = _val[:100]",
             "        else:",
-            "            __s = str(__val)[:100]",
-            f"        __r = {{'kind': 'variable', 'varName': __name, 'line': __line, 'module': {module_name!r}, 'file': {filename!r}, 'type': __t, 'typeHash': __th, 'sample': __s}}",
-            "        with open(__trickle_tv_file, 'a') as __f:",
-            "            __f.write(__trickle_json.dumps(__r) + '\\n')",
+            "            _s = str(_val)[:100]",
+            f"        _r = {{'kind': 'variable', 'varName': _name, 'line': _line, 'module': {module_name!r}, 'file': {filename!r}, 'type': _t, 'typeHash': _th, 'sample': _s}}",
+            "        with open(_trickle_tv_file, 'a') as _f:",
+            "            _f.write(_trickle_json.dumps(_r) + '\\n')",
             "    except Exception:",
             "        pass",
         ])
     else:
-        lines.append("def __trickle_tv(__val, __name, __line): pass")
+        lines.append("def _trickle_tv(_val, _name, _line): pass")
 
     lines.append("# --- end trickle preamble ---")
     return "\n".join(lines)
@@ -394,7 +398,7 @@ def _make_trace_stmts(node: ast.AST) -> list:
         # __trickle_tv(var_name_value, 'var_name', line_no)
         trace_call = ast.Expr(
             value=ast.Call(
-                func=ast.Name(id="__trickle_tv", ctx=ast.Load()),
+                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
                 args=[
                     ast.Name(id=name, ctx=ast.Load()),
                     ast.Constant(value=name),

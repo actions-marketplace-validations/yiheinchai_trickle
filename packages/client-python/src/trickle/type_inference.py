@@ -70,6 +70,28 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if isinstance(value, enum.Enum):
         return {"kind": "primitive", "name": "string"}
 
+    # --- PyTorch Tensor ---
+    _tensor_type = _get_torch_tensor_type()
+    if _tensor_type is not None and isinstance(value, _tensor_type):
+        props: Dict[str, Any] = {
+            "shape": {"kind": "primitive", "name": str(list(value.shape))},
+            "dtype": {"kind": "primitive", "name": str(value.dtype)},
+        }
+        if hasattr(value, "device"):
+            props["device"] = {"kind": "primitive", "name": str(value.device)}
+        if hasattr(value, "requires_grad"):
+            props["requires_grad"] = {"kind": "primitive", "name": "boolean"}
+        return {"kind": "object", "properties": props, "class_name": "Tensor"}
+
+    # --- NumPy ndarray ---
+    _ndarray_type = _get_numpy_ndarray_type()
+    if _ndarray_type is not None and isinstance(value, _ndarray_type):
+        props = {
+            "shape": {"kind": "primitive", "name": str(list(value.shape))},
+            "dtype": {"kind": "primitive", "name": str(value.dtype)},
+        }
+        return {"kind": "object", "properties": props, "class_name": "ndarray"}
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -157,6 +179,42 @@ def _get_pydantic_fields(value: Any) -> list[str] | None:
     if hasattr(cls, "__fields__"):
         return list(cls.__fields__.keys())
     return None
+
+
+_torch_tensor_type: Any = None
+_torch_checked = False
+
+
+def _get_torch_tensor_type() -> Any:
+    """Lazily resolve torch.Tensor to avoid import overhead when torch isn't used."""
+    global _torch_tensor_type, _torch_checked
+    if _torch_checked:
+        return _torch_tensor_type
+    _torch_checked = True
+    try:
+        import torch
+        _torch_tensor_type = torch.Tensor
+    except ImportError:
+        pass
+    return _torch_tensor_type
+
+
+_numpy_ndarray_type: Any = None
+_numpy_checked = False
+
+
+def _get_numpy_ndarray_type() -> Any:
+    """Lazily resolve numpy.ndarray to avoid import overhead when numpy isn't used."""
+    global _numpy_ndarray_type, _numpy_checked
+    if _numpy_checked:
+        return _numpy_ndarray_type
+    _numpy_checked = True
+    try:
+        import numpy
+        _numpy_ndarray_type = numpy.ndarray
+    except ImportError:
+        pass
+    return _numpy_ndarray_type
 
 
 def _unify_element_types(elements: list, max_depth: int, _seen: Set[int]) -> Dict[str, Any]:

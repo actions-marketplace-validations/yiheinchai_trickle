@@ -58,8 +58,10 @@ def _should_observe(fullname: str) -> bool:
         "pytest", "unittest", "_pytest", "pluggy",
         # Build / packaging
         "setuptools", "pip", "pkg_resources", "wheel", "distutils",
-        # Data science
+        # Data science / ML
         "numpy", "pandas", "scipy", "sklearn", "matplotlib",
+        "torch", "torchvision", "torchaudio", "transformers",
+        "tensorflow", "tf", "keras", "jax", "flax",
         # Typing
         "typing", "typing_extensions",
         # Stdlib categories

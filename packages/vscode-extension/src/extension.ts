@@ -32,11 +32,25 @@ type VarIndex = Map<string, Map<number, VariableObservation[]>>;
 /** Index for notebook cells: "notebookPath#cell_N" -> Map<lineNumber, observation[]> */
 type NotebookCellIndex = Map<string, Map<number, VariableObservation[]>>;
 
+/** A runtime error record from errors.jsonl */
+interface ErrorRecord {
+  kind: 'error';
+  error_type: string;
+  message: string;
+  file: string;
+  line: number;
+  function: string;
+  shape_context: string[];
+  frames: { file: string; line: number; function: string }[];
+}
+
 let varIndex: VarIndex = new Map();
 let notebookCellIndex: NotebookCellIndex = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
+let errorFileWatcher: vscode.FileSystemWatcher | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let inlineHintsProvider: vscode.Disposable | undefined;
+let diagnosticCollection: vscode.DiagnosticCollection;
 /** Fires to tell VSCode to re-query inlay hints after data changes. */
 const inlayHintsChangeEmitter = new vscode.EventEmitter<void>();
 
@@ -45,8 +59,13 @@ export function activate(context: vscode.ExtensionContext) {
   statusBarItem.command = 'trickle.refreshVariables';
   context.subscriptions.push(statusBarItem);
 
+  // Create diagnostic collection for error reporting
+  diagnosticCollection = vscode.languages.createDiagnosticCollection('trickle');
+  context.subscriptions.push(diagnosticCollection);
+
   // Load variable data
   loadAllVariables();
+  loadErrors();
 
   // Register hover provider for all common file types (JS/TS and Python)
   const selector: vscode.DocumentSelector = [
@@ -88,6 +107,24 @@ export function activate(context: vscode.ExtensionContext) {
       refreshInlineHints();
     });
     context.subscriptions.push(fileWatcher);
+
+    // Watch errors.jsonl for crash diagnostics
+    const errorPattern = new vscode.RelativePattern(workspaceFolders[0], '.trickle/errors.jsonl');
+    errorFileWatcher = vscode.workspace.createFileSystemWatcher(errorPattern);
+
+    let errorReloadTimer: ReturnType<typeof setTimeout> | undefined;
+    const debouncedErrorReload = () => {
+      if (errorReloadTimer) clearTimeout(errorReloadTimer);
+      errorReloadTimer = setTimeout(() => loadErrors(), 300);
+    };
+
+    errorFileWatcher.onDidChange(debouncedErrorReload);
+    errorFileWatcher.onDidCreate(debouncedErrorReload);
+    errorFileWatcher.onDidDelete(() => {
+      if (errorReloadTimer) clearTimeout(errorReloadTimer);
+      diagnosticCollection.clear();
+    });
+    context.subscriptions.push(errorFileWatcher);
   }
 
   // Watch for source file edits — shift hint line numbers and invalidate edited lines
@@ -163,8 +200,12 @@ export function activate(context: vscode.ExtensionContext) {
         const jsonlPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'variables.jsonl');
         try {
           fs.writeFileSync(jsonlPath, '');
+          // Also clear errors
+          const errorsPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'errors.jsonl');
+          try { fs.writeFileSync(errorsPath, ''); } catch { /* ignore */ }
           varIndex.clear();
           notebookCellIndex.clear();
+          diagnosticCollection.clear();
           updateStatusBar();
           refreshInlineHints();
           vscode.window.showInformationMessage('Trickle: Variable data cleared');
@@ -187,8 +228,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   fileWatcher?.dispose();
+  errorFileWatcher?.dispose();
   inlineHintsProvider?.dispose();
   inlayHintsChangeEmitter.dispose();
+  diagnosticCollection?.dispose();
 }
 
 function countVars(): number {
@@ -282,6 +325,74 @@ function loadAllVariables() {
 
   updateStatusBar();
   refreshInlineHints();
+}
+
+function loadErrors() {
+  diagnosticCollection.clear();
+
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) return;
+
+  for (const folder of workspaceFolders) {
+    const errorsPath = path.join(folder.uri.fsPath, '.trickle', 'errors.jsonl');
+    if (!fs.existsSync(errorsPath)) continue;
+
+    try {
+      const content = fs.readFileSync(errorsPath, 'utf8');
+      const lines = content.split('\n').filter(l => l.trim());
+
+      const diagsByFile = new Map<string, vscode.Diagnostic[]>();
+
+      for (const line of lines) {
+        try {
+          const err: ErrorRecord = JSON.parse(line);
+          if (err.kind !== 'error') continue;
+
+          // Build diagnostic message with shape context
+          let message = `${err.error_type}: ${err.message}`;
+          if (err.shape_context && err.shape_context.length > 0) {
+            message += '\n\nTensor shapes near error:\n' + err.shape_context.join('\n');
+          }
+
+          // Create diagnostic at crash site
+          const crashLine = Math.max(0, err.line - 1); // 0-based
+          const range = new vscode.Range(crashLine, 0, crashLine, 1000);
+          const diag = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
+          diag.source = 'trickle';
+
+          // Add related information for stack frames
+          const relatedInfo: vscode.DiagnosticRelatedInformation[] = [];
+          for (const frame of (err.frames || []).slice(1, 6)) {
+            const frameLine = Math.max(0, frame.line - 1);
+            const frameUri = vscode.Uri.file(frame.file);
+            const frameRange = new vscode.Range(frameLine, 0, frameLine, 1000);
+            const loc = new vscode.Location(frameUri, frameRange);
+            relatedInfo.push(new vscode.DiagnosticRelatedInformation(
+              loc, `in ${frame.function} (${path.basename(frame.file)}:${frame.line})`,
+            ));
+          }
+          if (relatedInfo.length > 0) {
+            diag.relatedInformation = relatedInfo;
+          }
+
+          const filePath = err.file;
+          if (!diagsByFile.has(filePath)) {
+            diagsByFile.set(filePath, []);
+          }
+          diagsByFile.get(filePath)!.push(diag);
+        } catch {
+          // Skip malformed lines
+        }
+      }
+
+      // Set diagnostics for each file
+      for (const [filePath, diags] of diagsByFile) {
+        diagnosticCollection.set(vscode.Uri.file(filePath), diags);
+      }
+    } catch {
+      // File read error
+    }
+  }
 }
 
 /** Get the line map for a document, handling both regular files and notebook cells. */

@@ -27,9 +27,16 @@ def main() -> None:
     # Clear previous trace data so only the latest run's results show
     _local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
     _vars_file = os.path.join(_local_dir, "variables.jsonl")
+    _errors_file = os.path.join(_local_dir, "errors.jsonl")
     try:
         if os.path.exists(_vars_file):
             with open(_vars_file, "w") as _f:
+                _f.truncate(0)
+    except OSError:
+        pass
+    try:
+        if os.path.exists(_errors_file):
+            with open(_errors_file, "w") as _f:
                 _f.truncate(0)
     except OSError:
         pass

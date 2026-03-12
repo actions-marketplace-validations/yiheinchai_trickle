@@ -19,12 +19,17 @@ def print_error_context(exc: BaseException) -> None:
     """Print tensor shape context around the crash site.
 
     Reads variables.jsonl and the exception traceback to show relevant
-    tensor shapes near where the error occurred.
+    tensor shapes near where the error occurred.  Also writes error
+    info to errors.jsonl so the VSCode extension can show diagnostics.
     """
     try:
         _print_context(exc)
     except Exception:
         pass  # Never make errors worse
+    try:
+        _write_error_jsonl(exc)
+    except Exception:
+        pass
 
 
 def _print_context(exc: BaseException) -> None:
@@ -287,3 +292,72 @@ def _print_shape_report(
     print("\033[90m  Run `trickle vars --tensors` for full tensor details\033[0m", file=sys.stderr)
     print("\033[36m" + "─" * 60 + "\033[0m", file=sys.stderr)
     print(file=sys.stderr)
+
+
+def _write_error_jsonl(exc: BaseException) -> None:
+    """Write error info to .trickle/errors.jsonl for VSCode diagnostics."""
+    local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+    errors_file = os.path.join(local_dir, "errors.jsonl")
+    vars_file = os.path.join(local_dir, "variables.jsonl")
+
+    crash_frames = _extract_crash_frames(exc)
+    if not crash_frames:
+        return
+
+    # Read tensor records for shape context
+    records = _read_tensor_records(vars_file) if os.path.exists(vars_file) else []
+    relevant = _find_relevant_tensors(records, crash_frames) if records else []
+    tensors = [r for r in relevant if _is_tensor(r)]
+
+    # Build shape context lines
+    shape_context: List[str] = []
+    for r in tensors:
+        name = r.get("varName", "?")
+        type_str = _format_type(r.get("type", {}))
+        line = r.get("line", 0)
+        shape_context.append(f"L{line} {name}: {type_str}")
+
+    crash_file, crash_line, crash_func = crash_frames[0]
+
+    # Map temp transform file back to original file path and correct line numbers.
+    # The AST transform stores the preamble line count in TRICKLE_PREAMBLE_LINES.
+    original_file = crash_file
+    preamble_lines = int(os.environ.get("TRICKLE_PREAMBLE_LINES", "0"))
+
+    if os.path.basename(crash_file).startswith(".trickle_"):
+        # Find original file from variable records
+        record_files = {r.get("file", "") for r in records if r.get("file")}
+        crash_dir = os.path.dirname(crash_file)
+        for rf in record_files:
+            if os.path.dirname(rf) == crash_dir and not os.path.basename(rf).startswith(".trickle_"):
+                original_file = rf
+                break
+
+    crash_line_corrected = max(1, crash_line - preamble_lines) if preamble_lines > 0 else crash_line
+
+    # Also map frame file paths and correct line numbers
+    mapped_frames: List[Tuple[str, int, str]] = []
+    for f, l, fn in crash_frames[:10]:
+        if os.path.basename(f).startswith(".trickle_") and original_file != crash_file:
+            corrected = max(1, l - preamble_lines) if preamble_lines > 0 else l
+            mapped_frames.append((original_file, corrected, fn))
+        else:
+            mapped_frames.append((f, l, fn))
+
+    error_record = {
+        "kind": "error",
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+        "file": original_file,
+        "line": crash_line_corrected,
+        "function": crash_func,
+        "shape_context": shape_context,
+        "frames": [
+            {"file": f, "line": l, "function": fn}
+            for f, l, fn in mapped_frames
+        ],
+    }
+
+    os.makedirs(local_dir, exist_ok=True)
+    with open(errors_file, "w") as f:
+        f.write(json.dumps(error_record) + "\n")

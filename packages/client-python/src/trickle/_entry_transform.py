@@ -204,6 +204,9 @@ def _transform_to_source(source: str, filename: str, module_name: str, trace_var
 
     # Prepend the tracer setup code
     setup = _generate_setup_code(filename, module_name, trace_vars)
+    preamble_lines = setup.count("\n") + 1  # +1 for the joining newline
+    # Store preamble offset so _error_context can correct traceback line numbers
+    os.environ["TRICKLE_PREAMBLE_LINES"] = str(preamble_lines)
     return setup + "\n" + transformed
 
 

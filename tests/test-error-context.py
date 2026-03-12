@@ -106,8 +106,34 @@ print("Should not reach here")
     else:
         print("\nWARNING: no variables.jsonl (context came from other source)")
 
+    # Check that errors.jsonl was created with crash diagnostics
+    errors_file = os.path.join(trickle_dir, "errors.jsonl")
+    if os.path.exists(errors_file):
+        with open(errors_file) as f:
+            error_records = [json.loads(l) for l in f if l.strip()]
+        if not error_records:
+            print("FAIL: errors.jsonl is empty")
+            sys.exit(1)
+        err = error_records[0]
+        print(f"\nError record: {err['error_type']}: {err['message'][:80]}")
+        print(f"  Crash site: {os.path.basename(err['file'])}:{err['line']} in {err['function']}")
+        if err.get("shape_context"):
+            print(f"  Shape context ({len(err['shape_context'])} entries):")
+            for sc in err["shape_context"][:5]:
+                print(f"    {sc}")
+        if err.get("frames"):
+            print(f"  Stack frames: {len(err['frames'])}")
+        # Verify required fields
+        assert err["kind"] == "error", f"Expected kind='error', got {err['kind']}"
+        assert err["error_type"] == "RuntimeError", f"Expected RuntimeError, got {err['error_type']}"
+        assert err["line"] > 0, "Expected positive line number"
+        assert len(err.get("shape_context", [])) > 0, "Expected shape_context to be non-empty"
+    else:
+        print("FAIL: errors.jsonl was not created")
+        sys.exit(1)
+
     shutil.rmtree(test_dir)
-    print("\nPASS: Error context with tensor shapes works!")
+    print("\nPASS: Error context with tensor shapes and errors.jsonl works!")
 
 
 if __name__ == "__main__":

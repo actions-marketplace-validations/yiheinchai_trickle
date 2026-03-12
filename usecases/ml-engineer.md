@@ -49,11 +49,48 @@ for epoch in range(5):
 
 Loop variables (`epoch`, `data`, `target`) are traced too. Same shape at the same line is deduplicated, so loops don't explode the data file.
 
+**Cell 4 — defining model classes directly in notebook:**
+```python
+class SimpleModel(nn.Module):
+    def __init__(self, in_dim, hidden, out_dim):
+        super().__init__()
+        self.fc1 = nn.Linear(in_dim, hidden)    # → Linear (traced as SimpleModel.__init__.self.fc1)
+        self.fc2 = nn.Linear(hidden, out_dim)    # → Linear (traced as SimpleModel.__init__.self.fc2)
+
+    def forward(self, x):
+        # x: Tensor[32, 784] float32 (traced as SimpleModel.forward.x)
+        h = self.fc1(x)                          # → Tensor[32, 128] float32
+        h = torch.relu(h)                        # → Tensor[32, 128] float32
+        return self.fc2(h)                       # → Tensor[32, 10] float32
+```
+
+All variables inside class methods are traced with full context — `funcName` shows which method they belong to (e.g., `SimpleModel.forward`), and `self.x` attribute assignments are captured too.
+
+**Swapping layers and re-running:**
+```python
+# Change fc1 to a Conv1d — just re-run the cell
+class SimpleModel(nn.Module):
+    def __init__(self, in_dim, hidden, out_dim):
+        super().__init__()
+        self.conv1 = nn.Conv1d(1, hidden, 3)    # → Conv1d
+        self.fc2 = nn.Linear(hidden, out_dim)
+
+    def forward(self, x):
+        x = x.unsqueeze(1)                      # → Tensor[32, 1, 784] float32
+        h = self.conv1(x)                        # → Tensor[32, 128, 782] float32
+        h = h.mean(dim=-1)                       # → Tensor[32, 128] float32
+        return self.fc2(h)
+```
+
+Re-running the cell automatically re-traces all variables with updated shapes. No need to restart the kernel.
+
 **What gets traced:**
 - Simple assignments: `x = torch.randn(4, 8)`
 - Tuple unpacking: `B, T, C = x.size()`
 - For-loop variables: `for i, (x, y) in enumerate(loader)`
 - Function parameters: `def forward(self, x, targets=None)`
+- Attribute assignments: `self.fc1 = nn.Linear(...)`, `self.encoder = ...`
+- Variables inside class methods with full function context (e.g., `GPT.forward`)
 - Variables inside imported local modules (your model.py, not torch internals)
 
 **Managing the session:**
@@ -152,6 +189,6 @@ All three work with just `pip install trickle-observe`.
 ## Tips
 
 - **Clear between experiments**: `trickle.notebook.clear()` or `rm .trickle/variables.jsonl` before starting fresh
-- **Run cells in order**: The VSCode extension matches cells by execution index. Restart kernel and run top-to-bottom if hints appear on wrong cells.
+- **Re-run cells freely**: The extension matches cells by content, so editing and re-running a cell updates hints correctly without restarting the kernel.
 - **Exclude noisy modules**: `TRICKLE_OBSERVE_EXCLUDE=data_utils,logging trickle run train.py`
 - **Check the status bar**: You should see "Trickle: N vars" in VSCode. If not, the extension isn't finding `.trickle/variables.jsonl` — make sure VSCode's workspace folder matches where you ran the code.

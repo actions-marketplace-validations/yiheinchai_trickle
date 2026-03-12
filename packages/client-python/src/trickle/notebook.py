@@ -39,6 +39,11 @@ _cell_counter: int = 0
 _notebook_path: Optional[str] = None
 _active = False
 
+# Shape change tracking: maps (var_name, func_name_or_empty) -> shape_str
+_prev_shapes: dict = {}
+_curr_shapes: dict = {}
+_current_cell_idx: int = 0
+
 
 def _get_vars_file() -> str:
     """Get (and lazily create) the path to variables.jsonl."""
@@ -98,6 +103,12 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
         }
         if func_name:
             record["funcName"] = func_name
+
+        # Track tensor shapes for change detection on re-run
+        shape_node = type_node.get("properties", {}).get("shape", {})
+        if shape_node.get("kind") == "primitive" and shape_node.get("name", "").startswith("["):
+            key = (var_name, func_name or "")
+            _curr_shapes[key] = (shape_node["name"], str(type_node.get("properties", {}).get("dtype", {}).get("name", "")), line_no)
 
         vars_file = _get_vars_file()
         with open(vars_file, "a") as f:
@@ -384,8 +395,66 @@ def _clear_cell_data(cell_id: str) -> None:
     line numbers when a cell is re-run after editing. The JSONL file is NOT
     modified — the VSCode extension handles deduplication by preferring the
     most recent records.
+
+    Also snapshots current tensor shapes so we can detect changes after re-run.
     """
+    global _prev_shapes, _curr_shapes
+    if _curr_shapes:
+        _prev_shapes = dict(_curr_shapes)
+    _curr_shapes = {}
     _tv_cache.clear()
+
+
+def _format_shape(shape_str: str, dtype_str: str) -> str:
+    """Format shape and dtype for display: [32, 784] float32."""
+    return f"Tensor{shape_str} {dtype_str}" if dtype_str else f"Tensor{shape_str}"
+
+
+def _print_shape_changes() -> None:
+    """Compare previous and current tensor shapes, print a summary if anything changed."""
+    if not _prev_shapes:
+        return
+
+    changes: list = []
+    new_vars: list = []
+    removed_vars: list = []
+
+    for key, (shape, dtype, line) in _curr_shapes.items():
+        var_name, func_name = key
+        display_name = f"{func_name}.{var_name}" if func_name else var_name
+        if key in _prev_shapes:
+            prev_shape, prev_dtype, prev_line = _prev_shapes[key]
+            if prev_shape != shape or prev_dtype != dtype:
+                changes.append((display_name, line,
+                                _format_shape(prev_shape, prev_dtype),
+                                _format_shape(shape, dtype)))
+        else:
+            new_vars.append((display_name, line, _format_shape(shape, dtype)))
+
+    for key in _prev_shapes:
+        if key not in _curr_shapes:
+            var_name, func_name = key
+            display_name = f"{func_name}.{var_name}" if func_name else var_name
+            prev_shape, prev_dtype, prev_line = _prev_shapes[key]
+            removed_vars.append((display_name, prev_line, _format_shape(prev_shape, prev_dtype)))
+
+    if not changes and not new_vars and not removed_vars:
+        return
+
+    lines: list = ["[trickle] Shape changes:"]
+    for name, line, old, new in changes:
+        lines.append(f"  {name} (L{line}): {old} → {new}")
+    for name, line, shape in new_vars:
+        lines.append(f"  + {name} (L{line}): {shape}")
+    for name, line, shape in removed_vars:
+        lines.append(f"  - {name} (L{line}): {shape}")
+
+    print("\n".join(lines))
+
+
+def _post_run_cell_hook(result: Any = None) -> None:
+    """IPython post_run_cell callback — print shape changes after cell execution."""
+    _print_shape_changes()
 
 
 class _TrickleASTTransformer:
@@ -428,6 +497,9 @@ def activate() -> None:
     # Register AST transformer
     ip.ast_transformers.append(_TrickleASTTransformer())
 
+    # Register post-cell hook for shape change detection
+    ip.events.register("post_run_cell", _post_run_cell_hook)
+
     # Also install the import hook so imported modules get traced too
     trace_imports = os.environ.get("TRICKLE_TRACE_IMPORTS", "1") not in ("0", "false")
     if trace_imports:
@@ -451,7 +523,8 @@ def deactivate() -> None:
         ip = get_ipython()  # type: ignore[name-defined]
         ip.ast_transformers = [t for t in ip.ast_transformers if not isinstance(t, _TrickleASTTransformer)]
         ip.user_ns.pop("_trickle_tv", None)
-    except NameError:
+        ip.events.unregister("post_run_cell", _post_run_cell_hook)
+    except (NameError, ValueError):
         pass
 
     _active = False
@@ -459,8 +532,10 @@ def deactivate() -> None:
 
 def clear() -> None:
     """Clear the cached variable observations and the variables.jsonl file."""
-    global _tv_cache, _tv_file
+    global _tv_cache, _tv_file, _prev_shapes, _curr_shapes
     _tv_cache.clear()
+    _prev_shapes.clear()
+    _curr_shapes.clear()
     if _tv_file and os.path.exists(_tv_file):
         with open(_tv_file, "w") as f:
             f.write("")

@@ -94,6 +94,9 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - Return values: `return logits` shows `-> Tensor[B, T, vocab_size]` inline
 - Gradient context: tensors in `torch.no_grad()` show `[no_grad]` badge
 - Model mode: modules in eval mode show `[eval]` (helps catch `.eval()` bugs)
+- Optimizers: `Adam(lr=0.001, betas=(0.9, 0.999), ...)` with param count
+- LR schedulers: `StepLR(step_size=10, gamma=0.5, ...)` with current lr
+- Loss functions: `CrossEntropyLoss(ignore_index=-100, label_smoothing=0.0)`
 - Variables inside imported local modules (your model.py, not torch internals)
 
 **Managing the session:**

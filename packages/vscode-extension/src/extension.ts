@@ -330,11 +330,20 @@ class TrickleHoverProvider implements vscode.HoverProvider {
     // but the user might hover on a usage line)
     const candidates: VariableObservation[] = [];
 
+    // Try to get the full "obj.attr" text if the cursor is on an attribute
+    const lineText = document.lineAt(position.line).text;
+    const attrRange = document.getWordRangeAtPosition(position, /[a-zA-Z_$][a-zA-Z0-9_$]*\.[a-zA-Z_$][a-zA-Z0-9_$]*/);
+    const attrWord = attrRange ? document.getText(attrRange) : null;
+
     // Check exact line first
     const obsAtLine = lineMap.get(lineNo);
     if (obsAtLine) {
       for (const obs of obsAtLine) {
         if (obs.varName === word) candidates.push(obs);
+        // Match attribute vars: hovering on "weight" matches "self.weight"
+        if (attrWord && obs.varName === attrWord) candidates.push(obs);
+        // Also match when varName is "self.x" and word is "x" (attr part)
+        if (obs.varName.endsWith('.' + word) && obs.varName.includes('.')) candidates.push(obs);
         // Show return value info when hovering over "return" keyword
         if (word === 'return' && (obs.varName === '<return>' || obs.varName.startsWith('<return:'))) {
           candidates.push(obs);
@@ -347,6 +356,7 @@ class TrickleHoverProvider implements vscode.HoverProvider {
       for (const [, obsArr] of lineMap) {
         for (const obs of obsArr) {
           if (obs.varName === word) candidates.push(obs);
+          if (attrWord && obs.varName === attrWord) candidates.push(obs);
         }
       }
     }
@@ -427,7 +437,11 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
 
         // Find the variable name in the line
-        const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
+        // For attribute names like "self.weight", use non-word-boundary matching
+        const isAttrVar = obs.varName.includes('.');
+        const varPattern = isAttrVar
+          ? new RegExp(escapeRegex(obs.varName))
+          : new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
         const match = varPattern.exec(lineText);
         if (!match) continue;
 
@@ -443,11 +457,15 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           // 3. With-as: `with ... as x:`
           // 4. Function param: `def fn(x, y=None):` or `def fn(self, x):`
           // 5. Annotated: `x: int = ...` (skip — already has annotation)
+          // 6. Attribute assignment: `self.x = ...`
           const isAssignment = afterVar.startsWith('=') && !afterVar.startsWith('==');
           const isAnnotated = afterVar.startsWith(':');
           const isForVar = /\bfor\s+$/.test(beforeVar) || /\bfor\s+.*,\s*$/.test(beforeVar);
           const isWithAs = /\bas\s+$/.test(beforeVar);
           const isBareAssignment = /^\s*$/.test(beforeVar) || /,\s*$/.test(beforeVar);
+
+          // Attribute assignment: `self.weight = ...` or `  self.proj = ...`
+          const isAttrAssignment = isAttrVar && isAssignment && /^\s*$/.test(beforeVar);
 
           // Function parameter: `def fn(x` or `def fn(self, x` or `def fn(x,`
           // Also handles `async def fn(x`
@@ -462,6 +480,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           const isValidPattern =
             ((isBareAssignment || isForVar || isWithAs) && (isAssignment || isAnnotated)) ||
             isFuncParam ||
+            isAttrAssignment ||
             (isTupleElement && !isFuncParam);  // Tuple elements in assignments
 
           if (!isValidPattern) continue;

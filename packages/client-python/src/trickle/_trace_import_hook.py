@@ -375,9 +375,15 @@ def _make_return_trace(node: ast.Return) -> list:
 
 
 def _make_trace_stmts(node: ast.AST) -> list:
-    """Generate __trickle_tv() calls for variable names assigned in this node."""
-    names = _extract_assigned_names(node)
+    """Generate _trickle_tv() calls for variable names assigned in this node.
+
+    Handles both simple names (x = ...) and attribute assignments (self.x = ...).
+    """
+    lineno = getattr(node, "lineno", 0)
     stmts = []
+
+    # Simple variable names
+    names = _extract_assigned_names(node)
     for name in names:
         trace_call = ast.Expr(
             value=ast.Call(
@@ -385,12 +391,29 @@ def _make_trace_stmts(node: ast.AST) -> list:
                 args=[
                     ast.Name(id=name, ctx=ast.Load()),
                     ast.Constant(value=name),
-                    ast.Constant(value=getattr(node, "lineno", 0)),
+                    ast.Constant(value=lineno),
                 ],
                 keywords=[],
             )
         )
         stmts.append(trace_call)
+
+    # Attribute assignments (self.x = ..., obj.attr = ...)
+    attrs = _extract_attr_assignments(node)
+    for display_name, value_node in attrs:
+        trace_call = ast.Expr(
+            value=ast.Call(
+                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
+                args=[
+                    value_node,
+                    ast.Constant(value=display_name),
+                    ast.Constant(value=lineno),
+                ],
+                keywords=[],
+            )
+        )
+        stmts.append(trace_call)
+
     return stmts
 
 
@@ -473,6 +496,41 @@ def _extract_assigned_names(node: ast.AST) -> list:
         names.extend(_names_from_target(node.target))
     # Filter out private/dunder names and trickle internals
     return [n for n in names if not n.startswith("_")]
+
+
+def _extract_attr_assignments(node: ast.AST) -> list:
+    """Extract attribute assignments from an assignment node.
+
+    For ``self.weight = expr``, returns [('self.weight', <AST for self.weight>)].
+    Only handles single-level attributes (self.x, not self.a.b).
+    Skips private/dunder attributes.
+    """
+    results: list = []
+
+    targets = []
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+    elif isinstance(node, ast.AnnAssign) and node.value is not None and node.target:
+        targets = [node.target]
+    elif isinstance(node, ast.AugAssign):
+        targets = [node.target]
+
+    for target in targets:
+        if isinstance(target, ast.Attribute):
+            attr_name = target.attr
+            if attr_name.startswith("_"):
+                continue
+            if isinstance(target.value, ast.Name):
+                obj_name = target.value.id
+                display_name = f"{obj_name}.{attr_name}"
+                read_node = ast.Attribute(
+                    value=ast.Name(id=obj_name, ctx=ast.Load()),
+                    attr=attr_name,
+                    ctx=ast.Load(),
+                )
+                results.append((display_name, read_node))
+
+    return results
 
 
 def _names_from_target(target: ast.AST) -> list:

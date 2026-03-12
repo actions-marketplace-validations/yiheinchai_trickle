@@ -9,6 +9,7 @@ interface VariableObservation {
   line: number;
   module: string;
   file: string;
+  cellIndex?: number;
   type: TypeNode;
   typeHash: string;
   sample: unknown;
@@ -27,7 +28,11 @@ interface TypeNode {
 /** Index: filePath -> Map<lineNumber, observation[]> */
 type VarIndex = Map<string, Map<number, VariableObservation[]>>;
 
+/** Index for notebook cells: "notebookPath#cell_N" -> Map<lineNumber, observation[]> */
+type NotebookCellIndex = Map<string, Map<number, VariableObservation[]>>;
+
 let varIndex: VarIndex = new Map();
+let notebookCellIndex: NotebookCellIndex = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let statusBarItem: vscode.StatusBarItem;
 let inlineHintsProvider: vscode.Disposable | undefined;
@@ -47,6 +52,8 @@ export function activate(context: vscode.ExtensionContext) {
     { scheme: 'file', language: 'javascript' },
     { scheme: 'file', language: 'javascriptreact' },
     { scheme: 'file', language: 'python' },
+    // Jupyter notebook cells in VSCode
+    { scheme: 'vscode-notebook-cell', language: 'python' },
   ];
 
   context.subscriptions.push(
@@ -87,6 +94,7 @@ export function activate(context: vscode.ExtensionContext) {
         try {
           fs.writeFileSync(jsonlPath, '');
           varIndex.clear();
+          notebookCellIndex.clear();
           updateStatusBar();
           refreshInlineHints();
           vscode.window.showInformationMessage('Trickle: Variable data cleared');
@@ -119,6 +127,11 @@ function countVars(): number {
       count += obs.length;
     }
   }
+  for (const lineMap of notebookCellIndex.values()) {
+    for (const obs of lineMap.values()) {
+      count += obs.length;
+    }
+  }
   return count;
 }
 
@@ -142,6 +155,7 @@ function loadAllVariables() {
   }
 
   varIndex.clear();
+  notebookCellIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -159,8 +173,23 @@ function loadAllVariables() {
           const obs: VariableObservation = JSON.parse(line);
           if (obs.kind !== 'variable') continue;
 
-          // Normalize file path
           const filePath = obs.file;
+
+          // Check if this is a notebook cell observation
+          // Format: "/path/to/notebook.ipynb#cell_N" or "__notebook__cell_N.py"
+          const cellMatch = filePath.match(/#cell_(\d+)$/) || filePath.match(/__notebook__cell_(\d+)\.py$/);
+          if (cellMatch) {
+            // Index by the full cell identifier
+            if (!notebookCellIndex.has(filePath)) {
+              notebookCellIndex.set(filePath, new Map());
+            }
+            const lineMap = notebookCellIndex.get(filePath)!;
+            if (!lineMap.has(obs.line)) {
+              lineMap.set(obs.line, []);
+            }
+            lineMap.get(obs.line)!.push(obs);
+            continue;
+          }
 
           if (!varIndex.has(filePath)) {
             varIndex.set(filePath, new Map());
@@ -184,6 +213,47 @@ function loadAllVariables() {
   refreshInlineHints();
 }
 
+/** Get the line map for a document, handling both regular files and notebook cells. */
+function getLineMapForDocument(document: vscode.TextDocument): Map<number, VariableObservation[]> | undefined {
+  // Regular file
+  if (document.uri.scheme === 'file') {
+    return varIndex.get(document.uri.fsPath);
+  }
+
+  // Notebook cell: URI looks like vscode-notebook-cell:/path/notebook.ipynb#fragment
+  if (document.uri.scheme === 'vscode-notebook-cell') {
+    // Extract the notebook path and cell index
+    const notebookUri = document.uri.with({ scheme: 'file', fragment: '' });
+    const notebookPath = notebookUri.fsPath;
+
+    // Find the cell index from the notebook
+    const cellIndex = getNotebookCellIndex(document);
+    if (cellIndex === undefined) return undefined;
+
+    // Look up by various cell ID formats
+    const cellId1 = `${notebookPath}#cell_${cellIndex}`;
+    const cellId2 = path.join(path.dirname(notebookPath), `__notebook__cell_${cellIndex}.py`);
+
+    return notebookCellIndex.get(cellId1) || notebookCellIndex.get(cellId2);
+  }
+
+  return undefined;
+}
+
+/** Get the 1-based cell index for a notebook cell document. */
+function getNotebookCellIndex(document: vscode.TextDocument): number | undefined {
+  // Try to find the cell in open notebooks
+  for (const notebook of vscode.workspace.notebookDocuments) {
+    for (let i = 0; i < notebook.cellCount; i++) {
+      const cell = notebook.cellAt(i);
+      if (cell.document === document) {
+        return i + 1; // 1-based to match Python's _cell_counter
+      }
+    }
+  }
+  return undefined;
+}
+
 class TrickleHoverProvider implements vscode.HoverProvider {
   provideHover(
     document: vscode.TextDocument,
@@ -192,8 +262,7 @@ class TrickleHoverProvider implements vscode.HoverProvider {
     const config = vscode.workspace.getConfiguration('trickle');
     if (!config.get('enabled', true)) return undefined;
 
-    const filePath = document.uri.fsPath;
-    const lineMap = varIndex.get(filePath);
+    const lineMap = getLineMapForDocument(document);
     if (!lineMap) return undefined;
 
     // Get the word at the cursor
@@ -267,8 +336,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
     const config = vscode.workspace.getConfiguration('trickle');
     if (!config.get('enabled', true) || !config.get('inlineHints', true)) return [];
 
-    const filePath = document.uri.fsPath;
-    const lineMap = varIndex.get(filePath);
+    const lineMap = getLineMapForDocument(document);
     if (!lineMap) return [];
 
     const hints: vscode.InlayHint[] = [];

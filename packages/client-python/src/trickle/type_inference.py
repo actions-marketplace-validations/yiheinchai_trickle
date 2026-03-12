@@ -81,6 +81,13 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
             props["device"] = {"kind": "primitive", "name": str(value.device)}
         if hasattr(value, "requires_grad"):
             props["requires_grad"] = {"kind": "primitive", "name": str(value.requires_grad)}
+        # Capture whether gradient computation is enabled in the current context
+        try:
+            import torch
+            if not torch.is_grad_enabled():
+                props["grad_enabled"] = {"kind": "primitive", "name": "False"}
+        except Exception:
+            pass
         if hasattr(value, "grad_fn") and value.grad_fn is not None:
             props["grad_fn"] = {"kind": "primitive", "name": type(value.grad_fn).__name__}
         # Scalar tensors: capture actual value
@@ -356,6 +363,12 @@ def _infer_nn_module(value: Any) -> Dict[str, Any]:
                     break
         except Exception:
             pass
+
+    # Capture training/eval mode
+    try:
+        props["training"] = {"kind": "primitive", "name": str(value.training)}
+    except Exception:
+        pass
 
     # Count parameters
     try:

@@ -115,8 +115,28 @@ function activate(context) {
     context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(e => {
         if (e.contentChanges.length === 0)
             return; // metadata-only change
-        const filePath = e.document.uri.fsPath;
-        const lineMap = varIndex.get(filePath);
+        // Resolve the line map: regular files use varIndex, notebook cells use notebookCellIndex
+        let lineMap;
+        let lineMapParent;
+        if (e.document.uri.scheme === 'vscode-notebook-cell') {
+            lineMap = getLineMapForDocument(e.document);
+            // Find which key in notebookCellIndex this maps to so we can clean up
+            if (lineMap) {
+                for (const [key, lm] of notebookCellIndex) {
+                    if (lm === lineMap) {
+                        lineMapParent = { index: notebookCellIndex, key };
+                        break;
+                    }
+                }
+            }
+        }
+        else {
+            const filePath = e.document.uri.fsPath;
+            lineMap = varIndex.get(filePath);
+            if (lineMap) {
+                lineMapParent = { index: varIndex, key: filePath };
+            }
+        }
         if (!lineMap)
             return;
         // Process changes in reverse order (bottom-up) so earlier changes
@@ -154,8 +174,8 @@ function activate(context) {
             }
         }
         // If the map is now empty, remove the file entry entirely
-        if (lineMap.size === 0) {
-            varIndex.delete(filePath);
+        if (lineMap.size === 0 && lineMapParent) {
+            lineMapParent.index.delete(lineMapParent.key);
         }
         updateStatusBar();
         refreshInlineHints();
@@ -277,7 +297,15 @@ function loadAllVariables() {
                         if (!lineMap.has(obs.line)) {
                             lineMap.set(obs.line, []);
                         }
-                        lineMap.get(obs.line).push(obs);
+                        // Deduplicate: replace existing observation with same varName (last wins)
+                        const existing = lineMap.get(obs.line);
+                        const existingIdx = existing.findIndex(o => o.varName === obs.varName);
+                        if (existingIdx >= 0) {
+                            existing[existingIdx] = obs;
+                        }
+                        else {
+                            existing.push(obs);
+                        }
                         continue;
                     }
                     if (!varIndex.has(filePath)) {
@@ -369,80 +397,46 @@ function getLineMapForDocument(document) {
     }
     // Notebook cell: URI looks like vscode-notebook-cell:/path/notebook.ipynb#fragment
     if (document.uri.scheme === 'vscode-notebook-cell') {
-        // Extract the notebook path and cell index
-        const notebookUri = document.uri.with({ scheme: 'file', fragment: '' });
-        const notebookPath = notebookUri.fsPath;
-        // Find the cell index from the notebook
-        const cellIndex = getNotebookCellIndex(document);
-        if (cellIndex === undefined)
-            return undefined;
-        // Look up by various cell ID formats
-        const cellId1 = `${notebookPath}#cell_${cellIndex}`;
-        const cellId2 = path.join(path.dirname(notebookPath), `__notebook__cell_${cellIndex}.py`);
-        const result = notebookCellIndex.get(cellId1) || notebookCellIndex.get(cellId2);
-        if (result)
-            return result;
-        // Fallback: Python's _cell_counter only counts executed code cells,
-        // but VSCode's cell index counts all cells (including markdown).
-        // Also, the __notebook__ path uses Python's CWD which may differ from
-        // the notebook directory. Try matching by scanning all keys.
-        const cellSuffix1 = `#cell_${cellIndex}`;
-        const cellSuffix2 = `__notebook__cell_${cellIndex}.py`;
-        for (const [key, lineMap] of notebookCellIndex) {
-            if (key.endsWith(cellSuffix1) || key.endsWith(cellSuffix2)) {
-                return lineMap;
-            }
-        }
-        // If cell index doesn't match (markdown cells shift the count),
-        // try matching by document content: find the cell whose observations
-        // best match the variable names visible in this cell's text.
+        // Always use content-based matching as the primary method.
+        // Python's cell_counter increments on every execution (including re-runs),
+        // so cell IDs like "cell_3" don't correspond to cell positions. Content
+        // matching correctly handles re-runs by finding the most recent entry
+        // whose variables match the cell's text.
         const cellText = document.getText();
         return findBestMatchingCell(cellText);
     }
     return undefined;
 }
-/** Find the notebook cell index entry that best matches the given cell text. */
+/** Find the notebook cell entry whose variables best match the cell text.
+ * When multiple entries tie, prefers the one with the highest cell counter
+ * (most recent execution). */
 function findBestMatchingCell(cellText) {
     let bestMatch;
     let bestScore = 0;
-    for (const [, lineMap] of notebookCellIndex) {
+    let bestCellNum = -1;
+    for (const [key, lineMap] of notebookCellIndex) {
         let score = 0;
         let total = 0;
         for (const obsArr of lineMap.values()) {
             for (const obs of obsArr) {
                 total++;
-                // Check if this variable name appears in the cell text at roughly the right line
                 const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
                 if (varPattern.test(cellText)) {
                     score++;
                 }
             }
         }
-        if (total > 0 && score > bestScore) {
+        // Extract cell number from key for tie-breaking (prefer most recent)
+        const cellNumMatch = key.match(/cell_(\d+)/);
+        const cellNum = cellNumMatch ? parseInt(cellNumMatch[1], 10) : 0;
+        if (total > 0 && (score > bestScore || (score === bestScore && cellNum > bestCellNum))) {
             bestScore = score;
             bestMatch = lineMap;
+            bestCellNum = cellNum;
         }
     }
-    // Only return if we have a reasonable match (at least half the variables found)
     if (bestMatch && bestScore > 0)
         return bestMatch;
-    return undefined;
-}
-/** Get the 1-based code cell index for a notebook cell document.
- * Only counts code cells (not markdown) to match Python's _cell_counter. */
-function getNotebookCellIndex(document) {
-    for (const notebook of vscode.workspace.notebookDocuments) {
-        let codeCellIndex = 0;
-        for (let i = 0; i < notebook.cellCount; i++) {
-            const cell = notebook.cellAt(i);
-            if (cell.kind === vscode.NotebookCellKind.Code) {
-                codeCellIndex++;
-                if (cell.document === document) {
-                    return codeCellIndex; // 1-based to match Python's _cell_counter
-                }
-            }
-        }
-    }
     return undefined;
 }
 class TrickleHoverProvider {
@@ -824,16 +818,18 @@ function typeNodeToString(node, depth = 3, dimLabels) {
             if (node.class_name === 'Tensor' || node.class_name === 'ndarray') {
                 return formatTensorType(node.class_name, node.properties, dimLabels);
             }
-            // nn.Module types: show key params, omit 'params' count from inline display
+            // nn.Module types: show key params, omit 'params'/'training' from inline props
             if (node.class_name && node.properties['params']) {
                 const paramCount = node.properties['params']?.name;
-                const displayEntries = entries.filter(([k]) => k !== 'params');
+                const trainingMode = node.properties['training']?.name;
+                const modeBadge = trainingMode === 'False' ? ' [eval]' : '';
+                const displayEntries = entries.filter(([k]) => k !== 'params' && k !== 'training');
                 if (displayEntries.length === 0) {
-                    return paramCount ? `${node.class_name}(${paramCount} params)` : node.class_name;
+                    return paramCount ? `${node.class_name}(${paramCount} params)${modeBadge}` : `${node.class_name}${modeBadge}`;
                 }
                 const props = displayEntries.slice(0, 4).map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
                 const suffix = displayEntries.length > 4 ? ', ...' : '';
-                return `${node.class_name}(${props.join(', ')}${suffix})`;
+                return `${node.class_name}(${props.join(', ')}${suffix})${modeBadge}`;
             }
             // Named class
             if (node.class_name) {
@@ -923,6 +919,11 @@ function formatTensorType(className, properties, dimLabels) {
     const valueProp = properties['value'];
     if (valueProp?.kind === 'primitive' && valueProp.name) {
         parts.push(`= ${valueProp.name}`);
+    }
+    // no_grad context: show when tensor was computed without gradient tracking
+    const gradEnabledProp = properties['grad_enabled'];
+    if (gradEnabledProp?.kind === 'primitive' && gradEnabledProp.name === 'False') {
+        parts.push('[no_grad]');
     }
     // NaN/Inf warnings — show prominently at the end
     const nanProp = properties['nan_count'];

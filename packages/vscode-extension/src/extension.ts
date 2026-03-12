@@ -910,16 +910,18 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
         return formatTensorType(node.class_name, node.properties, dimLabels);
       }
 
-      // nn.Module types: show key params, omit 'params' count from inline display
+      // nn.Module types: show key params, omit 'params'/'training' from inline props
       if (node.class_name && node.properties['params']) {
         const paramCount = node.properties['params']?.name;
-        const displayEntries = entries.filter(([k]) => k !== 'params');
+        const trainingMode = node.properties['training']?.name;
+        const modeBadge = trainingMode === 'False' ? ' [eval]' : '';
+        const displayEntries = entries.filter(([k]) => k !== 'params' && k !== 'training');
         if (displayEntries.length === 0) {
-          return paramCount ? `${node.class_name}(${paramCount} params)` : node.class_name;
+          return paramCount ? `${node.class_name}(${paramCount} params)${modeBadge}` : `${node.class_name}${modeBadge}`;
         }
         const props = displayEntries.slice(0, 4).map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
         const suffix = displayEntries.length > 4 ? ', ...' : '';
-        return `${node.class_name}(${props.join(', ')}${suffix})`;
+        return `${node.class_name}(${props.join(', ')}${suffix})${modeBadge}`;
       }
 
       // Named class
@@ -1021,6 +1023,12 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
   const valueProp = properties['value'];
   if (valueProp?.kind === 'primitive' && valueProp.name) {
     parts.push(`= ${valueProp.name}`);
+  }
+
+  // no_grad context: show when tensor was computed without gradient tracking
+  const gradEnabledProp = properties['grad_enabled'];
+  if (gradEnabledProp?.kind === 'primitive' && gradEnabledProp.name === 'False') {
+    parts.push('[no_grad]');
   }
 
   // NaN/Inf warnings — show prominently at the end

@@ -298,6 +298,23 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
     else:
         lines.append("def _trickle_tv(_val, _name, _line): pass")
 
+    # Dimension labels: when code does B, T, C = x.size(), record the names
+    if trace_vars:
+        lines.extend([
+            "def _trickle_dl(_val, _names, _var, _line, _func=None):",
+            "    try:",
+            "        if not hasattr(_val, 'shape'): return",
+            "        _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')",
+            "        _trickle_os.makedirs(_d, exist_ok=True)",
+            "        _p = _trickle_os.path.join(_d, 'variables.jsonl')",
+            f"        _r = {{'kind': 'dim_labels', 'varName': _var, 'labels': _names, 'line': _line, 'file': {filename!r}}}",
+            "        if _func: _r['funcName'] = _func",
+            "        with open(_p, 'a') as _f:",
+            "            _f.write(_trickle_json.dumps(_r) + '\\n')",
+            "    except Exception:",
+            "        pass",
+        ])
+
     lines.append("# --- end trickle preamble ---")
     return "\n".join(lines)
 
@@ -567,7 +584,82 @@ def _make_trace_stmts(node: ast.AST, func_name: str | None = None) -> list:
     for display_name, value_node in attrs:
         stmts.append(_make_tv_call(value_node, display_name, lineno, func_name))
 
+    # Detect dimension label patterns: B, T, C = x.size() or B, T, C = x.shape
+    dl_stmt = _make_dim_label_stmt(node, func_name)
+    if dl_stmt:
+        stmts.append(dl_stmt)
+
     return stmts
+
+
+def _make_dim_label_stmt(node: ast.AST, func_name: str | None = None) -> ast.Expr | None:
+    """Detect `A, B, C = x.size()` or `A, B, C = x.shape` and emit a dim_labels record.
+
+    This captures the mapping from tensor variable `x` to dimension names ["A", "B", "C"],
+    so the VSCode extension can display shapes as Tensor[A=2, B=16, C=64].
+    """
+    if not isinstance(node, ast.Assign):
+        return None
+    if len(node.targets) != 1:
+        return None
+
+    target = node.targets[0]
+    value = node.value
+
+    # Target must be a tuple of simple names: (A, B, C) or A, B, C
+    if not isinstance(target, ast.Tuple):
+        return None
+    dim_names = []
+    for elt in target.elts:
+        if isinstance(elt, ast.Name):
+            dim_names.append(elt.id)
+        else:
+            return None  # Complex unpacking, skip
+
+    # Value must be x.size() or x.size(dim) or x.shape
+    tensor_expr = None
+    if isinstance(value, ast.Call):
+        # x.size() or x.size(0) — we only care about no-arg .size()
+        if isinstance(value.func, ast.Attribute) and value.func.attr == "size" and len(value.args) == 0:
+            tensor_expr = value.func.value
+    elif isinstance(value, ast.Attribute) and value.attr == "shape":
+        # x.shape
+        tensor_expr = value.value
+
+    if tensor_expr is None:
+        return None
+
+    # Get the tensor variable name for the record
+    tensor_var_name = _expr_to_name(tensor_expr)
+    if not tensor_var_name:
+        return None
+
+    lineno = getattr(node, "lineno", 0)
+
+    # Build: _trickle_dl(x, ["A", "B", "C"], "x", line, func_name)
+    args: list[ast.expr] = [
+        tensor_expr,  # The actual tensor value (to check if it has .shape)
+        ast.List(elts=[ast.Constant(value=n) for n in dim_names], ctx=ast.Load()),
+        ast.Constant(value=tensor_var_name),
+        ast.Constant(value=lineno),
+    ]
+    if func_name:
+        args.append(ast.Constant(value=func_name))
+
+    return ast.Expr(value=ast.Call(
+        func=ast.Name(id="_trickle_dl", ctx=ast.Load()),
+        args=args,
+        keywords=[],
+    ))
+
+
+def _expr_to_name(expr: ast.expr) -> str | None:
+    """Convert an AST expression to a display name string, or None if too complex."""
+    if isinstance(expr, ast.Name):
+        return expr.id
+    if isinstance(expr, ast.Attribute) and isinstance(expr.value, ast.Name):
+        return f"{expr.value.id}.{expr.attr}"
+    return None
 
 
 def _make_param_traces(node: ast.AST, func_name: str | None = None) -> list:

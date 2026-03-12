@@ -26,11 +26,24 @@ interface TypeNode {
   resolved?: TypeNode;
 }
 
+/** A dimension label record from variables.jsonl */
+interface DimLabelRecord {
+  kind: 'dim_labels';
+  varName: string;
+  labels: string[];
+  line: number;
+  file: string;
+  funcName?: string;
+}
+
 /** Index: filePath -> Map<lineNumber, observation[]> */
 type VarIndex = Map<string, Map<number, VariableObservation[]>>;
 
 /** Index for notebook cells: "notebookPath#cell_N" -> Map<lineNumber, observation[]> */
 type NotebookCellIndex = Map<string, Map<number, VariableObservation[]>>;
+
+/** Index: filePath -> Map<varName, DimLabelRecord> (most recent per var per file+func) */
+type DimLabelIndex = Map<string, Map<string, DimLabelRecord>>;
 
 /** A runtime error record from errors.jsonl */
 interface ErrorRecord {
@@ -46,6 +59,7 @@ interface ErrorRecord {
 
 let varIndex: VarIndex = new Map();
 let notebookCellIndex: NotebookCellIndex = new Map();
+let dimLabelIndex: DimLabelIndex = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let errorFileWatcher: vscode.FileSystemWatcher | undefined;
 let statusBarItem: vscode.StatusBarItem;
@@ -270,6 +284,7 @@ function loadAllVariables() {
 
   varIndex.clear();
   notebookCellIndex.clear();
+  dimLabelIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -284,7 +299,20 @@ function loadAllVariables() {
 
       for (const line of lines) {
         try {
-          const obs: VariableObservation = JSON.parse(line);
+          const record = JSON.parse(line);
+
+          // Handle dim_labels records
+          if (record.kind === 'dim_labels') {
+            const dl = record as DimLabelRecord;
+            const key = dl.funcName ? `${dl.file}:${dl.funcName}:${dl.varName}` : `${dl.file}::${dl.varName}`;
+            if (!dimLabelIndex.has(dl.file)) {
+              dimLabelIndex.set(dl.file, new Map());
+            }
+            dimLabelIndex.get(dl.file)!.set(key, dl);
+            continue;
+          }
+
+          const obs = record as VariableObservation;
           if (obs.kind !== 'variable') continue;
 
           const filePath = obs.file;
@@ -554,7 +582,8 @@ class TrickleHoverProvider implements vscode.HoverProvider {
     const shapeFlowShown = new Set<string>();
 
     for (const obs of candidates) {
-      const typeStr = typeNodeToString(obs.type);
+      const labels = getDimLabels(obs);
+      const typeStr = typeNodeToString(obs.type, 3, labels);
       const className = obs.type?.class_name;
       const funcCtx = obs.funcName ? ` in \`${obs.funcName}\`` : '';
 
@@ -572,7 +601,8 @@ class TrickleHoverProvider implements vscode.HoverProvider {
           parts.push(`**\`${obs.varName}\`**${funcCtx} — shape flow:`);
           const flowLines: string[] = [];
           for (const fo of flowObs) {
-            const shape = extractShapeStr(fo.type);
+            const foLabels = getDimLabels(fo);
+            const shape = extractShapeStr(fo.type, foLabels);
             const stats = formatTensorStats(fo.type);
             const marker = fo.line === obs.line ? ' **←**' : '';
             flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${marker}`);
@@ -631,7 +661,8 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         // Handle return value traces — show at end of return line
         if (obs.varName === '<return>' || obs.varName.startsWith('<return:')) {
           if (!/\breturn\b/.test(lineText)) continue;
-          const typeStr = typeNodeToString(obs.type);
+          const retLabels = getDimLabels(obs);
+          const typeStr = typeNodeToString(obs.type, 3, retLabels);
           // For <return:varname>, show the individual element type
           const label = obs.varName === '<return>'
             ? ` -> ${typeStr}`
@@ -715,7 +746,8 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           if (afterVar.startsWith(':') && !afterVar.startsWith(':=')) continue;
         }
 
-        const typeStr = typeNodeToString(obs.type);
+        const obsLabels = getDimLabels(obs);
+        const typeStr = typeNodeToString(obs.type, 3, obsLabels);
         const position = new vscode.Position(lineNo - 1, varEnd);
 
         const label = isPython ? `: ${typeStr}` : `: ${typeStr}`;
@@ -762,7 +794,7 @@ function collectShapeFlow(
 }
 
 /** Extract a concise shape string from a tensor TypeNode. */
-function extractShapeStr(type: TypeNode): string {
+function extractShapeStr(type: TypeNode, dimLabels?: string[]): string {
   if (!type.properties) return type.class_name || 'unknown';
   const shape = type.properties['shape'];
   const dtype = type.properties['dtype'];
@@ -771,7 +803,18 @@ function extractShapeStr(type: TypeNode): string {
 
   let result = type.class_name || 'Tensor';
   if (shape?.kind === 'primitive' && shape.name) {
-    result += shape.name;
+    if (dimLabels && dimLabels.length > 0) {
+      const match = shape.name.match(/^\[(.+)\]$/);
+      if (match) {
+        const dims = match[1].split(',').map(s => s.trim());
+        const labeled = dims.map((d, i) => i < dimLabels.length ? `${dimLabels[i]}=${d}` : d);
+        result += `[${labeled.join(', ')}]`;
+      } else {
+        result += shape.name;
+      }
+    } else {
+      result += shape.name;
+    }
   }
   if (dtype?.kind === 'primitive' && dtype.name) {
     result += ' ' + dtype.name.replace('torch.', '').replace('numpy.', '');
@@ -797,6 +840,24 @@ function extractShapeStr(type: TypeNode): string {
   return result;
 }
 
+/** Look up dimension labels for a tensor variable from the dimLabelIndex. */
+function getDimLabels(obs: VariableObservation): string[] | undefined {
+  const fileLabels = dimLabelIndex.get(obs.file);
+  if (!fileLabels) return undefined;
+  // Try func-scoped key first, then file-scoped
+  const funcKey = obs.funcName ? `${obs.file}:${obs.funcName}:${obs.varName}` : `${obs.file}::${obs.varName}`;
+  const record = fileLabels.get(funcKey);
+  if (record) return record.labels;
+  // Also try without func for attribute vars like "self.x" -> look up "x"
+  if (obs.varName.includes('.')) {
+    const baseName = obs.varName.split('.').pop()!;
+    const baseKey = obs.funcName ? `${obs.file}:${obs.funcName}:${baseName}` : `${obs.file}::${baseName}`;
+    const baseRecord = fileLabels.get(baseKey);
+    if (baseRecord) return baseRecord.labels;
+  }
+  return undefined;
+}
+
 function registerInlineHints(context: vscode.ExtensionContext, selector: vscode.DocumentSelector) {
   inlineHintsProvider?.dispose();
 
@@ -819,7 +880,7 @@ function escapeRegex(str: string): string {
 /** Convert a TypeNode to a readable type string.
  * Handles both JS/TS types and Python types (tensors, ndarrays, etc.)
  */
-function typeNodeToString(node: TypeNode, depth: number = 3): string {
+function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[]): string {
   if (depth <= 0) return 'unknown';
 
   switch (node.kind) {
@@ -853,7 +914,7 @@ function typeNodeToString(node: TypeNode, depth: number = 3): string {
       // These have shape, dtype (and optionally device) as properties
       // where the values are stored as primitive name strings like "[1, 16, 32]"
       if (node.class_name === 'Tensor' || node.class_name === 'ndarray') {
-        return formatTensorType(node.class_name, node.properties);
+        return formatTensorType(node.class_name, node.properties, dimLabels);
       }
 
       // nn.Module types: show key params, omit 'params' count from inline display
@@ -911,15 +972,29 @@ function typeNodeToString(node: TypeNode, depth: number = 3): string {
 }
 
 /** Format a tensor type as a concise readable string.
- * E.g. Tensor[1, 16, 32] float32 @cpu
+ * E.g. Tensor[B=1, T=16, C=32] float32 @cpu
+ * When dimLabels are provided, annotates each dimension with its name.
  */
-function formatTensorType(className: string, properties: Record<string, TypeNode>): string {
+function formatTensorType(className: string, properties: Record<string, TypeNode>, dimLabels?: string[]): string {
   const parts: string[] = [className];
 
   // Shape: stored as primitive with name like "[1, 16, 32]"
   const shapeProp = properties['shape'];
   if (shapeProp?.kind === 'primitive' && shapeProp.name) {
-    parts[0] = `${className}${shapeProp.name}`;
+    if (dimLabels && dimLabels.length > 0) {
+      // Parse the shape string "[1, 16, 32]" and annotate with dim names
+      const shapeStr = shapeProp.name;
+      const match = shapeStr.match(/^\[(.+)\]$/);
+      if (match) {
+        const dims = match[1].split(',').map(s => s.trim());
+        const labeled = dims.map((d, i) => i < dimLabels.length ? `${dimLabels[i]}=${d}` : d);
+        parts[0] = `${className}[${labeled.join(', ')}]`;
+      } else {
+        parts[0] = `${className}${shapeStr}`;
+      }
+    } else {
+      parts[0] = `${className}${shapeProp.name}`;
+    }
   }
 
   // Dtype: stored as primitive with name like "torch.float32"

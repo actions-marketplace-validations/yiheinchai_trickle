@@ -40,17 +40,24 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 let varIndex = new Map();
 let notebookCellIndex = new Map();
+let dimLabelIndex = new Map();
 let fileWatcher;
+let errorFileWatcher;
 let statusBarItem;
 let inlineHintsProvider;
+let diagnosticCollection;
 /** Fires to tell VSCode to re-query inlay hints after data changes. */
 const inlayHintsChangeEmitter = new vscode.EventEmitter();
 function activate(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
     statusBarItem.command = 'trickle.refreshVariables';
     context.subscriptions.push(statusBarItem);
+    // Create diagnostic collection for error reporting
+    diagnosticCollection = vscode.languages.createDiagnosticCollection('trickle');
+    context.subscriptions.push(diagnosticCollection);
     // Load variable data
     loadAllVariables();
+    loadErrors();
     // Register hover provider for all common file types (JS/TS and Python)
     const selector = [
         { scheme: 'file', language: 'typescript' },
@@ -86,6 +93,23 @@ function activate(context) {
             refreshInlineHints();
         });
         context.subscriptions.push(fileWatcher);
+        // Watch errors.jsonl for crash diagnostics
+        const errorPattern = new vscode.RelativePattern(workspaceFolders[0], '.trickle/errors.jsonl');
+        errorFileWatcher = vscode.workspace.createFileSystemWatcher(errorPattern);
+        let errorReloadTimer;
+        const debouncedErrorReload = () => {
+            if (errorReloadTimer)
+                clearTimeout(errorReloadTimer);
+            errorReloadTimer = setTimeout(() => loadErrors(), 300);
+        };
+        errorFileWatcher.onDidChange(debouncedErrorReload);
+        errorFileWatcher.onDidCreate(debouncedErrorReload);
+        errorFileWatcher.onDidDelete(() => {
+            if (errorReloadTimer)
+                clearTimeout(errorReloadTimer);
+            diagnosticCollection.clear();
+        });
+        context.subscriptions.push(errorFileWatcher);
     }
     // Watch for source file edits — shift hint line numbers and invalidate edited lines
     context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(e => {
@@ -147,8 +171,15 @@ function activate(context) {
             const jsonlPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'variables.jsonl');
             try {
                 fs.writeFileSync(jsonlPath, '');
+                // Also clear errors
+                const errorsPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'errors.jsonl');
+                try {
+                    fs.writeFileSync(errorsPath, '');
+                }
+                catch { /* ignore */ }
                 varIndex.clear();
                 notebookCellIndex.clear();
+                diagnosticCollection.clear();
                 updateStatusBar();
                 refreshInlineHints();
                 vscode.window.showInformationMessage('Trickle: Variable data cleared');
@@ -167,8 +198,10 @@ function activate(context) {
 }
 function deactivate() {
     fileWatcher?.dispose();
+    errorFileWatcher?.dispose();
     inlineHintsProvider?.dispose();
     inlayHintsChangeEmitter.dispose();
+    diagnosticCollection?.dispose();
 }
 function countVars() {
     let count = 0;
@@ -204,6 +237,7 @@ function loadAllVariables() {
     }
     varIndex.clear();
     notebookCellIndex.clear();
+    dimLabelIndex.clear();
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders)
         return;
@@ -216,7 +250,18 @@ function loadAllVariables() {
             const lines = content.split('\n').filter(l => l.trim());
             for (const line of lines) {
                 try {
-                    const obs = JSON.parse(line);
+                    const record = JSON.parse(line);
+                    // Handle dim_labels records
+                    if (record.kind === 'dim_labels') {
+                        const dl = record;
+                        const key = dl.funcName ? `${dl.file}:${dl.funcName}:${dl.varName}` : `${dl.file}::${dl.varName}`;
+                        if (!dimLabelIndex.has(dl.file)) {
+                            dimLabelIndex.set(dl.file, new Map());
+                        }
+                        dimLabelIndex.get(dl.file).set(key, dl);
+                        continue;
+                    }
+                    const obs = record;
                     if (obs.kind !== 'variable')
                         continue;
                     const filePath = obs.file;
@@ -255,6 +300,66 @@ function loadAllVariables() {
     }
     updateStatusBar();
     refreshInlineHints();
+}
+function loadErrors() {
+    diagnosticCollection.clear();
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders)
+        return;
+    for (const folder of workspaceFolders) {
+        const errorsPath = path.join(folder.uri.fsPath, '.trickle', 'errors.jsonl');
+        if (!fs.existsSync(errorsPath))
+            continue;
+        try {
+            const content = fs.readFileSync(errorsPath, 'utf8');
+            const lines = content.split('\n').filter(l => l.trim());
+            const diagsByFile = new Map();
+            for (const line of lines) {
+                try {
+                    const err = JSON.parse(line);
+                    if (err.kind !== 'error')
+                        continue;
+                    // Build diagnostic message with shape context
+                    let message = `${err.error_type}: ${err.message}`;
+                    if (err.shape_context && err.shape_context.length > 0) {
+                        message += '\n\nTensor shapes near error:\n' + err.shape_context.join('\n');
+                    }
+                    // Create diagnostic at crash site
+                    const crashLine = Math.max(0, err.line - 1); // 0-based
+                    const range = new vscode.Range(crashLine, 0, crashLine, 1000);
+                    const diag = new vscode.Diagnostic(range, message, vscode.DiagnosticSeverity.Error);
+                    diag.source = 'trickle';
+                    // Add related information for stack frames
+                    const relatedInfo = [];
+                    for (const frame of (err.frames || []).slice(1, 6)) {
+                        const frameLine = Math.max(0, frame.line - 1);
+                        const frameUri = vscode.Uri.file(frame.file);
+                        const frameRange = new vscode.Range(frameLine, 0, frameLine, 1000);
+                        const loc = new vscode.Location(frameUri, frameRange);
+                        relatedInfo.push(new vscode.DiagnosticRelatedInformation(loc, `in ${frame.function} (${path.basename(frame.file)}:${frame.line})`));
+                    }
+                    if (relatedInfo.length > 0) {
+                        diag.relatedInformation = relatedInfo;
+                    }
+                    const filePath = err.file;
+                    if (!diagsByFile.has(filePath)) {
+                        diagsByFile.set(filePath, []);
+                    }
+                    diagsByFile.get(filePath).push(diag);
+                }
+                catch {
+                    // Skip malformed lines
+                }
+            }
+            // Set diagnostics for each file
+            for (const [filePath, diags] of diagsByFile) {
+                diagnosticCollection.set(vscode.Uri.file(filePath), diags);
+            }
+        }
+        catch {
+            // File read error
+        }
+    }
 }
 /** Get the line map for a document, handling both regular files and notebook cells. */
 function getLineMapForDocument(document) {
@@ -400,7 +505,8 @@ class TrickleHoverProvider {
         // variable in the same function to show "shape flow" (how shape transforms)
         const shapeFlowShown = new Set();
         for (const obs of candidates) {
-            const typeStr = typeNodeToString(obs.type);
+            const labels = getDimLabels(obs);
+            const typeStr = typeNodeToString(obs.type, 3, labels);
             const className = obs.type?.class_name;
             const funcCtx = obs.funcName ? ` in \`${obs.funcName}\`` : '';
             // For tensors, show shape flow if available
@@ -416,7 +522,8 @@ class TrickleHoverProvider {
                     parts.push(`**\`${obs.varName}\`**${funcCtx} — shape flow:`);
                     const flowLines = [];
                     for (const fo of flowObs) {
-                        const shape = extractShapeStr(fo.type);
+                        const foLabels = getDimLabels(fo);
+                        const shape = extractShapeStr(fo.type, foLabels);
                         const stats = formatTensorStats(fo.type);
                         const marker = fo.line === obs.line ? ' **←**' : '';
                         flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${marker}`);
@@ -474,7 +581,8 @@ class TrickleInlayHintsProvider {
                 if (obs.varName === '<return>' || obs.varName.startsWith('<return:')) {
                     if (!/\breturn\b/.test(lineText))
                         continue;
-                    const typeStr = typeNodeToString(obs.type);
+                    const retLabels = getDimLabels(obs);
+                    const typeStr = typeNodeToString(obs.type, 3, retLabels);
                     // For <return:varname>, show the individual element type
                     const label = obs.varName === '<return>'
                         ? ` -> ${typeStr}`
@@ -555,7 +663,8 @@ class TrickleInlayHintsProvider {
                     if (afterVar.startsWith(':') && !afterVar.startsWith(':='))
                         continue;
                 }
-                const typeStr = typeNodeToString(obs.type);
+                const obsLabels = getDimLabels(obs);
+                const typeStr = typeNodeToString(obs.type, 3, obsLabels);
                 const position = new vscode.Position(lineNo - 1, varEnd);
                 const label = isPython ? `: ${typeStr}` : `: ${typeStr}`;
                 const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
@@ -594,7 +703,7 @@ function collectShapeFlow(lineMap, varName, funcName) {
     return results;
 }
 /** Extract a concise shape string from a tensor TypeNode. */
-function extractShapeStr(type) {
+function extractShapeStr(type, dimLabels) {
     if (!type.properties)
         return type.class_name || 'unknown';
     const shape = type.properties['shape'];
@@ -603,7 +712,20 @@ function extractShapeStr(type) {
     const gradFn = type.properties['grad_fn'];
     let result = type.class_name || 'Tensor';
     if (shape?.kind === 'primitive' && shape.name) {
-        result += shape.name;
+        if (dimLabels && dimLabels.length > 0) {
+            const match = shape.name.match(/^\[(.+)\]$/);
+            if (match) {
+                const dims = match[1].split(',').map(s => s.trim());
+                const labeled = dims.map((d, i) => i < dimLabels.length ? `${dimLabels[i]}=${d}` : d);
+                result += `[${labeled.join(', ')}]`;
+            }
+            else {
+                result += shape.name;
+            }
+        }
+        else {
+            result += shape.name;
+        }
     }
     if (dtype?.kind === 'primitive' && dtype.name) {
         result += ' ' + dtype.name.replace('torch.', '').replace('numpy.', '');
@@ -628,6 +750,26 @@ function extractShapeStr(type) {
     }
     return result;
 }
+/** Look up dimension labels for a tensor variable from the dimLabelIndex. */
+function getDimLabels(obs) {
+    const fileLabels = dimLabelIndex.get(obs.file);
+    if (!fileLabels)
+        return undefined;
+    // Try func-scoped key first, then file-scoped
+    const funcKey = obs.funcName ? `${obs.file}:${obs.funcName}:${obs.varName}` : `${obs.file}::${obs.varName}`;
+    const record = fileLabels.get(funcKey);
+    if (record)
+        return record.labels;
+    // Also try without func for attribute vars like "self.x" -> look up "x"
+    if (obs.varName.includes('.')) {
+        const baseName = obs.varName.split('.').pop();
+        const baseKey = obs.funcName ? `${obs.file}:${obs.funcName}:${baseName}` : `${obs.file}::${baseName}`;
+        const baseRecord = fileLabels.get(baseKey);
+        if (baseRecord)
+            return baseRecord.labels;
+    }
+    return undefined;
+}
 function registerInlineHints(context, selector) {
     inlineHintsProvider?.dispose();
     const config = vscode.workspace.getConfiguration('trickle');
@@ -646,7 +788,7 @@ function escapeRegex(str) {
 /** Convert a TypeNode to a readable type string.
  * Handles both JS/TS types and Python types (tensors, ndarrays, etc.)
  */
-function typeNodeToString(node, depth = 3) {
+function typeNodeToString(node, depth = 3, dimLabels) {
     if (depth <= 0)
         return 'unknown';
     switch (node.kind) {
@@ -680,7 +822,7 @@ function typeNodeToString(node, depth = 3) {
             // These have shape, dtype (and optionally device) as properties
             // where the values are stored as primitive name strings like "[1, 16, 32]"
             if (node.class_name === 'Tensor' || node.class_name === 'ndarray') {
-                return formatTensorType(node.class_name, node.properties);
+                return formatTensorType(node.class_name, node.properties, dimLabels);
             }
             // nn.Module types: show key params, omit 'params' count from inline display
             if (node.class_name && node.properties['params']) {
@@ -729,14 +871,30 @@ function typeNodeToString(node, depth = 3) {
     }
 }
 /** Format a tensor type as a concise readable string.
- * E.g. Tensor[1, 16, 32] float32 @cpu
+ * E.g. Tensor[B=1, T=16, C=32] float32 @cpu
+ * When dimLabels are provided, annotates each dimension with its name.
  */
-function formatTensorType(className, properties) {
+function formatTensorType(className, properties, dimLabels) {
     const parts = [className];
     // Shape: stored as primitive with name like "[1, 16, 32]"
     const shapeProp = properties['shape'];
     if (shapeProp?.kind === 'primitive' && shapeProp.name) {
-        parts[0] = `${className}${shapeProp.name}`;
+        if (dimLabels && dimLabels.length > 0) {
+            // Parse the shape string "[1, 16, 32]" and annotate with dim names
+            const shapeStr = shapeProp.name;
+            const match = shapeStr.match(/^\[(.+)\]$/);
+            if (match) {
+                const dims = match[1].split(',').map(s => s.trim());
+                const labeled = dims.map((d, i) => i < dimLabels.length ? `${dimLabels[i]}=${d}` : d);
+                parts[0] = `${className}[${labeled.join(', ')}]`;
+            }
+            else {
+                parts[0] = `${className}${shapeStr}`;
+            }
+        }
+        else {
+            parts[0] = `${className}${shapeProp.name}`;
+        }
     }
     // Dtype: stored as primitive with name like "torch.float32"
     const dtypeProp = properties['dtype'];

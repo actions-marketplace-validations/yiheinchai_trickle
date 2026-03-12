@@ -98,6 +98,18 @@ function mergeTypeNodes(a: TypeNode, b: TypeNode): TypeNode {
     if (aE.length === bE.length) {
       return { kind: 'tuple', elements: aE.map((el, i) => mergeTypeNodes(el, bE[i])) };
     }
+    // Different lengths: merge common prefix, make extra elements optional
+    const shorter = aE.length < bE.length ? aE : bE;
+    const longer = aE.length < bE.length ? bE : aE;
+    const merged: TypeNode[] = [];
+    for (let i = 0; i < longer.length; i++) {
+      if (i < shorter.length) {
+        merged.push(mergeTypeNodes(shorter[i], longer[i]));
+      } else {
+        merged.push(makeOptional(longer[i]));
+      }
+    }
+    return { kind: 'tuple', elements: merged };
   }
 
   return deduplicateUnion([
@@ -366,8 +378,12 @@ function generateClassDts(className: string, methods: FunctionData[]): string[] 
       let retType = typeToTS(fn.returnType, ext, base, undefined, 1);
       if (fn.isAsync) retType = `Promise<${retType}>`;
 
-      // Build params string
+      // Build params string (handle optional params)
       const params = argEntries.map(e => {
+        const { isOptional, innerType } = extractOptional(e.typeNode);
+        if (isOptional) {
+          return `${e.paramName}?: ${typeToTS(innerType, ext, base, e.paramName, 1)}`;
+        }
         return `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 1)}`;
       });
 
@@ -505,6 +521,11 @@ function generateDts(functions: FunctionData[]): string {
         const params = argEntries.map(e => {
           if (e.typeNode.kind === 'object' && Object.keys(e.typeNode.properties || {}).length > 0)
             return `${e.paramName}: ${base}${toPascalCase(e.paramName)}`;
+          // Check if parameter is optional (union with undefined)
+          const { isOptional, innerType } = extractOptional(e.typeNode);
+          if (isOptional) {
+            return `${e.paramName}?: ${typeToTS(innerType, ext, base, e.paramName, 0)}`;
+          }
           return `${e.paramName}: ${typeToTS(e.typeNode, ext, base, e.paramName, 0)}`;
         });
         decl = `export declare function ${ident}(${params.join(', ')}): ${retDecl};`;

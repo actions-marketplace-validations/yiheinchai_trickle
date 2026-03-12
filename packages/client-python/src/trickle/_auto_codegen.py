@@ -96,12 +96,22 @@ def _merge_type_nodes(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
         if a.get("element") and b.get("element"):
             return {"kind": "array", "element": _merge_type_nodes(a["element"], b["element"])}
 
-    # Both tuples with same length
+    # Both tuples: merge positionally, handle different lengths
     if a.get("kind") == "tuple" and b.get("kind") == "tuple":
         a_els = a.get("elements", [])
         b_els = b.get("elements", [])
         if len(a_els) == len(b_els):
             return {"kind": "tuple", "elements": [_merge_type_nodes(ae, be) for ae, be in zip(a_els, b_els)]}
+        # Different lengths: merge common prefix, make extra elements optional
+        shorter = a_els if len(a_els) < len(b_els) else b_els
+        longer = a_els if len(a_els) >= len(b_els) else b_els
+        merged = []
+        for i in range(len(longer)):
+            if i < len(shorter):
+                merged.append(_merge_type_nodes(shorter[i], longer[i]))
+            else:
+                merged.append(_make_optional(longer[i]))
+        return {"kind": "tuple", "elements": merged}
 
     # Both unions: flatten
     if a.get("kind") == "union" and b.get("kind") == "union":
@@ -380,8 +390,13 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                     pname = param_names[i] if i < len(param_names) else f"arg{i}"
                     if pname == "self":
                         continue
-                    py_type = _type_to_python(el, extracted, base_name, pname)
-                    params.append(f"{pname}: {py_type}")
+                    is_opt, inner = _extract_optional(el)
+                    if is_opt:
+                        py_type = _type_to_python(inner, extracted, base_name, pname)
+                        params.append(f"{pname}: Optional[{py_type}] = None")
+                    else:
+                        py_type = _type_to_python(el, extracted, base_name, pname)
+                        params.append(f"{pname}: {py_type}")
             is_async = fn.get("isAsync", False)
             def_keyword = "async def" if is_async else "def"
             ret_type = _type_to_python(return_type, extracted, base_name, None)
@@ -401,8 +416,13 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                     pname = param_names[i] if i < len(param_names) else f"arg{i}"
                     if pname == "self":
                         continue
-                    py_type = _type_to_python(el, extracted, base_name, pname)
-                    params_list.append(f"{pname}: {py_type}")
+                    is_opt, inner = _extract_optional(el)
+                    if is_opt:
+                        py_type = _type_to_python(inner, extracted, base_name, pname)
+                        params_list.append(f"{pname}: Optional[{py_type}] = None")
+                    else:
+                        py_type = _type_to_python(el, extracted, base_name, pname)
+                        params_list.append(f"{pname}: {py_type}")
 
             # Return type
             is_async = fn.get("isAsync", False)
@@ -530,8 +550,13 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
             params = []
             for idx, el in enumerate(elements):
                 pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
-                py_type = _type_to_python(el, extracted, base_name, pname)
-                params.append(f"{pname}: {py_type}")
+                is_opt, inner = _extract_optional(el)
+                if is_opt:
+                    py_type = _type_to_python(inner, extracted, base_name, pname)
+                    params.append(f"{pname}: Optional[{py_type}] = None")
+                else:
+                    py_type = _type_to_python(el, extracted, base_name, pname)
+                    params.append(f"{pname}: {py_type}")
             result.append(f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ...")
         else:
             result.append(f"{def_keyword} {func_name}() -> {ret_type}: ...")
@@ -545,8 +570,13 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
                 params = []
                 for idx, el in enumerate(elements):
                     pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
-                    py_type = _type_to_python(el, extracted, base_name, pname)
-                    params.append(f"{pname}: {py_type}")
+                    is_opt, inner = _extract_optional(el)
+                    if is_opt:
+                        py_type = _type_to_python(inner, extracted, base_name, pname)
+                        params.append(f"{pname}: Optional[{py_type}] = None")
+                    else:
+                        py_type = _type_to_python(el, extracted, base_name, pname)
+                        params.append(f"{pname}: {py_type}")
                 sig = f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ..."
         elif args_type.get("kind") == "object" and args_type.get("properties"):
             sig = f"{def_keyword} {func_name}(input: {base_name}Input) -> {ret_type}: ..."

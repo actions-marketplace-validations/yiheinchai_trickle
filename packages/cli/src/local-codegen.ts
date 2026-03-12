@@ -97,7 +97,7 @@ function mergeTypeNodes(a: TypeNode, b: TypeNode): TypeNode {
     return { kind: "array", element: mergeTypeNodes(a.element, b.element) };
   }
 
-  // Both tuples with same length: merge positionally
+  // Both tuples: merge positionally, handle different lengths
   if (a.kind === "tuple" && b.kind === "tuple") {
     const aEls = a.elements || [];
     const bEls = b.elements || [];
@@ -107,6 +107,18 @@ function mergeTypeNodes(a: TypeNode, b: TypeNode): TypeNode {
         elements: aEls.map((el, i) => mergeTypeNodes(el, bEls[i])),
       };
     }
+    // Different lengths: merge common prefix, make extra elements optional
+    const shorter = aEls.length < bEls.length ? aEls : bEls;
+    const longer = aEls.length < bEls.length ? bEls : aEls;
+    const merged: TypeNode[] = [];
+    for (let i = 0; i < longer.length; i++) {
+      if (i < shorter.length) {
+        merged.push(mergeTypeNodes(shorter[i], longer[i]));
+      } else {
+        merged.push(makeOptional(longer[i]));
+      }
+    }
+    return { kind: "tuple", elements: merged };
   }
 
   // Both unions: flatten and deduplicate
@@ -520,6 +532,11 @@ function generateTsForFunction(fn: FunctionTypeData): string {
       const params = argEntries.map((entry) => {
         if (entry.typeNode.kind === "object" && Object.keys(entry.typeNode.properties || {}).length > 0) {
           return `${entry.paramName}: ${baseName}${toPascalCase(entry.paramName)}`;
+        }
+        // Check if parameter is optional (union with undefined)
+        const { isOptional, innerType } = extractOptional(entry.typeNode);
+        if (isOptional) {
+          return `${entry.paramName}?: ${typeNodeToTS(innerType, extracted, baseName, entry.paramName, 0)}`;
         }
         return `${entry.paramName}: ${typeNodeToTS(entry.typeNode, extracted, baseName, entry.paramName, 0)}`;
       });

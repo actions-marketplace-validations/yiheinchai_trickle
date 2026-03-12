@@ -71,6 +71,7 @@ trickle dev
   - [Async Function Types](#async-function-types)
   - [Python int vs float Type Narrowing](#python-int-vs-float-type-narrowing)
   - [Function Overloads from Multiple Observations](#function-overloads-from-multiple-observations)
+  - [Optional Parameter Detection](#optional-parameter-detection)
 - [CLI Reference](#cli-reference)
 - [Python Support](#python-support)
 - [Backend](#backend)
@@ -3706,6 +3707,58 @@ How it works:
 **E2E test:**
 ```bash
 npm run build --workspace=packages/client-js && node test-overload-e2e.js
+```
+
+---
+
+### Optional Parameter Detection
+
+When a function is called with different numbers of arguments across invocations, trickle detects which parameters are optional and generates proper optional types.
+
+```javascript
+// Your code — greet is called with 1 or 2 args
+greet("Alice");           // 1 arg
+greet("Bob", "Hi");       // 2 args
+
+search("test");           // 1 arg
+search("test", 5, 1);     // 3 args
+```
+
+```typescript
+// Generated .d.ts — overloads for different arg counts
+export declare function greet(name: string): string;
+export declare function greet(name: string, greeting: string): string;
+
+export declare function search(query: string): SearchOutput;
+export declare function search(query: string, limit: number, offset: number): SearchOutput;
+```
+
+```python
+# Generated .pyi — @overload + Optional with defaults
+@overload
+def greet(name: str) -> str: ...
+@overload
+def greet(name: str, greeting: str) -> str: ...
+def greet(name: str, greeting: Optional[str] = None) -> str: ...
+
+@overload
+def search(query: str) -> SearchOutput: ...
+@overload
+def search(query: str, limit: int, offset: int) -> SearchOutput: ...
+def search(query: str, limit: Optional[int] = None, offset: Optional[int] = None) -> SearchOutput: ...
+```
+
+How it works:
+- When merging observations with different tuple lengths (argument counts), the shorter tuple is padded with `undefined`/`None` for the missing positions
+- Extra parameters become `T | undefined` in the merged type
+- TypeScript renders these as `param?: T` in non-overload signatures
+- Python renders them as `param: Optional[T] = None`
+- When 2–5 distinct patterns exist, overloads are generated for each exact pattern, plus an implementation signature with optional params
+- Works for standalone functions and class methods
+
+**E2E test:**
+```bash
+npm run build --workspace=packages/client-js && node test-optional-e2e.js
 ```
 
 ---

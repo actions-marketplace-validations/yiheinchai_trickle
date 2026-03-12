@@ -83,6 +83,12 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
             props["requires_grad"] = {"kind": "primitive", "name": str(value.requires_grad)}
         if hasattr(value, "grad_fn") and value.grad_fn is not None:
             props["grad_fn"] = {"kind": "primitive", "name": type(value.grad_fn).__name__}
+        # Scalar tensors: capture actual value
+        if value.numel() <= 1:
+            try:
+                props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
+            except Exception:
+                pass
         return {"kind": "object", "properties": props, "class_name": "Tensor"}
 
     # --- NumPy ndarray ---
@@ -92,6 +98,11 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
             "shape": {"kind": "primitive", "name": str(list(value.shape))},
             "dtype": {"kind": "primitive", "name": str(value.dtype)},
         }
+        if value.size <= 1:
+            try:
+                props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
+            except Exception:
+                pass
         return {"kind": "object", "properties": props, "class_name": "ndarray"}
 
     # --- PyTorch nn.Module (MUST come before callable — modules are callable) ---

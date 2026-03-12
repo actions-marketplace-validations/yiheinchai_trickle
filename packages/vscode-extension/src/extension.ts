@@ -596,6 +596,10 @@ function extractShapeStr(type: TypeNode): string {
   if (gradFn?.kind === 'primitive' && gradFn.name) {
     result += ` (${gradFn.name})`;
   }
+  const val = type.properties['value'];
+  if (val?.kind === 'primitive' && val.name) {
+    result += ` = ${val.name}`;
+  }
   return result;
 }
 
@@ -750,6 +754,12 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
   const gradFnProp = properties['grad_fn'];
   if (gradFnProp?.kind === 'primitive' && gradFnProp.name) {
     parts.push(`(${gradFnProp.name})`);
+  }
+
+  // Scalar value: show actual number for 0-dim / 1-element tensors
+  const valueProp = properties['value'];
+  if (valueProp?.kind === 'primitive' && valueProp.name) {
+    parts.push(`= ${valueProp.name}`);
   }
 
   return parts.join(' ');

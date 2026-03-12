@@ -90,6 +90,19 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(fileWatcher);
   }
 
+  // Watch for source file edits — clear stale hints when a tracked file changes
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument(e => {
+      if (e.contentChanges.length === 0) return; // metadata-only change
+      const filePath = e.document.uri.fsPath;
+      if (varIndex.has(filePath)) {
+        varIndex.delete(filePath);
+        updateStatusBar();
+        refreshInlineHints();
+      }
+    }),
+  );
+
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('trickle.refreshVariables', () => {

@@ -244,6 +244,37 @@ export async function fetchStubs(opts?: {
   });
 }
 
+export interface FunctionSample {
+  functionName: string;
+  sampleInput: unknown;
+  sampleOutput: unknown;
+}
+
+export async function fetchFunctionSamples(): Promise<FunctionSample[]> {
+  const { functions } = await listFunctions({ limit: 500 });
+  const samples: FunctionSample[] = [];
+  for (const fn of functions) {
+    try {
+      const data = await fetchJson<{ snapshots: Array<{ sample_input: unknown; sample_output: unknown }> }>(
+        `/api/types/${fn.id}`
+      );
+      if (data.snapshots && data.snapshots.length > 0) {
+        const snap = data.snapshots[0];
+        if (snap.sample_input || snap.sample_output) {
+          samples.push({
+            functionName: fn.function_name,
+            sampleInput: snap.sample_input,
+            sampleOutput: snap.sample_output,
+          });
+        }
+      }
+    } catch {
+      // Skip functions with no data
+    }
+  }
+  return samples;
+}
+
 export interface MockRoute {
   method: string;
   path: string;

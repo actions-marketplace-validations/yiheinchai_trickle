@@ -13,6 +13,8 @@ interface FunctionTypeData {
   module?: string;
   env?: string;
   observedAt?: string;
+  sampleInput?: unknown;
+  sampleOutput?: unknown;
 }
 
 function tryParseJson(value: string): unknown {
@@ -65,6 +67,8 @@ function collectFunctionTypes(opts: {
       module: moduleName,
       env: (snapshot.env as string) || environment,
       observedAt: snapshot.observed_at as string,
+      sampleInput: snapshot.sample_input ? tryParseJson(snapshot.sample_input as string) : undefined,
+      sampleOutput: snapshot.sample_output ? tryParseJson(snapshot.sample_output as string) : undefined,
     });
   }
 

@@ -178,7 +178,7 @@ export function generateFunctionTypes(
   functionName: string,
   argsType: TypeNode,
   returnType: TypeNode,
-  meta?: { module?: string; env?: string; observedAt?: string },
+  meta?: { module?: string; env?: string; observedAt?: string; sampleInput?: unknown; sampleOutput?: unknown },
 ): string {
   const baseName = toPascalCase(functionName);
   const extracted: ExtractedInterface[] = [];
@@ -298,14 +298,41 @@ export function generateFunctionTypes(
     funcDecl = `export declare function ${funcIdent}(${params.join(", ")}): ${outputName};`;
   }
 
+  // ── Build @example JSDoc from sample data ──
+
+  const exampleLines: string[] = [];
+  if (meta?.sampleInput !== undefined || meta?.sampleOutput !== undefined) {
+    exampleLines.push(`/**`);
+    if (meta?.sampleInput !== undefined) {
+      exampleLines.push(` * @example`);
+      exampleLines.push(` * // Sample input:`);
+      const inputStr = JSON.stringify(meta.sampleInput, null, 2);
+      for (const line of inputStr.split('\n')) {
+        exampleLines.push(` * ${line}`);
+      }
+    }
+    if (meta?.sampleOutput !== undefined) {
+      if (!meta?.sampleInput) exampleLines.push(` * @example`);
+      exampleLines.push(` * // Sample output:`);
+      const outputStr = JSON.stringify(meta.sampleOutput, null, 2);
+      for (const line of outputStr.split('\n')) {
+        exampleLines.push(` * ${line}`);
+      }
+    }
+    exampleLines.push(` */`);
+  }
+
   // ── Assemble output ──
-  // Order: extracted interfaces → input → output → function declaration
+  // Order: extracted interfaces → input → output → JSDoc with examples → function declaration
 
   const result: string[] = [];
   if (extractedLines.length > 0) {
     result.push(...extractedLines);
   }
   result.push(...lines);
+  if (exampleLines.length > 0) {
+    result.push(...exampleLines);
+  }
   result.push(funcDecl);
 
   return result.join("\n");
@@ -322,6 +349,8 @@ export function generateAllTypes(
     module?: string;
     env?: string;
     observedAt?: string;
+    sampleInput?: unknown;
+    sampleOutput?: unknown;
   }>,
 ): string {
   const sections: string[] = [];
@@ -337,6 +366,8 @@ export function generateAllTypes(
         module: fn.module,
         env: fn.env,
         observedAt: fn.observedAt,
+        sampleInput: fn.sampleInput,
+        sampleOutput: fn.sampleOutput,
       }),
     );
     sections.push("");

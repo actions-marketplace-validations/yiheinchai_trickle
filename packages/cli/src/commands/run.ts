@@ -350,7 +350,9 @@ async function executeSingleRun(
 
     // Start live type generation for backend mode
     let liveStop: (() => void) | null = null;
-    if (singleFile && !opts.stubs) {
+    if (opts.stubs) {
+      liveStop = startLiveStubsGeneration(opts.stubs);
+    } else if (singleFile) {
       liveStop = startLiveBackendTypes(singleFile);
     }
 
@@ -567,6 +569,49 @@ function startLiveBackendTypes(sourceFile: string): () => void {
   // Poll every 3 seconds (backend mode has higher overhead)
   const interval = setInterval(poll, 3000);
 
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+  };
+}
+
+// ── Live stubs generation during run ──
+
+function startLiveStubsGeneration(stubsDir: string): () => void {
+  let lastTotal = 0;
+  let stopped = false;
+
+  const poll = async () => {
+    if (stopped) return;
+    try {
+      const { stubsCommand } = await import("./stubs");
+      const result = await stubsCommand(stubsDir, { silent: true });
+
+      // Count .d.ts files in the stubs dir to track progress
+      const files = fs.readdirSync(stubsDir).filter(f => f.endsWith('.d.ts'));
+      let funcCount = 0;
+      for (const f of files) {
+        const content = fs.readFileSync(path.join(stubsDir, f), 'utf-8');
+        funcCount += (content.match(/export declare function/g) || []).length;
+      }
+
+      if (funcCount > lastTotal) {
+        const newCount = funcCount - lastTotal;
+        const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+        console.log(
+          chalk.gray(`  [${ts}]`) +
+          chalk.green(` +${newCount} type(s)`) +
+          chalk.gray(` → ${stubsDir}`) +
+          chalk.gray(` (${funcCount} total)`),
+        );
+        lastTotal = funcCount;
+      }
+    } catch {
+      // Never crash — background helper
+    }
+  };
+
+  const interval = setInterval(poll, 3000);
   return () => {
     stopped = true;
     clearInterval(interval);
@@ -887,6 +932,8 @@ function injectObservation(
   const env: Record<string, string> = {};
 
   if (
+    command.includes("trickle-observe/observe") ||
+    command.includes("trickle-observe/register") ||
     command.includes("trickle/observe") ||
     command.includes("trickle/register") ||
     command.includes("-m trickle")
@@ -964,6 +1011,12 @@ function injectObservation(
 
 function resolveObservePath(): string {
   try {
+    return require.resolve("trickle-observe/observe");
+  } catch {
+    // Not in node_modules
+  }
+
+  try {
     return require.resolve("trickle/observe");
   } catch {
     // Not in node_modules
@@ -979,12 +1032,12 @@ function resolveObservePath(): string {
   );
   if (fs.existsSync(monorepoPath)) return monorepoPath;
 
-  return "trickle/observe";
+  return "trickle-observe/observe";
 }
 
 function resolveObserveEsmPath(): string | null {
   try {
-    return require.resolve("trickle/observe-esm");
+    return require.resolve("trickle-observe/observe-esm");
   } catch {
     // Not in node_modules
   }

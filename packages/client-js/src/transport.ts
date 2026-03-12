@@ -178,8 +178,11 @@ function silentError(): void {
 
 // Register process exit handler to flush remaining events
 if (typeof process !== 'undefined' && process.on) {
+  let flushing = false;
   process.on('beforeExit', () => {
-    flush().catch(silentError);
+    if (flushing || queue.length === 0) return;
+    flushing = true;
+    flush().catch(silentError).finally(() => { flushing = false; stopTimer(); });
   });
 
   // SIGTERM / SIGINT: attempt a sync-ish flush

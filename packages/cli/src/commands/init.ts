@@ -283,13 +283,13 @@ function updatePackageJson(dir: string, info: ProjectInfo): { scriptsAdded: stri
   if (startScript && !scripts["trickle:start"]) {
     // Check if it's a node command we can add -r to
     if (startScript.match(/\bnode\s/)) {
-      scripts["trickle:start"] = startScript.replace(/\bnode\s/, "node -r trickle/register ");
+      scripts["trickle:start"] = startScript.replace(/\bnode\s/, "node -r trickle-observe/register ");
       added.push("trickle:start");
     } else if (startScript.match(/\bts-node\s/)) {
-      scripts["trickle:start"] = startScript.replace(/\bts-node\s/, "ts-node -r trickle/register ");
+      scripts["trickle:start"] = startScript.replace(/\bts-node\s/, "ts-node -r trickle-observe/register ");
       added.push("trickle:start");
     } else if (startScript.match(/\bnodemon\s/)) {
-      scripts["trickle:start"] = startScript.replace(/\bnodemon\s/, "nodemon -r trickle/register ");
+      scripts["trickle:start"] = startScript.replace(/\bnodemon\s/, "nodemon -r trickle-observe/register ");
       added.push("trickle:start");
     }
   }

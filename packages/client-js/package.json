@@ -1,6 +1,6 @@
 {
-  "name": "trickle",
-  "version": "0.1.0",
+  "name": "trickle-observe",
+  "version": "0.2.2",
   "description": "Runtime type observability for JavaScript applications",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -11,7 +11,8 @@
     "./observe-esm": "./observe-esm.mjs",
     "./auto": "./auto.js",
     "./auto-env": "./auto-env.js",
-    "./auto-esm": "./auto-esm.mjs"
+    "./auto-esm": "./auto-esm.mjs",
+    "./vite-plugin": "./dist/vite-plugin.js"
   },
   "scripts": {
     "build": "tsc",

@@ -66,7 +66,7 @@ program
 
 // trickle run <command>
 program
-  .command("run [command]")
+  .command("run [command...]")
   .description("Run any command or file with universal type observation — zero code changes needed")
   .option("--module <name>", "Module name for captured functions")
   .option("--include <patterns>", "Comma-separated substrings — only observe matching modules")
@@ -74,7 +74,9 @@ program
   .option("--stubs <dir>", "Auto-generate .d.ts/.pyi type stubs in this directory after the run")
   .option("--annotate <path>", "Auto-annotate this file or directory with types after the run")
   .option("-w, --watch", "Watch source files and re-run on changes")
-  .action(async (command: string | undefined, opts) => {
+  .allowUnknownOption()
+  .action(async (commandParts: string[], opts) => {
+    const command = commandParts.length > 0 ? commandParts.join(" ") : undefined;
     await runCommand(command, opts);
   });
 

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
-import { fetchAnnotations, AnnotationEntry } from "../api-client";
+import { fetchAnnotations, fetchFunctionSamples, AnnotationEntry, FunctionSample } from "../api-client";
 
 export interface AnnotateOptions {
   env?: string;
@@ -151,8 +151,9 @@ function annotateJSDoc(source: string, annotations: Record<string, AnnotationEnt
 
 /**
  * Annotate a TypeScript file with inline type annotations on function signatures.
+ * When samples are provided, adds JSDoc @example comments even for already-typed functions.
  */
-function annotateTS(source: string, annotations: Record<string, AnnotationEntry>): string {
+function annotateTS(source: string, annotations: Record<string, AnnotationEntry>, samples?: Record<string, FunctionSample>): string {
   const lines = source.split("\n");
   const result: string[] = [];
 
@@ -166,13 +167,67 @@ function annotateTS(source: string, annotations: Record<string, AnnotationEntry>
     }
 
     const annotation = annotations[info.fnName];
-    if (!annotation) {
+    const sample = samples?.[info.fnName];
+
+    if (!annotation && !sample) {
       result.push(line);
       continue;
     }
 
-    // Skip if already typed (has a colon in param list or return annotation)
+    // Add JSDoc with @example from sample data (even for already-typed functions)
+    if (sample) {
+      // Check if there's already a trickle JSDoc comment above
+      const prevIdx = result.length - 1;
+      let alreadyHasTrickleDoc = false;
+      if (prevIdx >= 0) {
+        // Look back for a JSDoc block containing @example and "trickle"
+        let j = prevIdx;
+        while (j >= 0 && !result[j].trim().startsWith("/**")) j--;
+        if (j >= 0 && result[prevIdx].trim().endsWith("*/")) {
+          const block = result.slice(j, prevIdx + 1).join("\n");
+          if (block.includes("@example") && block.includes("trickle")) {
+            alreadyHasTrickleDoc = true;
+          }
+        }
+      }
+
+      if (!alreadyHasTrickleDoc) {
+        const indent = line.match(/^(\s*)/)?.[1] || "";
+        const jsdocLines: string[] = [];
+        jsdocLines.push(`${indent}/** @trickle`);
+
+        if (sample.sampleInput !== undefined && sample.sampleInput !== null) {
+          jsdocLines.push(`${indent} * @example`);
+          jsdocLines.push(`${indent} * // Sample input:`);
+          const inputStr = JSON.stringify(sample.sampleInput, null, 2);
+          for (const l of inputStr.split('\n')) {
+            jsdocLines.push(`${indent} * ${l}`);
+          }
+        }
+
+        if (sample.sampleOutput !== undefined && sample.sampleOutput !== null) {
+          if (sample.sampleInput === undefined || sample.sampleInput === null) {
+            jsdocLines.push(`${indent} * @example`);
+          }
+          jsdocLines.push(`${indent} * // Sample output:`);
+          const outputStr = JSON.stringify(sample.sampleOutput, null, 2);
+          for (const l of outputStr.split('\n')) {
+            jsdocLines.push(`${indent} * ${l}`);
+          }
+        }
+
+        jsdocLines.push(`${indent} */`);
+        result.push(...jsdocLines);
+      }
+    }
+
+    // Skip inline type modification if already typed
     if (info.rawParams.includes(":") || line.includes("): ")) {
+      result.push(line);
+      continue;
+    }
+
+    if (!annotation) {
       result.push(line);
       continue;
     }
@@ -331,7 +386,18 @@ export async function annotateCommand(
     language: apiLanguage,
   });
 
-  if (!annotations || Object.keys(annotations).length === 0) {
+  // Fetch sample data for @example JSDoc
+  let samplesMap: Record<string, FunctionSample> = {};
+  try {
+    const samples = await fetchFunctionSamples();
+    for (const s of samples) {
+      samplesMap[s.functionName] = s;
+    }
+  } catch {
+    // Sample data is optional
+  }
+
+  if ((!annotations || Object.keys(annotations).length === 0) && Object.keys(samplesMap).length === 0) {
     console.log(chalk.yellow("\n  No observed types found. Run your code with trickle first.\n"));
     return;
   }
@@ -348,8 +414,8 @@ export async function annotateCommand(
     annotated = annotateJSDoc(source, annotations);
     mode = "JSDoc comments";
   } else {
-    annotated = annotateTS(source, annotations);
-    mode = "TypeScript annotations";
+    annotated = annotateTS(source, annotations, samplesMap);
+    mode = "TypeScript annotations + sample data";
   }
 
   // Count changes

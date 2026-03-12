@@ -1,0 +1,39 @@
+/loop 10min think of a feature that will improve this project and make it   
+  more useful for developers, and provide real value. the vision is that      
+  with minimal setup (one-liners changes) developers can turn their codebase  
+  to start recording runtime types and bring those runtime types to compile   
+  time so they get types information when they are programming (without       
+  having to explicitly spend time writing the types), so they can develop     
+  code faster because they know exactly the data they are manipulating. Once  
+  you have a feature that you think will be useful to add, implement it in  
+  full, test it e2e in full, and then commit and push (do not coauthor      
+  claude).
+
+
+
+  /loop 10min Think of a feature that will improve this project for real-world developer
+  use. The vision: with one-liner setup, developers can record runtime types
+  and see them at compile time (hover in VSCode, auto-generated .d.ts/.pyi).
+
+  CRITICAL RULES:
+  1. Before building ANYTHING, test the EXISTING features against a REAL
+     external project (not a synthetic test file you create). Clone a small
+     open-source TypeScript project, install trickle from npm, and try to
+     use it. Fix whatever breaks FIRST.
+  2. Only build a new feature after existing features work end-to-end in a
+     real project.
+  3. Test your new feature in that same real external project, not just
+     in-repo synthetic tests.
+  4. Your e2e test must: install from npm (not local path), run against
+     TypeScript (not plain JS), use a real test runner (vitest/jest), and
+     verify the output is actually useful (hover works in an editor, types
+     are correct).
+  5. Before publishing, verify: package name is available, exports resolve
+     correctly after npm install, binary works after global install.
+  6. Do NOT add features that sound impressive but aren't tested against
+     reality. One working feature > ten broken ones.
+
+  The project currently has broken: multi-word command parsing in `trickle run`,
+
+  vitest/vite plugin integration, TypeScript annotate with sample data, and
+  npm publishing setup. Fix these before adding anything new.

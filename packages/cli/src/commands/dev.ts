@@ -64,7 +64,7 @@ export async function devCommand(command: string | undefined, opts: DevOptions):
   console.log(chalk.gray("  " + "─".repeat(50)));
   console.log("");
 
-  // Inject -r trickle/register into the command
+  // Inject -r trickle-observe/register into the command
   const instrumentedCommand = injectRegister(appCommand);
 
   // Start the app process
@@ -140,30 +140,30 @@ function resolveAppCommand(explicitCommand: string | undefined): string | null {
 }
 
 /**
- * Inject `-r trickle/register` into a node/ts-node/nodemon command.
+ * Inject `-r trickle-observe/register` into a node/ts-node/nodemon command.
  * If the command already has it, return as-is.
  */
 function injectRegister(command: string): string {
   // Already instrumented
-  if (command.includes("trickle/register") || command.includes("trickle\\register")) {
+  if (command.includes("trickle-observe/register") || command.includes("trickle\\register")) {
     return command;
   }
 
   // Inject -r flag
   if (/\bnode\s/.test(command)) {
-    return command.replace(/\bnode\s/, "node -r trickle/register ");
+    return command.replace(/\bnode\s/, "node -r trickle-observe/register ");
   }
   if (/\bts-node\s/.test(command)) {
-    return command.replace(/\bts-node\s/, "ts-node -r trickle/register ");
+    return command.replace(/\bts-node\s/, "ts-node -r trickle-observe/register ");
   }
   if (/\bnodemon\s/.test(command)) {
-    return command.replace(/\bnodemon\s/, "nodemon -r trickle/register ");
+    return command.replace(/\bnodemon\s/, "nodemon -r trickle-observe/register ");
   }
 
   // Can't inject — run as-is with a warning
-  console.log(chalk.yellow("  Warning: Could not inject -r trickle/register into command."));
+  console.log(chalk.yellow("  Warning: Could not inject -r trickle-observe/register into command."));
   console.log(chalk.yellow("  Auto-instrumentation may not work. Consider using:"));
-  console.log(chalk.yellow(`    node -r trickle/register ${command}\n`));
+  console.log(chalk.yellow(`    node -r trickle-observe/register ${command}\n`));
   return command;
 }
 

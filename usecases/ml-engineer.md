@@ -97,6 +97,8 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - Optimizers: `Adam(lr=0.001, betas=(0.9, 0.999), ...)` with param count
 - LR schedulers: `StepLR(step_size=10, gamma=0.5, ...)` with current lr
 - Loss functions: `CrossEntropyLoss(ignore_index=-100, label_smoothing=0.0)`
+- DataLoaders: `DataLoader(batch_size=32, dataset_size=8000, batches=250, ...)`
+- Datasets: `TensorDataset(size=10000, tensors=2)`, `Subset(size=8000, from=TensorDataset)`
 - Variables inside imported local modules (your model.py, not torch internals)
 
 **Managing the session:**

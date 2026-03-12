@@ -1,13 +1,16 @@
 {
   "name": "trickle-vscode",
   "displayName": "Trickle - Runtime Variable Inspector",
-  "description": "Hover over any variable to see its runtime type and sample value captured by trickle",
+  "description": "Hover over any variable to see its runtime type, tensor shape, and sample value captured by trickle",
   "version": "0.1.0",
   "publisher": "trickle",
   "engines": {
     "vscode": "^1.80.0"
   },
-  "categories": ["Debuggers", "Other"],
+  "categories": [
+    "Debuggers",
+    "Other"
+  ],
   "activationEvents": [
     "workspaceContains:.trickle/variables.jsonl"
   ],
@@ -44,13 +47,16 @@
       }
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
     "package": "vsce package"
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@types/vscode": "^1.80.0",
     "typescript": "^5.4.0"
   }

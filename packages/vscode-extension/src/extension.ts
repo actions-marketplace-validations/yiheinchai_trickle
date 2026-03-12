@@ -17,6 +17,7 @@ interface VariableObservation {
 interface TypeNode {
   kind: string;
   name?: string;
+  class_name?: string;
   element?: TypeNode;
   elements?: TypeNode[];
   properties?: Record<string, TypeNode>;
@@ -39,12 +40,13 @@ export function activate(context: vscode.ExtensionContext) {
   // Load variable data
   loadAllVariables();
 
-  // Register hover provider for all common file types
+  // Register hover provider for all common file types (JS/TS and Python)
   const selector: vscode.DocumentSelector = [
     { scheme: 'file', language: 'typescript' },
     { scheme: 'file', language: 'typescriptreact' },
     { scheme: 'file', language: 'javascript' },
     { scheme: 'file', language: 'javascriptreact' },
+    { scheme: 'file', language: 'python' },
   ];
 
   context.subscriptions.push(
@@ -231,11 +233,20 @@ class TrickleHoverProvider implements vscode.HoverProvider {
 
     for (const obs of candidates) {
       const typeStr = typeNodeToString(obs.type);
-      parts.push(`**\`${obs.varName}\`** (line ${obs.line}): \`${typeStr}\``);
+      const className = obs.type?.class_name;
 
-      if (showSamples && obs.sample !== undefined) {
-        const sampleStr = formatSample(obs.sample);
-        parts.push(`\n*Sample:*\n\`\`\`json\n${sampleStr}\n\`\`\``);
+      // For tensors, show a richer display
+      if (className === 'Tensor' || className === 'ndarray') {
+        parts.push(`**\`${obs.varName}\`** (line ${obs.line}): \`${typeStr}\``);
+        if (showSamples && obs.sample !== undefined) {
+          parts.push(`\n*Value:* \`${obs.sample}\``);
+        }
+      } else {
+        parts.push(`**\`${obs.varName}\`** (line ${obs.line}): \`${typeStr}\``);
+        if (showSamples && obs.sample !== undefined) {
+          const sampleStr = formatSample(obs.sample);
+          parts.push(`\n*Sample:*\n\`\`\`json\n${sampleStr}\n\`\`\``);
+        }
       }
     }
 
@@ -268,27 +279,43 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
       for (const obs of observations) {
         const line = document.lineAt(lineNo - 1);
         const lineText = line.text;
+        const isPython = document.languageId === 'python';
 
         // Find the variable name in the line
         const varPattern = new RegExp(`\\b${escapeRegex(obs.varName)}\\b`);
         const match = varPattern.exec(lineText);
         if (!match) continue;
 
-        // Check this is a declaration line (has const/let/var before the variable)
+        // Check this is a declaration/assignment line
         const beforeVar = lineText.substring(0, match.index);
-        if (!/\b(const|let|var)\s+$/.test(beforeVar) && !/\bexport\s+(const|let|var)\s+$/.test(beforeVar)) continue;
-
-        // Find the end of the variable name — place hint after it
         const varEnd = match.index + obs.varName.length;
-
-        // Check if there's already a type annotation
         const afterVar = lineText.substring(varEnd).trimStart();
-        if (afterVar.startsWith(':') && !afterVar.startsWith(':=')) continue;
+
+        if (isPython) {
+          // Python: match `varName = ...` or `varName: type = ...` or tuple unpacking `a, b = ...`
+          // Also match inside for loops: `for x in ...`, with statements: `with ... as x:`
+          const isAssignment = afterVar.startsWith('=') && !afterVar.startsWith('==');
+          const isAnnotated = afterVar.startsWith(':');
+          const isForVar = /\bfor\s+$/.test(beforeVar) || /\bfor\s+.*,\s*$/.test(beforeVar);
+          const isWithAs = /\bas\s+$/.test(beforeVar);
+          const isBareAssignment = /^\s*$/.test(beforeVar) || /,\s*$/.test(beforeVar);
+          if (!((isBareAssignment || isForVar || isWithAs) && (isAssignment || isAnnotated))) continue;
+
+          // Skip if already has a type annotation (x: int = ...)
+          if (isAnnotated) continue;
+        } else {
+          // JS/TS: check for const/let/var
+          if (!/\b(const|let|var)\s+$/.test(beforeVar) && !/\bexport\s+(const|let|var)\s+$/.test(beforeVar)) continue;
+
+          // Check if there's already a type annotation
+          if (afterVar.startsWith(':') && !afterVar.startsWith(':=')) continue;
+        }
 
         const typeStr = typeNodeToString(obs.type);
         const position = new vscode.Position(lineNo - 1, varEnd);
 
-        const hint = new vscode.InlayHint(position, `: ${typeStr}`, vscode.InlayHintKind.Type);
+        const label = isPython ? `: ${typeStr}` : `: ${typeStr}`;
+        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
         hint.paddingLeft = false;
         hint.paddingRight = true;
 
@@ -326,7 +353,9 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Convert a TypeNode to a readable TypeScript type string */
+/** Convert a TypeNode to a readable type string.
+ * Handles both JS/TS types and Python types (tensors, ndarrays, etc.)
+ */
 function typeNodeToString(node: TypeNode, depth: number = 3): string {
   if (depth <= 0) return 'unknown';
 
@@ -348,14 +377,31 @@ function typeNodeToString(node: TypeNode, depth: number = 3): string {
       return '[]';
 
     case 'object': {
-      if (!node.properties) return 'object';
+      if (!node.properties) return node.class_name || 'object';
       const entries = Object.entries(node.properties);
-      if (entries.length === 0) return '{}';
+      if (entries.length === 0) return node.class_name || '{}';
 
-      // Special cases
+      // Special cases for JS
       if ('__date' in node.properties) return 'Date';
       if ('__regexp' in node.properties) return 'RegExp';
       if ('__error' in node.properties) return 'Error';
+
+      // Special case for PyTorch Tensor / NumPy ndarray:
+      // These have shape, dtype (and optionally device) as properties
+      // where the values are stored as primitive name strings like "[1, 16, 32]"
+      if (node.class_name === 'Tensor' || node.class_name === 'ndarray') {
+        return formatTensorType(node.class_name, node.properties);
+      }
+
+      // Named class
+      if (node.class_name) {
+        if (entries.length <= 4) {
+          const props = entries.map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
+          return `${node.class_name}(${props.join(', ')})`;
+        }
+        const first3 = entries.slice(0, 3).map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
+        return `${node.class_name}(${first3.join(', ')}, ...)`;
+      }
 
       if (entries.length <= 5) {
         const props = entries.map(([k, v]) => `${k}: ${typeNodeToString(v, depth - 1)}`);
@@ -367,6 +413,9 @@ function typeNodeToString(node: TypeNode, depth: number = 3): string {
     }
 
     case 'function':
+      if (node.name && node.name !== 'anonymous') {
+        return `${node.name}(...)`;
+      }
       return '(...args: any[]) => any';
 
     case 'promise':
@@ -384,6 +433,36 @@ function typeNodeToString(node: TypeNode, depth: number = 3): string {
     default:
       return 'unknown';
   }
+}
+
+/** Format a tensor type as a concise readable string.
+ * E.g. Tensor[1, 16, 32] float32 @cpu
+ */
+function formatTensorType(className: string, properties: Record<string, TypeNode>): string {
+  const parts: string[] = [className];
+
+  // Shape: stored as primitive with name like "[1, 16, 32]"
+  const shapeProp = properties['shape'];
+  if (shapeProp?.kind === 'primitive' && shapeProp.name) {
+    parts[0] = `${className}${shapeProp.name}`;
+  }
+
+  // Dtype: stored as primitive with name like "torch.float32"
+  const dtypeProp = properties['dtype'];
+  if (dtypeProp?.kind === 'primitive' && dtypeProp.name) {
+    // Shorten common dtypes
+    let dtype = dtypeProp.name;
+    dtype = dtype.replace('torch.', '').replace('numpy.', '');
+    parts.push(dtype);
+  }
+
+  // Device: stored as primitive with name like "cpu" or "cuda:0"
+  const deviceProp = properties['device'];
+  if (deviceProp?.kind === 'primitive' && deviceProp.name && deviceProp.name !== 'cpu') {
+    parts.push(`@${deviceProp.name}`);
+  }
+
+  return parts.join(' ');
 }
 
 /** Format a sample value for display */

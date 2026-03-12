@@ -579,6 +579,18 @@ function typeNodeToString(node: TypeNode, depth: number = 3): string {
         return formatTensorType(node.class_name, node.properties);
       }
 
+      // nn.Module types: show key params, omit 'params' count from inline display
+      if (node.class_name && node.properties['params']) {
+        const paramCount = node.properties['params']?.name;
+        const displayEntries = entries.filter(([k]) => k !== 'params');
+        if (displayEntries.length === 0) {
+          return paramCount ? `${node.class_name}(${paramCount} params)` : node.class_name;
+        }
+        const props = displayEntries.slice(0, 4).map(([k, v]) => `${k}=${typeNodeToString(v, depth - 1)}`);
+        const suffix = displayEntries.length > 4 ? ', ...' : '';
+        return `${node.class_name}(${props.join(', ')}${suffix})`;
+      }
+
       // Named class
       if (node.class_name) {
         if (entries.length <= 4) {

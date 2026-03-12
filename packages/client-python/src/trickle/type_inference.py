@@ -94,6 +94,11 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         }
         return {"kind": "object", "properties": props, "class_name": "ndarray"}
 
+    # --- PyTorch nn.Module (MUST come before callable — modules are callable) ---
+    _module_type = _get_torch_module_type()
+    if _module_type is not None and isinstance(value, _module_type):
+        return _infer_nn_module(value)
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -199,6 +204,104 @@ def _get_torch_tensor_type() -> Any:
     except ImportError:
         pass
     return _torch_tensor_type
+
+
+_torch_module_type: Any = None
+_torch_module_checked = False
+
+
+def _get_torch_module_type() -> Any:
+    """Lazily resolve torch.nn.Module."""
+    global _torch_module_type, _torch_module_checked
+    if _torch_module_checked:
+        return _torch_module_type
+    _torch_module_checked = True
+    try:
+        import torch.nn
+        _torch_module_type = torch.nn.Module
+    except ImportError:
+        pass
+    return _torch_module_type
+
+
+# Map of nn.Module subclass names to their key attributes to extract
+_MODULE_KEY_ATTRS: Dict[str, list] = {
+    "Linear": ["in_features", "out_features", "bias"],
+    "Conv1d": ["in_channels", "out_channels", "kernel_size", "stride", "padding"],
+    "Conv2d": ["in_channels", "out_channels", "kernel_size", "stride", "padding"],
+    "Conv3d": ["in_channels", "out_channels", "kernel_size", "stride", "padding"],
+    "BatchNorm1d": ["num_features", "eps", "momentum"],
+    "BatchNorm2d": ["num_features", "eps", "momentum"],
+    "LayerNorm": ["normalized_shape", "eps"],
+    "RMSNorm": ["normalized_shape", "eps"],
+    "Embedding": ["num_embeddings", "embedding_dim"],
+    "Dropout": ["p"],
+    "LSTM": ["input_size", "hidden_size", "num_layers", "bidirectional"],
+    "GRU": ["input_size", "hidden_size", "num_layers", "bidirectional"],
+    "RNN": ["input_size", "hidden_size", "num_layers", "bidirectional"],
+    "MultiheadAttention": ["embed_dim", "num_heads", "dropout"],
+    "TransformerEncoderLayer": ["d_model", "nhead", "dim_feedforward"],
+    "TransformerDecoderLayer": ["d_model", "nhead", "dim_feedforward"],
+}
+
+
+def _infer_nn_module(value: Any) -> Dict[str, Any]:
+    """Infer type for a torch.nn.Module instance.
+
+    Returns a TypeNode with class_name and key properties like
+    in_features, out_features for Linear layers.
+    """
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+
+    # Try to extract known key attributes for common module types
+    key_attrs = _MODULE_KEY_ATTRS.get(class_name, [])
+    for attr in key_attrs:
+        try:
+            val = getattr(value, attr, None)
+            if val is not None:
+                # Convert to a simple representation
+                if isinstance(val, bool):
+                    props[attr] = {"kind": "primitive", "name": str(val)}
+                elif isinstance(val, (int, float)):
+                    props[attr] = {"kind": "primitive", "name": str(val)}
+                elif isinstance(val, (list, tuple)):
+                    props[attr] = {"kind": "primitive", "name": str(val)}
+                else:
+                    props[attr] = {"kind": "primitive", "name": str(val)}
+        except Exception:
+            continue
+
+    # For unknown module types, try to extract any simple numeric/bool attributes
+    # Skip internal PyTorch module attrs that add noise
+    _SKIP_MODULE_ATTRS = frozenset({
+        "call_super_init", "dump_patches", "training",
+        "T_destination", "FSDP_WRAPPED_MODULE",
+    })
+    if not key_attrs:
+        try:
+            for attr_name in dir(value):
+                if attr_name.startswith("_") or attr_name in _SKIP_MODULE_ATTRS:
+                    continue
+                try:
+                    val = getattr(value, attr_name)
+                except Exception:
+                    continue
+                if isinstance(val, (int, float, bool)) and not callable(val):
+                    props[attr_name] = {"kind": "primitive", "name": str(val)}
+                if len(props) >= 6:
+                    break
+        except Exception:
+            pass
+
+    # Count parameters
+    try:
+        n_params = sum(p.numel() for p in value.parameters())
+        props["params"] = {"kind": "primitive", "name": str(n_params)}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": class_name}
 
 
 _numpy_ndarray_type: Any = None

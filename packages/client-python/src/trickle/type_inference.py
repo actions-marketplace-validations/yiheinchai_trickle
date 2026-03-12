@@ -89,6 +89,18 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
                 props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
             except Exception:
                 pass
+        # NaN/Inf detection for floating-point tensors
+        if value.is_floating_point() and value.numel() > 0:
+            try:
+                import torch
+                nan_count = int(torch.isnan(value).sum().item())
+                inf_count = int(torch.isinf(value).sum().item())
+                if nan_count > 0:
+                    props["nan_count"] = {"kind": "primitive", "name": str(nan_count)}
+                if inf_count > 0:
+                    props["inf_count"] = {"kind": "primitive", "name": str(inf_count)}
+            except Exception:
+                pass
         return {"kind": "object", "properties": props, "class_name": "Tensor"}
 
     # --- NumPy ndarray ---
@@ -101,6 +113,18 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         if value.size <= 1:
             try:
                 props["value"] = {"kind": "primitive", "name": f"{value.item():.6g}"}
+            except Exception:
+                pass
+        # NaN/Inf detection for floating-point arrays
+        if value.dtype.kind == 'f' and value.size > 0:
+            try:
+                import numpy as np
+                nan_count = int(np.isnan(value).sum())
+                inf_count = int(np.isinf(value).sum())
+                if nan_count > 0:
+                    props["nan_count"] = {"kind": "primitive", "name": str(nan_count)}
+                if inf_count > 0:
+                    props["inf_count"] = {"kind": "primitive", "name": str(inf_count)}
             except Exception:
                 pass
         return {"kind": "object", "properties": props, "class_name": "ndarray"}

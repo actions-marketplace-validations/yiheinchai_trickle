@@ -1,7 +1,6 @@
 ---
 name: publish
 description: "Publish all trickle packages (npm, PyPI, VSCode extension). Use when the user asks to publish, release, bump versions, or push packages to registries."
-disable-model-invocation: true
 argument-hint: "[version-bump: patch|minor|major]"
 ---
 
@@ -11,13 +10,23 @@ Publishes all packages in the trickle monorepo. Default bump is `patch`.
 
 ## Packages
 
-| Package | Registry | Name | Location |
-|---------|----------|------|----------|
-| JS Client | npm | `trickle-observe` | `packages/client-js` |
-| CLI | npm | `trickle-cli` | `packages/cli` |
-| Backend | npm | `trickle-backend` | `packages/backend` |
-| Python Client | PyPI | `trickle-observe` | `packages/client-python` |
+| Package          | Registry       | Name                        | Location                    |
+| ---------------- | -------------- | --------------------------- | --------------------------- |
+| JS Client        | npm            | `trickle-observe`           | `packages/client-js`        |
+| CLI              | npm            | `trickle-cli`               | `packages/cli`              |
+| Backend          | npm            | `trickle-backend`           | `packages/backend`          |
+| Python Client    | PyPI           | `trickle-observe`           | `packages/client-python`    |
 | VSCode Extension | VS Marketplace | `yiheinchai.trickle-vscode` | `packages/vscode-extension` |
+
+## Auth tokens
+
+All auth tokens are in `.env` at the repo root:
+
+- `NPM_ACCESS_TOKEN` — npm publish token
+- `PYPI_TOKEN` — PyPI API token (username is `__token__`)
+- `VSCODE_PAT` — VS Code Marketplace Personal Access Token
+
+Read `.env` at the start to get these values.
 
 ## Steps
 
@@ -25,7 +34,8 @@ Publishes all packages in the trickle monorepo. Default bump is `patch`.
 
 Determine the bump type from the argument (default: `patch`).
 
-**npm packages** (JS client, CLI, backend):
+**npm packages** (JS client, CLI, backend, VSCode extension):
+
 ```bash
 cd packages/client-js && npm version <bump> --no-git-tag-version
 cd packages/cli && npm version <bump> --no-git-tag-version
@@ -37,29 +47,47 @@ cd packages/vscode-extension && npm version <bump> --no-git-tag-version
 
 ### 2. Build all packages
 
-Run all builds in parallel:
+Run all builds **in parallel**:
+
 ```bash
 cd packages/client-js && npm run build
 cd packages/cli && npm run build
 cd packages/backend && npm run build
 cd packages/vscode-extension && npm run build
-cd packages/client-python && rm -rf dist/ && /opt/anaconda3/bin/python -m build
+cd packages/client-python && rm -rf dist/ && python3 -m build
 ```
+
+Note: Use `python3 -m build` (anaconda python at `/Users/yiheinchai/anaconda3/bin/python3`). If `build` module is missing, install with `python3 -m pip install build`.
 
 ### 3. Publish npm packages
 
-npm requires passkey auth, so give the user the commands to run manually:
+**IMPORTANT**: npm requires auth. Write the token to `~/.npmrc` temporarily:
+
+```bash
+echo "//registry.npmjs.org/:_authToken=<NPM_ACCESS_TOKEN>" > ~/.npmrc
+```
+
+Then publish each package (can run in parallel):
+
 ```bash
 cd packages/client-js && npm publish
 cd packages/cli && npm publish
 cd packages/backend && npm publish
 ```
 
+**Clean up after**: `rm -f ~/.npmrc`
+
+Note: Do NOT use a local `.npmrc` in the package directory — npm ignores workspace config files. The token MUST be in `~/.npmrc`.
+
 ### 4. Publish Python package
 
+Use twine with env vars for auth (no interactive prompt needed):
+
 ```bash
-cd packages/client-python && twine upload dist/*
+cd packages/client-python && TWINE_USERNAME=__token__ TWINE_PASSWORD='<PYPI_TOKEN>' twine upload dist/*
 ```
+
+If twine is broken (missing `rich` module etc.), fix with: `conda install rich` or `python3 -m pip install rich twine`.
 
 ### 5. Publish VSCode extension
 
@@ -69,16 +97,22 @@ The extension is in a monorepo, so `vsce package` picks up parent files. Work ar
 mkdir -p /tmp/trickle-vsce/dist
 cp packages/vscode-extension/package.json /tmp/trickle-vsce/
 cp packages/vscode-extension/dist/extension.js /tmp/trickle-vsce/dist/
-cd /tmp/trickle-vsce && vsce package --allow-missing-repository
-cd /tmp/trickle-vsce && vsce publish --allow-missing-repository
+cd /tmp/trickle-vsce && npx @vscode/vsce package --allow-missing-repository
+cd /tmp/trickle-vsce && npx @vscode/vsce publish --allow-missing-repository --pat '<VSCODE_PAT>'
 ```
+
+Note: Use `npx @vscode/vsce` (not bare `vsce` which may not be installed globally).
 
 ### 6. Update installed VSCode extension locally
 
 After publishing, also update the local installed copy so the user sees changes immediately:
+
 ```bash
 cp packages/vscode-extension/dist/extension.js ~/.vscode/extensions/yiheinchai.trickle-vscode-*/dist/extension.js
 ```
+
+If the extension isn't installed locally yet, skip this step.
+
 Then tell user to reload VSCode (Cmd+Shift+P -> "Developer: Reload Window").
 
 ### 7. Commit and push
@@ -91,8 +125,11 @@ git push
 
 ## Important notes
 
-- npm publish requires passkey auth — give user the commands to run themselves
+- Read `.env` for all auth tokens — never hardcode them
+- npm token MUST go in `~/.npmrc` (not package-level `.npmrc`) — clean up after publish
 - PyPI package name is `trickle-observe` (not `trickle`, which is taken by someone else)
 - VSCode publisher is `yiheinchai`
-- Python must be built with `/opt/anaconda3/bin/python` (system python3 points to 3.14 which lacks the `build` module)
+- Use `python3` from anaconda (`/Users/yiheinchai/anaconda3/bin/python3`, Python 3.11)
+- Use `npx @vscode/vsce` instead of bare `vsce`
 - Always build before publishing to ensure dist is up to date
+- Run all independent publish commands in parallel for speed

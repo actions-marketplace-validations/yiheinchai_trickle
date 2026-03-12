@@ -92,6 +92,8 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - Attribute assignments: `self.fc1 = nn.Linear(...)`, `self.encoder = ...`
 - Variables inside class methods with full function context (e.g., `GPT.forward`)
 - Return values: `return logits` shows `-> Tensor[B, T, vocab_size]` inline
+- Gradient context: tensors in `torch.no_grad()` show `[no_grad]` badge
+- Model mode: modules in eval mode show `[eval]` (helps catch `.eval()` bugs)
 - Variables inside imported local modules (your model.py, not torch internals)
 
 **Managing the session:**

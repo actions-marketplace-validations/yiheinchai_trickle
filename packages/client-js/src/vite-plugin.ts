@@ -19,6 +19,7 @@
  */
 
 import path from 'path';
+import fs from 'fs';
 
 export interface TricklePluginOptions {
   /** Substrings — only observe files whose paths contain one of these */
@@ -80,8 +81,18 @@ export function tricklePlugin(options: TricklePluginOptions = {}) {
     transform(code: string, id: string) {
       if (!shouldTransform(id)) return null;
 
+      // Read the original source file to get accurate line numbers.
+      // Vite transforms the code before our plugin (enforce: 'post'),
+      // so line numbers from `code` don't match the original .ts file.
+      let originalSource: string | null = null;
+      try {
+        originalSource = fs.readFileSync(id, 'utf-8');
+      } catch {
+        // If we can't read the original, we'll use transformed line numbers
+      }
+
       const moduleName = path.basename(id).replace(/\.[jt]sx?$/, '');
-      const transformed = transformEsmSource(code, id, moduleName, backendUrl, debug, traceVars);
+      const transformed = transformEsmSource(code, id, moduleName, backendUrl, debug, traceVars, originalSource);
       if (transformed === code) return null;
 
       if (debug) {
@@ -365,6 +376,63 @@ function extractDestructuredNames(pattern: string): string[] {
  * Prepends imports of the wrap/trace helpers, then inserts wrapper calls after
  * each function declaration body and trace calls after variable declarations.
  */
+/**
+ * Find the original line number for a simple variable declaration.
+ * Searches the original source lines for `const/let/var <varName>` near the expected position.
+ * Vite transforms typically remove lines (types, imports), so the original line is usually
+ * >= the transformed line. We search forward-biased (up to +80) but also a bit backward (-10).
+ */
+function findOriginalLine(origLines: string[], varName: string, transformedLine: number): number {
+  const pattern = new RegExp(`\\b(const|let|var)\\s+${escapeRegexStr(varName)}\\b`);
+
+  // Search: first try exact, then expand forward (more likely) and a bit backward
+  for (let delta = 0; delta <= 80; delta++) {
+    // Forward first (original line is usually after transformed line due to removed TS types)
+    const fwd = transformedLine - 1 + delta;
+    if (fwd >= 0 && fwd < origLines.length && pattern.test(origLines[fwd])) {
+      return fwd + 1;
+    }
+    // Also check backward (small range)
+    if (delta > 0 && delta <= 10) {
+      const bwd = transformedLine - 1 - delta;
+      if (bwd >= 0 && bwd < origLines.length && pattern.test(origLines[bwd])) {
+        return bwd + 1;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Find the original line number for a destructured declaration.
+ * Searches for const/let/var { or [ patterns containing at least one of the variable names.
+ */
+function findOriginalLineDestructured(origLines: string[], varNames: string[], transformedLine: number): number {
+  for (let delta = 0; delta <= 80; delta++) {
+    const fwd = transformedLine - 1 + delta;
+    if (fwd >= 0 && fwd < origLines.length) {
+      const line = origLines[fwd];
+      if (/\b(const|let|var)\s+[\[{]/.test(line) && varNames.some(n => line.includes(n))) {
+        return fwd + 1;
+      }
+    }
+    if (delta > 0 && delta <= 10) {
+      const bwd = transformedLine - 1 - delta;
+      if (bwd >= 0 && bwd < origLines.length) {
+        const line = origLines[bwd];
+        if (/\b(const|let|var)\s+[\[{]/.test(line) && varNames.some(n => line.includes(n))) {
+          return bwd + 1;
+        }
+      }
+    }
+  }
+  return -1;
+}
+
+function escapeRegexStr(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function transformEsmSource(
   source: string,
   filename: string,
@@ -372,6 +440,7 @@ function transformEsmSource(
   backendUrl: string,
   debug: boolean,
   traceVars: boolean,
+  originalSource?: string | null,
 ): string {
   // Match top-level and nested function declarations (including async, export)
   const funcRegex = /^[ \t]*(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
@@ -438,11 +507,30 @@ function transformEsmSource(
 
   if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0) return source;
 
+  // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
+  // Map transformed line numbers to original source line numbers.
+  if (originalSource && originalSource !== source) {
+    const origLines = originalSource.split('\n');
+
+    // For each variable insertion, find the declaration in the original source
+    for (const vi of varInsertions) {
+      const origLine = findOriginalLine(origLines, vi.varName, vi.lineNo);
+      if (origLine !== -1) vi.lineNo = origLine;
+    }
+    for (const di of destructInsertions) {
+      // Use the first variable name to locate the line
+      if (di.varNames.length > 0) {
+        const origLine = findOriginalLineDestructured(origLines, di.varNames, di.lineNo);
+        if (origLine !== -1) di.lineNo = origLine;
+      }
+    }
+  }
+
   // Build prefix — ALL imports first (ESM requires imports before any statements)
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
-  if (varInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0) {
     importLines.push(
       `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
       `import { join as __trickle_join } from 'node:path';`,
@@ -471,7 +559,7 @@ function transformEsmSource(
   // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
   // Uses synchronous writes (appendFileSync) to guarantee data persists even if Vitest
   // kills the worker abruptly without firing exit events.
-  if (varInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_var_tracer) {`,
       `  const _cache = new Set();`,

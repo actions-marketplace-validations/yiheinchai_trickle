@@ -192,11 +192,12 @@ def _transform_to_source(source: str, filename: str, module_name: str, trace_var
         if isinstance(node, ast.ClassDef):
             node.body = _transform_body(node.body, trace_vars=trace_vars)
 
-    # Transform function bodies for variable tracing
+    # Transform function bodies for variable tracing (including parameter traces)
     if trace_vars:
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                node.body = _transform_func_body(node.body)
+                param_traces = _make_param_traces(node)
+                node.body = param_traces + _transform_func_body(node.body)
 
     ast.fix_missing_locations(tree)
 
@@ -209,7 +210,7 @@ def _transform_to_source(source: str, filename: str, module_name: str, trace_var
 
 
 def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> str:
-    """Generate the Python source code that sets up __trickle_wrap and _trickle_tv.
+    """Generate the Python source code that sets up _trickle_wrap and _trickle_tv.
 
     Uses single-underscore prefix (_trickle_tv, not __trickle_tv) to avoid
     Python's name mangling inside class bodies.
@@ -224,10 +225,10 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
     # is redundant (the tracer captures all values) and can interfere with
     # frameworks like PyTorch whose tensors don't work through proxies.
     if trace_vars:
-        lines.append("def __trickle_wrap(__fn, __name): return __fn")
+        lines.append("def _trickle_wrap(__fn, __name): return __fn")
     else:
         lines.extend([
-            "def __trickle_wrap(__fn, __name):",
+            "def _trickle_wrap(__fn, __name):",
             "    try:",
             "        from trickle.decorator import _wrap",
             f"        return _wrap(__fn, name=__name, module={module_name!r})",
@@ -287,7 +288,7 @@ def _transform_source(source: str, filename: str, trace_vars: bool = True) -> An
 
         def process_data(items):
             ...
-        process_data = __trickle_wrap(process_data, 'process_data')  # inserted
+        process_data = _trickle_wrap(process_data, 'process_data')  # inserted
 
     For each variable assignment, inserts a trace call::
 
@@ -307,11 +308,12 @@ def _transform_source(source: str, filename: str, trace_vars: bool = True) -> An
         if isinstance(node, ast.ClassDef):
             node.body = _transform_body(node.body, trace_vars=trace_vars)
 
-    # Transform function bodies for variable tracing
+    # Transform function bodies for variable tracing (including parameter traces)
     if trace_vars:
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                node.body = _transform_func_body(node.body)
+                param_traces = _make_param_traces(node)
+                node.body = param_traces + _transform_func_body(node.body)
 
     ast.fix_missing_locations(tree)
     return compile(tree, filename, "exec")
@@ -334,11 +336,11 @@ def _transform_body(body: list, trace_vars: bool = True) -> list:
             if node.name.startswith("_"):
                 continue
 
-            # Insert: func_name = __trickle_wrap(func_name, 'func_name')
+            # Insert: func_name = _trickle_wrap(func_name, 'func_name')
             wrap_stmt = ast.Assign(
                 targets=[ast.Name(id=node.name, ctx=ast.Store())],
                 value=ast.Call(
-                    func=ast.Name(id="__trickle_wrap", ctx=ast.Load()),
+                    func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
                     args=[
                         ast.Name(id=node.name, ctx=ast.Load()),
                         ast.Constant(value=node.name),
@@ -484,6 +486,44 @@ def _make_trace_stmts(node: ast.AST) -> list:
                     ast.Name(id=name, ctx=ast.Load()),
                     ast.Constant(value=name),
                     ast.Constant(value=getattr(node, "lineno", 0)),
+                ],
+                keywords=[],
+            )
+        )
+        stmts.append(trace_call)
+    return stmts
+
+
+def _make_param_traces(node: ast.AST) -> list:
+    """Generate trace calls for function parameters.
+
+    For ``def forward(self, x, mask=None):``, this produces trace calls
+    for x and mask (skipping self/cls and _-prefixed params) inserted
+    at the start of the function body.
+    """
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return []
+    skip = {"self", "cls"}
+    names = []
+    for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+        name = arg.arg
+        if name in skip or name.startswith("_"):
+            continue
+        names.append(name)
+    if node.args.vararg and not node.args.vararg.arg.startswith("_"):
+        names.append(node.args.vararg.arg)
+    if node.args.kwarg and not node.args.kwarg.arg.startswith("_"):
+        names.append(node.args.kwarg.arg)
+    stmts = []
+    lineno = getattr(node, "lineno", 0)
+    for name in names:
+        trace_call = ast.Expr(
+            value=ast.Call(
+                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
+                args=[
+                    ast.Name(id=name, ctx=ast.Load()),
+                    ast.Constant(value=name),
+                    ast.Constant(value=lineno),
                 ],
                 keywords=[],
             )

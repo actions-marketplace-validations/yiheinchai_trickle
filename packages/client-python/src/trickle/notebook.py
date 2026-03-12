@@ -130,15 +130,17 @@ class _TrickleCellTransformer(ast.NodeTransformer):
             new_body.append(node)
 
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                # Recurse into function bodies
-                node.body = self._transform_func_body(node.body)
+                # Recurse into function bodies with parameter traces
+                param_traces = self._make_param_traces(node)
+                node.body = param_traces + self._transform_func_body(node.body)
                 continue
 
             if isinstance(node, ast.ClassDef):
                 # Recurse into class bodies (methods)
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        item.body = self._transform_func_body(item.body)
+                        param_traces = self._make_param_traces(item)
+                        item.body = param_traces + self._transform_func_body(item.body)
                 continue
 
             if isinstance(node, (ast.For, ast.AsyncFor)):
@@ -225,6 +227,23 @@ class _TrickleCellTransformer(ast.NodeTransformer):
             return []
         names = _names_from_target(node.target)
         names = [n for n in names if not n.startswith("_")]
+        return [self._make_call(name, getattr(node, "lineno", 0)) for name in names]
+
+    def _make_param_traces(self, node: ast.AST) -> list:
+        """Generate trace calls for function parameters."""
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return []
+        skip = {"self", "cls"}
+        names = []
+        for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+            name = arg.arg
+            if name in skip or name.startswith("_"):
+                continue
+            names.append(name)
+        if node.args.vararg and not node.args.vararg.arg.startswith("_"):
+            names.append(node.args.vararg.arg)
+        if node.args.kwarg and not node.args.kwarg.arg.startswith("_"):
+            names.append(node.args.kwarg.arg)
         return [self._make_call(name, getattr(node, "lineno", 0)) for name in names]
 
     def _make_call(self, name: str, lineno: int) -> ast.Expr:

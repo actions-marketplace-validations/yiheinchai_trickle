@@ -133,10 +133,11 @@ def _transform_module_source(source: str, filename: str, module_name: str) -> st
         if isinstance(node, ast.ClassDef):
             node.body = _transform_body(node.body)
 
-    # Transform function bodies
+    # Transform function bodies (including parameter traces)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            node.body = _transform_func_body(node.body)
+            param_traces = _make_param_traces(node)
+            node.body = param_traces + _transform_func_body(node.body)
 
     ast.fix_missing_locations(tree)
 
@@ -321,6 +322,44 @@ def _make_trace_stmts(node: ast.AST) -> list:
                     ast.Name(id=name, ctx=ast.Load()),
                     ast.Constant(value=name),
                     ast.Constant(value=getattr(node, "lineno", 0)),
+                ],
+                keywords=[],
+            )
+        )
+        stmts.append(trace_call)
+    return stmts
+
+
+def _make_param_traces(node: ast.AST) -> list:
+    """Generate trace calls for function parameters.
+
+    For ``def forward(self, x, mask=None):``, this produces trace calls
+    for x and mask (skipping self/cls and _-prefixed params) inserted
+    at the start of the function body.
+    """
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return []
+    skip = {"self", "cls"}
+    names = []
+    for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
+        name = arg.arg
+        if name in skip or name.startswith("_"):
+            continue
+        names.append(name)
+    if node.args.vararg and not node.args.vararg.arg.startswith("_"):
+        names.append(node.args.vararg.arg)
+    if node.args.kwarg and not node.args.kwarg.arg.startswith("_"):
+        names.append(node.args.kwarg.arg)
+    stmts = []
+    lineno = getattr(node, "lineno", 0)
+    for name in names:
+        trace_call = ast.Expr(
+            value=ast.Call(
+                func=ast.Name(id="_trickle_tv", ctx=ast.Load()),
+                args=[
+                    ast.Name(id=name, ctx=ast.Load()),
+                    ast.Constant(value=name),
+                    ast.Constant(value=lineno),
                 ],
                 keywords=[],
             )

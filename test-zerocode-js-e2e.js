@@ -11,13 +11,11 @@ const path = require("path");
 const fs = require("fs");
 
 const LIB_FILE = path.resolve("test-zerocode-lib.js");
-const DTS_FILE = path.resolve("test-zerocode-lib.d.ts");
 const TRICKLE_DIR = path.resolve(".trickle");
+const DTS_FILE = path.join(TRICKLE_DIR, "types", "test-zerocode-lib.d.ts");
 const JSONL_FILE = path.join(TRICKLE_DIR, "observations.jsonl");
 
 function cleanup() {
-  try { fs.unlinkSync(DTS_FILE); } catch {}
-  try { fs.unlinkSync(JSONL_FILE); } catch {}
   try { fs.rmSync(TRICKLE_DIR, { recursive: true }); } catch {}
 }
 

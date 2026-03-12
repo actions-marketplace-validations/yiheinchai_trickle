@@ -9,7 +9,7 @@
  * 1. App runs successfully with --import flag
  * 2. observations.jsonl captures all exported functions
  * 3. paramNames are preserved from ESM source
- * 4. .d.ts file is generated with correct types
+ * 4. .d.ts file is generated in .trickle/types/ with correct types
  * 5. Async exported functions are handled
  */
 const { spawn } = require("child_process");
@@ -17,12 +17,11 @@ const path = require("path");
 const fs = require("fs");
 
 const LIB_FILE = path.resolve("test-esm-lib.mjs");
-const DTS_FILE = path.resolve("test-esm-lib.d.ts");
+const DTS_FILE = path.resolve(".trickle/types/test-esm-lib.d.ts");
 const TRICKLE_DIR = path.resolve(".trickle");
 const JSONL_FILE = path.join(TRICKLE_DIR, "observations.jsonl");
 
 function cleanup() {
-  try { fs.unlinkSync(DTS_FILE); } catch {}
   try { fs.unlinkSync(JSONL_FILE); } catch {}
   try { fs.rmSync(TRICKLE_DIR, { recursive: true }); } catch {}
 }

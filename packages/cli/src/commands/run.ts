@@ -538,6 +538,9 @@ function startLiveBackendTypes(sourceFile: string): () => void {
   const baseName = path.basename(sourceFile, ext);
   const sidecarName = isPython ? `${baseName}.pyi` : `${baseName}.d.ts`;
   const sidecarPath = path.join(dir, sidecarName);
+  // Also check .trickle/types/ where auto-codegen now writes
+  const trickleDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+  const trickleTypesPath = path.join(trickleDir, 'types', `${baseName}.d.ts`);
 
   const poll = async () => {
     if (stopped) return;
@@ -545,8 +548,10 @@ function startLiveBackendTypes(sourceFile: string): () => void {
       const { stubsCommand } = await import("./stubs");
       await stubsCommand(dir, { silent: true });
 
-      if (fs.existsSync(sidecarPath)) {
-        const content = fs.readFileSync(sidecarPath, "utf-8");
+      // Check both old sidecar path and new .trickle/types/ path
+      const effectivePath = fs.existsSync(trickleTypesPath) ? trickleTypesPath : sidecarPath;
+      if (fs.existsSync(effectivePath)) {
+        const content = fs.readFileSync(effectivePath, "utf-8");
         const funcCount = (content.match(/export declare function/g) || []).length;
 
         if (funcCount > lastFunctionCount) {
@@ -635,12 +640,16 @@ async function autoGenerateSidecar(filePath: string): Promise<void> {
     const { stubsCommand } = await import("./stubs");
     await stubsCommand(dir, { silent: true });
 
-    // Check if the sidecar was generated
-    if (fs.existsSync(sidecarPath)) {
-      const stats = fs.statSync(sidecarPath);
+    // Check if types were generated (either sidecar or .trickle/types/)
+    const tDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+    const tTypesPath = path.join(tDir, 'types', `${baseName}.d.ts`);
+    const effectiveSidecar = fs.existsSync(tTypesPath) ? tTypesPath : sidecarPath;
+    const displayName = fs.existsSync(tTypesPath) ? `${baseName}.d.ts` : sidecarName;
+    if (fs.existsSync(effectiveSidecar)) {
+      const stats = fs.statSync(effectiveSidecar);
       if (stats.size > 0) {
         console.log(
-          chalk.green(`\n  Types written to ${chalk.bold(sidecarName)}`),
+          chalk.green(`\n  Types written to ${chalk.bold(displayName)}`),
         );
       }
     }

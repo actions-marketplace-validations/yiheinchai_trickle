@@ -10,7 +10,7 @@
  * 3. TypeScript generics (function<T>(...)) are handled
  * 4. Multiline TypeScript signatures are handled
  * 5. paramNames extracted correctly from TS source
- * 6. .trickle.d.ts file generated (not .d.ts — avoids TS conflict)
+ * 6. .d.ts file generated in .trickle/types/ directory
  * 7. export interface/type are NOT instrumented (TS-only constructs)
  */
 const { spawn } = require("child_process");
@@ -18,13 +18,11 @@ const path = require("path");
 const fs = require("fs");
 
 const LIB_FILE = path.resolve("test-ts-lib.ts");
-const TRICKLE_DTS = path.resolve("test-ts-lib.trickle.d.ts");
 const TRICKLE_DIR = path.resolve(".trickle");
+const TRICKLE_DTS = path.join(TRICKLE_DIR, "types", "test-ts-lib.d.ts");
 const JSONL_FILE = path.join(TRICKLE_DIR, "observations.jsonl");
 
 function cleanup() {
-  try { fs.unlinkSync(TRICKLE_DTS); } catch {}
-  try { fs.unlinkSync(JSONL_FILE); } catch {}
   try { fs.rmSync(TRICKLE_DIR, { recursive: true }); } catch {}
 }
 
@@ -138,32 +136,32 @@ async function run() {
       console.log("  export interface QueryResult NOT captured (correct — TS-only) OK");
     }
 
-    // === Step 4: Verify .trickle.d.ts generated ===
-    console.log("\n=== Step 4: Verify .trickle.d.ts file ===");
+    // === Step 4: Verify .d.ts generated in .trickle/types/ ===
+    console.log("\n=== Step 4: Verify .trickle/types/ .d.ts file ===");
 
     if (!fs.existsSync(TRICKLE_DTS)) {
-      throw new Error(".trickle.d.ts NOT generated!");
+      throw new Error(".trickle/types/ .d.ts NOT generated!");
     }
 
     const dts = fs.readFileSync(TRICKLE_DTS, "utf-8");
     console.log(`  ${path.basename(TRICKLE_DTS)}: ${dts.length} bytes`);
 
     if (process.env.TRICKLE_DEBUG) {
-      console.log("\n--- Generated .trickle.d.ts ---");
+      console.log("\n--- Generated .d.ts ---");
       console.log(dts);
       console.log("--- End ---\n");
     }
 
-    // Uses .trickle.d.ts naming (not .d.ts which TS would ignore next to .ts)
-    if (TRICKLE_DTS.endsWith(".trickle.d.ts")) {
-      console.log("  Uses .trickle.d.ts naming (avoids TS conflict) OK");
+    // Types go to .trickle/types/ directory (avoids conflict with .ts source)
+    if (TRICKLE_DTS.includes(".trickle/types/")) {
+      console.log("  Types written to .trickle/types/ (avoids TS conflict) OK");
     }
 
     for (const name of ["paginate", "groupBy", "retry"]) {
       if (dts.toLowerCase().includes(name.toLowerCase())) {
         console.log(`  ${name} type present OK`);
       } else {
-        throw new Error(`${name} NOT in .trickle.d.ts!`);
+        throw new Error(`${name} NOT in .d.ts!`);
       }
     }
 
@@ -182,7 +180,7 @@ async function run() {
     console.log("  Multiline TS signatures: handled OK");
     console.log("  TS type annotations stripped from params OK");
     console.log("  export interface/type: correctly skipped OK");
-    console.log("  .trickle.d.ts: avoids conflict with .ts source OK");
+    console.log("  .trickle/types/: avoids conflict with .ts source OK");
 
     console.log("\n=== ALL TESTS PASSED ===");
     console.log("TypeScript auto-instrumentation works!\n");

@@ -48,7 +48,7 @@ function runGeneration(isFinal: boolean): void {
     }
 
     if (isFinal && lastFunctionCount > 0) {
-      console.log(`[trickle/auto] ${lastFunctionCount} function type(s) written to .d.ts`);
+      console.log(`[trickle/auto] ${lastFunctionCount} function type(s) written to .trickle/types/`);
       // Inject JSDoc into source files if TRICKLE_INJECT=1
       try {
         const injected = injectTypes();

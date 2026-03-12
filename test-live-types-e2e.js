@@ -4,7 +4,7 @@
  * Verifies that:
  * 1. Types are generated WHILE a long-running process is still running
  * 2. New types appear as new functions are called
- * 3. The .d.ts file updates incrementally
+ * 3. The .d.ts file in .trickle/types/ updates incrementally
  * 4. Final types are complete after process exits
  */
 const { spawn } = require("child_process");
@@ -13,8 +13,9 @@ const fs = require("fs");
 
 const CLI = path.resolve("packages/cli/dist/index.js");
 const SERVER_FILE = path.resolve("test-live-types-server.js");
-const DTS_FILE = path.resolve("test-live-types-server.d.ts");
 const TRICKLE_DIR = path.resolve(".trickle-test-live");
+// CLI's trickle run generates sidecar .d.ts next to the source file
+const DTS_FILE = path.resolve("test-live-types-server.d.ts");
 const JSONL_FILE = path.join(TRICKLE_DIR, "observations.jsonl");
 
 // Use a port that won't have a backend to force local mode

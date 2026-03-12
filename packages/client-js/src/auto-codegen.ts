@@ -718,7 +718,8 @@ export function injectTypes(): number {
 // ── Public API ──
 
 let lastSize = 0;
-let lastContent = '';
+const lastContentByModule = new Map<string, string>();
+let tsconfigPatched = false;
 
 /**
  * Generate a typed Express route definitions file from route observations.
@@ -788,7 +789,76 @@ function generateRoutesDts(routeFunctions: FunctionData[]): string {
 }
 
 /**
- * Read observations and generate .d.ts files next to source files.
+ * Ensure .trickle/types/ directory exists.
+ */
+function ensureTypesDir(trickleDir: string): string {
+  const typesDir = path.join(trickleDir, 'types');
+  try {
+    fs.mkdirSync(typesDir, { recursive: true });
+  } catch { /* already exists */ }
+  return typesDir;
+}
+
+/**
+ * Auto-patch tsconfig.json to include .trickle/types so generated
+ * types are visible in VSCode and tsc. Only runs once per process.
+ */
+function patchTsConfig(): void {
+  if (tsconfigPatched) return;
+  tsconfigPatched = true;
+
+  const tsconfigPath = path.join(process.cwd(), 'tsconfig.json');
+  try {
+    if (!fs.existsSync(tsconfigPath)) return;
+
+    const raw = fs.readFileSync(tsconfigPath, 'utf-8');
+    // Strip JSON comments safely (skip strings to avoid breaking paths like "@/*")
+    let stripped = '';
+    let i = 0;
+    while (i < raw.length) {
+      if (raw[i] === '"') {
+        // Skip string content
+        let j = i + 1;
+        while (j < raw.length && raw[j] !== '"') {
+          if (raw[j] === '\\') j++; // skip escaped char
+          j++;
+        }
+        stripped += raw.slice(i, j + 1);
+        i = j + 1;
+      } else if (raw[i] === '/' && i + 1 < raw.length && raw[i + 1] === '/') {
+        // Line comment — skip to end of line
+        while (i < raw.length && raw[i] !== '\n') i++;
+      } else if (raw[i] === '/' && i + 1 < raw.length && raw[i + 1] === '*') {
+        // Block comment — skip to */
+        i += 2;
+        while (i < raw.length - 1 && !(raw[i] === '*' && raw[i + 1] === '/')) i++;
+        i += 2;
+      } else {
+        stripped += raw[i];
+        i++;
+      }
+    }
+    // Also strip trailing commas (common in tsconfig)
+    const cleaned = stripped.replace(/,(\s*[}\]])/g, '$1');
+    const config = JSON.parse(cleaned);
+
+    const include = config.include as string[] | undefined;
+    if (include && include.some((p: string) => p === '.trickle' || p.startsWith('.trickle/'))) {
+      return; // Already configured
+    }
+
+    if (include) {
+      include.push('.trickle/types');
+    } else {
+      config.include = ['.trickle/types'];
+    }
+
+    fs.writeFileSync(tsconfigPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
+  } catch { /* don't crash — tsconfig patching is best-effort */ }
+}
+
+/**
+ * Read observations and generate .d.ts type files in .trickle/types/.
  * Returns the number of functions typed.
  */
 export function generateTypes(): number {
@@ -826,16 +896,23 @@ export function generateTypes(): number {
     byModule.get(mod)!.push(fn);
   }
 
+  // Write all types to .trickle/types/ so TypeScript picks them up via tsconfig include
+  const typesDir = ensureTypesDir(trickleDir);
+  patchTsConfig();
+
   let totalFunctions = 0;
 
   // Generate Express route types
   if (routeFunctions.length > 0) {
     const routesDts = generateRoutesDts(routeFunctions);
-    const routesDtsPath = path.join(trickleDir, 'routes.d.ts');
-    try {
-      fs.writeFileSync(routesDtsPath, routesDts, 'utf-8');
-      totalFunctions += routeFunctions.length;
-    } catch { /* don't crash */ }
+    if (routesDts !== lastContentByModule.get('__routes')) {
+      const routesDtsPath = path.join(typesDir, 'routes.d.ts');
+      try {
+        fs.writeFileSync(routesDtsPath, routesDts, 'utf-8');
+        lastContentByModule.set('__routes', routesDts);
+        totalFunctions += routeFunctions.length;
+      } catch { /* don't crash */ }
+    }
   }
 
   for (const [mod, fns] of byModule) {
@@ -843,22 +920,12 @@ export function generateTypes(): number {
     if (mod.includes('.') && !mod.includes('/') && !mod.includes('\\')) continue;
 
     const dts = generateDts(fns);
-    if (dts === lastContent) continue;
+    if (dts === lastContentByModule.get(mod)) continue;
 
-    // Find source file for this module
-    const sourceFile = findSourceFile(mod);
-    if (!sourceFile) continue;
-
-    const ext = path.extname(sourceFile);
-    const dir = path.dirname(sourceFile);
-    const baseName = path.basename(sourceFile, ext);
-    // For .ts/.tsx files, use .trickle.d.ts to avoid conflicts (TS ignores .d.ts next to .ts)
-    const isTs = ext === '.ts' || ext === '.tsx';
-    const dtsPath = path.join(dir, `${baseName}${isTs ? '.trickle' : ''}.d.ts`);
-
+    const dtsPath = path.join(typesDir, `${mod}.d.ts`);
     try {
       fs.writeFileSync(dtsPath, dts, 'utf-8');
-      lastContent = dts;
+      lastContentByModule.set(mod, dts);
       totalFunctions += fns.length;
     } catch { /* don't crash user's app */ }
   }

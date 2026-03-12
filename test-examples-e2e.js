@@ -14,7 +14,6 @@ const PY_LIB = path.resolve("test_examples_lib.py");
 const TRICKLE_DIR = path.resolve(".trickle");
 
 function cleanup() {
-  try { fs.unlinkSync(path.resolve("test-examples-lib.d.ts")); } catch {}
   try { fs.unlinkSync(path.resolve("test_examples_lib.pyi")); } catch {}
   try { fs.rmSync(TRICKLE_DIR, { recursive: true }); } catch {}
 }
@@ -57,7 +56,7 @@ async function run() {
     }
 
     console.log("\nStep 2: Verify .d.ts contains @example comments");
-    const dtsPath = path.resolve("test-examples-lib.d.ts");
+    const dtsPath = path.resolve(".trickle/types/test-examples-lib.d.ts");
     if (!fs.existsSync(dtsPath)) {
       throw new Error("test-examples-lib.d.ts not found!");
     }

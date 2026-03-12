@@ -4,7 +4,7 @@
  * Verifies that:
  * 1. `trickle run app.js` works when backend is NOT running
  * 2. Observations are written to .trickle/observations.jsonl
- * 3. Type stubs (.d.ts) are generated from the local JSONL
+ * 3. Type stubs (.d.ts) are generated in .trickle/types/ from the local JSONL
  * 4. The generated types are correct
  */
 const { spawn } = require("child_process");
@@ -13,8 +13,9 @@ const fs = require("fs");
 
 const CLI = path.resolve("packages/cli/dist/index.js");
 const APP_FILE = path.resolve("test-local-mode-app.js");
-const DTS_FILE = path.resolve("test-local-mode-app.d.ts");
 const TRICKLE_DIR = path.resolve(".trickle");
+// CLI's trickle run generates sidecar .d.ts next to the source file
+const DTS_FILE = path.resolve("test-local-mode-app.d.ts");
 const JSONL_FILE = path.join(TRICKLE_DIR, "observations.jsonl");
 
 function sleep(ms) {
@@ -79,7 +80,7 @@ async function run() {
     // Clean up any previous local data
     try { fs.unlinkSync(DTS_FILE); } catch {}
     try { fs.unlinkSync(JSONL_FILE); } catch {}
-    try { fs.rmdirSync(TRICKLE_DIR); } catch {}
+    try { fs.rmSync(TRICKLE_DIR, { recursive: true }); } catch {}
 
     // === Test: Run in local mode ===
     console.log("\n=== Step 2: Run `trickle test-local-mode-app.js` (no backend) ===");
@@ -155,7 +156,7 @@ async function run() {
     }
 
     // === Verify .d.ts file ===
-    console.log("\n=== Step 4: Verify sidecar .d.ts file ===");
+    console.log("\n=== Step 4: Verify .trickle/types/ .d.ts file ===");
 
     if (fs.existsSync(DTS_FILE)) {
       const dtsContent = fs.readFileSync(DTS_FILE, "utf-8");
@@ -192,7 +193,7 @@ async function run() {
         console.log("  Header mentions local mode OK");
       }
     } else {
-      throw new Error("Sidecar .d.ts file NOT generated!");
+      throw new Error(".trickle/types/ .d.ts file NOT generated!");
     }
 
     // === Verify output mentions summary ===
@@ -220,7 +221,7 @@ async function run() {
     // Clean up
     try { fs.unlinkSync(DTS_FILE); } catch {}
     try { fs.unlinkSync(JSONL_FILE); } catch {}
-    try { fs.rmdirSync(TRICKLE_DIR); } catch {}
+    try { fs.rmSync(TRICKLE_DIR, { recursive: true }); } catch {}
     process.exit(process.exitCode || 0);
   }
 }

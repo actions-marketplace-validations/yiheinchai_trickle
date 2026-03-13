@@ -537,7 +537,8 @@ export function transformEsmSource(
   }
 
   // Also match arrow functions assigned to const/let/var
-  const arrowRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::\s*[^=]+?)?\s*=>\s*\{/gm;
+  // Handles: const X = () => {}, const X: React.FC = () => {}, const X: React.FC<Props> = ({ a }) => {}
+  const arrowRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*:\s*[^=]+?)?\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::\s*[^=]+?)?\s*=>\s*\{/gm;
 
   while ((match = arrowRegex.exec(source)) !== null) {
     const name = match[1];
@@ -606,6 +607,78 @@ export function transformEsmSource(
   }
 
 
+
+  // Match React.memo() and React.forwardRef() wrapped components
+  // Pattern: const Name = (React.)?memo(  or  const Name = (React.)?forwardRef<T,P>(
+  // Then scan forward to find the inner arrow => { body
+  if (isReactFile) {
+    const memoRefRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+([A-Z][a-zA-Z0-9_$]*)(?:\s*:\s*[^=]+?)?\s*=\s*(?:React\.)?(?:memo|forwardRef)\s*(?:<[^(]*>)?\s*\(/gm;
+    let memoMatch;
+    while ((memoMatch = memoRefRegex.exec(source)) !== null) {
+      const name = memoMatch[1];
+      // Position after the opening `(` of memo/forwardRef call
+      const afterMemoOpen = memoMatch.index + memoMatch[0].length;
+
+      // Scan forward to find `=> {` — the arrow body of the inner function.
+      // We need to skip over the inner function's parameter list (which may contain nested parens).
+      // Strategy: find the next `=>` that is followed by optional whitespace and `{`.
+      let pos = afterMemoOpen;
+      let arrowPos = -1;
+      let parenDepth = 0;
+      while (pos < source.length - 1) {
+        const ch = source[pos];
+        if (ch === '(') parenDepth++;
+        else if (ch === ')') parenDepth--;
+        else if (ch === '=' && source[pos + 1] === '>' && parenDepth <= 0) {
+          arrowPos = pos;
+          break;
+        }
+        pos++;
+      }
+      if (arrowPos === -1) continue;
+
+      // Skip `=>` and whitespace to find `{`
+      let bracePos = arrowPos + 2;
+      while (bracePos < source.length && /[\s]/.test(source[bracePos])) bracePos++;
+      if (source[bracePos] !== '{') continue;
+      const openBrace = bracePos;
+
+      const closeBrace = findClosingBrace(source, openBrace);
+      if (closeBrace === -1) continue;
+
+      // Extract the param list: everything between memo( and arrowPos
+      const innerParamStr = source.slice(afterMemoOpen, arrowPos).trim();
+      // innerParamStr is like `({ item, onSelect })` or `(props, ref)` or `props`
+      let propsExpr = 'undefined';
+      if (innerParamStr.startsWith('(')) {
+        // Peel outer parens
+        const inner = innerParamStr.slice(1, innerParamStr.lastIndexOf(')')).trim();
+        if (inner.startsWith('{')) {
+          // Find the matching `}` of the destructuring pattern, ignoring any type annotation after it
+          let depth3 = 0, destructEnd = -1;
+          for (let i = 0; i < inner.length; i++) {
+            if (inner[i] === '{') depth3++;
+            else if (inner[i] === '}') { depth3--; if (depth3 === 0) { destructEnd = i; break; } }
+          }
+          const destructPart = destructEnd !== -1 ? inner.slice(0, destructEnd + 1) : inner;
+          const fields = extractDestructuredNames(destructPart);
+          if (fields.length > 0) propsExpr = `{ ${fields.join(', ')} }`;
+        } else {
+          const firstParam = inner.split(',')[0].trim().split(':')[0].trim();
+          if (firstParam) propsExpr = firstParam;
+        }
+      } else if (innerParamStr && /^[a-zA-Z_$]/.test(innerParamStr)) {
+        propsExpr = innerParamStr.split(/[\s,:(]/)[0];
+      }
+
+      let lineNo = 1;
+      for (let i = 0; i < memoMatch.index; i++) {
+        if (source[i] === '\n') lineNo++;
+      }
+
+      bodyInsertions.push({ position: openBrace + 1, name, lineNo, propsExpr });
+    }
+  }
 
   // React hook tracking — wrap the callback arg of useEffect/useMemo/useCallback
   // to count how many times each hook fires (effect ran, memo recomputed, callback invoked).

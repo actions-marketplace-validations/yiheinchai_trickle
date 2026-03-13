@@ -47,6 +47,41 @@ describe('React file detection', () => {
     assert.ok(out!.includes('__trickle_rc'), 'export default function should be tracked as component');
   });
 
+  it('tracks React.FC typed arrow components', () => {
+    const code = `const UserCard: React.FC = () => { return null; }`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'React.FC arrow should be tracked');
+  });
+
+  it('tracks React.FC<Props> typed arrow components', () => {
+    const code = `const UserCard: React.FC<Props> = ({ name }) => { return null; }`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'React.FC<Props> arrow should be tracked');
+  });
+
+  it('tracks React.memo() wrapped components', () => {
+    const code = `const UserCard = React.memo(() => { return null; });`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'React.memo component should be tracked');
+  });
+
+  it('tracks memo() wrapped components with destructured props', () => {
+    const code = `const UserCard = memo(({ name, age }) => { return null; });`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'memo() component should be tracked');
+  });
+
+  it('tracks React.forwardRef() wrapped components', () => {
+    const code = `const UserCard = React.forwardRef<View, Props>((props, ref) => { return null; });`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'forwardRef component should be tracked');
+  });
+
   it('does not track lowercase functions as components', () => {
     const code = `function helper(x) { return x + 1; }`;
     const out = transformTsx(code);

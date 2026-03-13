@@ -9,11 +9,11 @@ Improve on the python developer experience, any arbituary python code (even with
 
 Next priorities for Python DX:
 
-1. **Improve type hint quality** — Better `List[dataclass]` types instead of `List[Dict[str, Any]]` in .pyi stubs. Use proper import types (e.g. `numpy.ndarray` instead of `Any`) for ndarray/Tensor/DataFrame return types in .pyi stubs.
+1. **Improve `trickle run python` function observation capture** — When running `trickle run python script.py` on scripts that use `if __name__ == "__main__"`, functions defined in the entry file are not captured as function observations (only variable tracing works). This means .pyi stubs are not generated for the entry file in this path.
 
-2. **Test async code and more edge cases** — Test on async frameworks (asyncio/aiohttp), Django views, SQLAlchemy models. Verify generators-as-iterators (consuming yield values), properties, decorated class methods, and nested unpacking.
+2. **Improve async generator and context manager type inference** — Async generators return `Iterator[Any]` instead of `AsyncIterator[YieldType]`. Context managers show as `Callable` instead of `ContextManager[YieldType]`. The profile hook doesn't distinguish sync vs async generators.
 
-3. **Improve `trickle run python` function observation capture** — When running `trickle run python script.py` on scripts that use `if __name__ == "__main__"`, functions defined in the entry file are not captured as function observations (only variable tracing works). This means .pyi stubs are not generated for the entry file in this path.
+3. **Improve kwargs rendering in .pyi stubs** — Keyword arguments are captured as a TypedDict element in the args tuple (e.g. `fetch_with_limit(ids, limit=3)` shows `limit: FetchWithLimitLimit`). Should render kwargs as normal keyword parameters with defaults.
 
 </focus point>
 

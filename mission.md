@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, model checkpoint observability, and LR scheduler visualization are all implemented. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, model checkpoint observability, LR scheduler visualization, memory profiling inlay hints, and dataset shape observability are all implemented. Next priorities:
 
-1. Dataset shape observability: when iterating over a DataLoader, automatically show the batch tensor shapes as inlay hints on the for loop line — so users immediately see what shape each batch has without adding print statements.
+1. Optimizer state observability: show gradient norms, weight update magnitudes, and parameter statistics (mean/std) as inlay hints on optimizer.step() lines, helping users detect issues like weight explosion or dead neurons without manual inspection.
 
-2. Optimizer state observability: show gradient norms, weight update magnitudes, and parameter statistics (mean/std) as inlay hints on optimizer.step() lines, helping users detect issues like weight explosion or dead neurons without manual inspection.
+2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+3. Training throughput metrics: automatically track samples/sec, batches/sec, and estimated time remaining, showing these as inlay hints on the training loop line without any instrumentation.
 
-4. Training throughput metrics: automatically track samples/sec, batches/sec, and estimated time remaining, showing these as inlay hints on the training loop line without any instrumentation.
+4. Activation statistics observability: show mean/std/min/max of layer activations as inlay hints on forward() lines, helping detect dead ReLUs, saturation, or vanishing activations without manual probing.
 
 </focus point>
 

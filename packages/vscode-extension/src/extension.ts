@@ -130,6 +130,23 @@ interface CheckpointRecord {
   save_count: number;
 }
 
+/** A DataLoader batch shape record emitted on each iteration */
+interface DataloaderBatchShape {
+  shape?: number[];
+  dtype?: string;
+  index?: number;
+  key?: string;
+}
+
+interface DataloaderBatchRecord {
+  kind: 'dataloader_batch';
+  file: string;
+  line: number;
+  shapes: DataloaderBatchShape[];
+  batch_num: number;
+  timestamp: number;
+}
+
 /** A training progress record emitted by trickle.progress() */
 interface ProgressRecord {
   kind: 'progress';
@@ -150,6 +167,8 @@ let gradientIndex: Map<string, Map<number, GradientRecord>> = new Map();
 let checkpointIndex: Map<string, Map<number, CheckpointRecord[]>> = new Map();
 /** LR schedule records: filePath -> lineNo -> LrScheduleRecord (latest per line) */
 let lrScheduleIndex: Map<string, Map<number, LrScheduleRecord>> = new Map();
+/** DataLoader batch shapes: filePath -> lineNo -> DataloaderBatchRecord (latest) */
+let dataloaderIndex: Map<string, Map<number, DataloaderBatchRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -488,6 +507,7 @@ function loadAllVariables() {
   gradientIndex.clear();
   checkpointIndex.clear();
   lrScheduleIndex.clear();
+  dataloaderIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -551,6 +571,20 @@ function loadAllVariables() {
             const existing = lineMap.get(gr.line);
             if (!existing || gr.timestamp > existing.timestamp) {
               lineMap.set(gr.line, gr);
+            }
+            continue;
+          }
+
+          // Handle DataLoader batch shape records
+          if (record.kind === 'dataloader_batch') {
+            const dl = record as DataloaderBatchRecord;
+            if (!dataloaderIndex.has(dl.file)) {
+              dataloaderIndex.set(dl.file, new Map());
+            }
+            const lineMap = dataloaderIndex.get(dl.file)!;
+            const existing = lineMap.get(dl.line);
+            if (!existing || dl.timestamp > existing.timestamp) {
+              lineMap.set(dl.line, dl);
             }
             continue;
           }
@@ -1273,6 +1307,68 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
               `max: \`${gr.max_norm.toExponential(3)}\` · min: \`${gr.min_norm.toExponential(3)}\`\n\n` +
               (gr.exploding.length > 0 ? `⚡ **Exploding** (>${_EXPLODING_THRESHOLD}): ${gr.exploding.join(', ')}\n\n` : '') +
               (gr.vanishing.length > 0 ? `↓ **Vanishing** (<${_VANISHING_THRESHOLD}): ${gr.vanishing.join(', ')}` : ''),
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add DataLoader batch shape inlay hints at for-loop lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const dlLines = dataloaderIndex.get(filePath);
+      if (dlLines) {
+        for (const [lineNo, dl] of dlLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+          if (dl.shapes.length === 0) continue;
+
+          // Format shapes compactly
+          const isDict = dl.shapes.some(s => s.key !== undefined);
+          let shapeStr: string;
+
+          if (isDict) {
+            // Dict batch: {input_ids[32,512] int64, attention_mask[32,512]}
+            const parts = dl.shapes.map(s => {
+              const shapeRepr = s.shape ? `[${s.shape.join(',')}]` : '';
+              const dtypeRepr = s.dtype ? ` ${s.dtype.replace('torch.', '')}` : '';
+              return `${s.key}${shapeRepr}${dtypeRepr}`;
+            });
+            shapeStr = `{${parts.join(', ')}}`;
+          } else {
+            // Tuple/list/single tensor batch: [32,3,224,224] float32, [32] int64
+            const parts = dl.shapes.map(s => {
+              const shapeRepr = s.shape ? `[${s.shape.join(',')}]` : '';
+              const dtypeRepr = s.dtype ? ` ${s.dtype.replace('torch.', '')}` : '';
+              return `${shapeRepr}${dtypeRepr}`;
+            });
+            shapeStr = parts.join(', ');
+          }
+
+          const label = ` ⬛ ${shapeStr}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            // Tooltip with full shape breakdown
+            const shapeRows = dl.shapes.map(s => {
+              const nameStr = s.key !== undefined ? `\`${s.key}\`` : `item ${s.index ?? 0}`;
+              const shapeRepr = s.shape ? `\`[${s.shape.join(', ')}]\`` : 'n/a';
+              const dtypeStr = s.dtype ? ` · \`${s.dtype}\`` : '';
+              return `${nameStr}: ${shapeRepr}${dtypeStr}`;
+            });
+            const md = new vscode.MarkdownString(
+              `### ⬛ DataLoader Batch Shapes\n\n` +
+              shapeRows.join('\n\n') +
+              `\n\n*Batch #${dl.batch_num} captured by trickle*`,
             );
             md.isTrusted = true;
             hint.tooltip = md;

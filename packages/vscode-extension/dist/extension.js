@@ -38,10 +38,22 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
+const _EXPLODING_THRESHOLD = 100.0;
+const _VANISHING_THRESHOLD = 1e-6;
 let varIndex = new Map();
 let notebookCellIndex = new Map();
 let dimLabelIndex = new Map();
 let latestProgress = null;
+/** Gradient flow records: filePath -> lineNo -> GradientRecord (latest per line) */
+let gradientIndex = new Map();
+/** Checkpoint records: filePath -> lineNo -> CheckpointRecord[] (all saves at that line) */
+let checkpointIndex = new Map();
+/** LR schedule records: filePath -> lineNo -> LrScheduleRecord (latest per line) */
+let lrScheduleIndex = new Map();
+/** DataLoader batch shapes: filePath -> lineNo -> DataloaderBatchRecord (latest) */
+let dataloaderIndex = new Map();
+/** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
+let crashVarIndex = new Map();
 let fileWatcher;
 let errorFileWatcher;
 let statusBarItem;
@@ -143,7 +155,7 @@ function activate(context) {
         const debouncedErrorReload = () => {
             if (errorReloadTimer)
                 clearTimeout(errorReloadTimer);
-            errorReloadTimer = setTimeout(() => loadErrors(), 300);
+            errorReloadTimer = setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300);
         };
         errorFileWatcher.onDidChange(debouncedErrorReload);
         errorFileWatcher.onDidCreate(debouncedErrorReload);
@@ -151,6 +163,8 @@ function activate(context) {
             if (errorReloadTimer)
                 clearTimeout(errorReloadTimer);
             diagnosticCollection.clear();
+            crashVarIndex.clear();
+            refreshInlineHints();
         });
         context.subscriptions.push(errorFileWatcher);
     }
@@ -341,6 +355,10 @@ function loadAllVariables() {
     notebookCellIndex.clear();
     dimLabelIndex.clear();
     latestProgress = null;
+    gradientIndex.clear();
+    checkpointIndex.clear();
+    lrScheduleIndex.clear();
+    dataloaderIndex.clear();
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders)
         return;
@@ -359,6 +377,58 @@ function loadAllVariables() {
                         const pr = record;
                         if (!latestProgress || pr.timestamp > latestProgress.timestamp) {
                             latestProgress = pr;
+                        }
+                        continue;
+                    }
+                    // Handle LR schedule records emitted after scheduler.step()
+                    if (record.kind === 'lr_schedule') {
+                        const lr = record;
+                        if (!lrScheduleIndex.has(lr.file)) {
+                            lrScheduleIndex.set(lr.file, new Map());
+                        }
+                        const lineMap = lrScheduleIndex.get(lr.file);
+                        const existing = lineMap.get(lr.line);
+                        if (!existing || lr.timestamp > existing.timestamp) {
+                            lineMap.set(lr.line, lr);
+                        }
+                        continue;
+                    }
+                    // Handle checkpoint records emitted after torch.save / save_pretrained
+                    if (record.kind === 'checkpoint') {
+                        const cr = record;
+                        if (!checkpointIndex.has(cr.file)) {
+                            checkpointIndex.set(cr.file, new Map());
+                        }
+                        const lineMap = checkpointIndex.get(cr.file);
+                        if (!lineMap.has(cr.line)) {
+                            lineMap.set(cr.line, []);
+                        }
+                        lineMap.get(cr.line).push(cr);
+                        continue;
+                    }
+                    // Handle gradient flow records emitted after loss.backward()
+                    if (record.kind === 'gradient') {
+                        const gr = record;
+                        if (!gradientIndex.has(gr.file)) {
+                            gradientIndex.set(gr.file, new Map());
+                        }
+                        const lineMap = gradientIndex.get(gr.file);
+                        const existing = lineMap.get(gr.line);
+                        if (!existing || gr.timestamp > existing.timestamp) {
+                            lineMap.set(gr.line, gr);
+                        }
+                        continue;
+                    }
+                    // Handle DataLoader batch shape records
+                    if (record.kind === 'dataloader_batch') {
+                        const dl = record;
+                        if (!dataloaderIndex.has(dl.file)) {
+                            dataloaderIndex.set(dl.file, new Map());
+                        }
+                        const lineMap = dataloaderIndex.get(dl.file);
+                        const existing = lineMap.get(dl.line);
+                        if (!existing || dl.timestamp > existing.timestamp) {
+                            lineMap.set(dl.line, dl);
                         }
                         continue;
                     }
@@ -445,6 +515,7 @@ function loadAllVariables() {
 }
 function loadErrors() {
     diagnosticCollection.clear();
+    crashVarIndex.clear();
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders)
         return;
@@ -461,8 +532,25 @@ function loadErrors() {
                     const err = JSON.parse(line);
                     if (err.kind !== 'error')
                         continue;
-                    // Build diagnostic message with shape context
+                    // Store crash-site local vars for inlay hints
+                    if (err.local_vars && err.local_vars.length > 0) {
+                        const varFile = err.local_vars_file || err.file;
+                        const varLine = err.local_vars_line || err.line;
+                        if (varFile && varLine) {
+                            if (!crashVarIndex.has(varFile)) {
+                                crashVarIndex.set(varFile, new Map());
+                            }
+                            crashVarIndex.get(varFile).set(varLine, err.local_vars);
+                        }
+                    }
+                    // Build diagnostic message with local vars + shape context
                     let message = `${err.error_type}: ${err.message}`;
+                    if (err.local_vars && err.local_vars.length > 0) {
+                        const varLines = err.local_vars.map(v => v.value !== null && v.value !== undefined
+                            ? `  ${v.name}: ${v.type_str} = ${v.value}`
+                            : `  ${v.name}: ${v.type_str}`);
+                        message += '\n\nLocal variables at crash:\n' + varLines.join('\n');
+                    }
                     if (err.shape_context && err.shape_context.length > 0) {
                         message += '\n\nTensor shapes near error:\n' + err.shape_context.join('\n');
                     }
@@ -814,7 +902,22 @@ class TrickleInlayHintsProvider {
                 // Check for type drift (type changed since last run)
                 const driftKey = `${obs.file}:${obs.line}:${obs.varName}`;
                 const hasDrift = changedVarKeys.has(driftKey);
-                const label = hasDrift ? `: ${typeStr} ⚠` : `: ${typeStr}`;
+                // Append memory info for tensors
+                let memSuffix = '';
+                if (obs.gpu_memory_mb !== undefined) {
+                    const gpuMb = obs.gpu_memory_mb;
+                    memSuffix = gpuMb >= 1024
+                        ? ` 🔴 ${(gpuMb / 1024).toFixed(1)}GB GPU`
+                        : ` 🟡 ${gpuMb.toFixed(0)}MB GPU`;
+                }
+                else if (obs.cpu_memory_mb !== undefined) {
+                    const cpuMb = obs.cpu_memory_mb;
+                    memSuffix = cpuMb >= 1024
+                        ? ` ${(cpuMb / 1024).toFixed(1)}GB RAM`
+                        : ` ${cpuMb.toFixed(0)}MB RAM`;
+                }
+                const labelBase = hasDrift ? `: ${typeStr} ⚠` : `: ${typeStr}`;
+                const label = labelBase + memSuffix;
                 const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
                 hint.paddingLeft = false;
                 hint.paddingRight = true;
@@ -842,6 +945,13 @@ class TrickleInlayHintsProvider {
                 const stats = formatTensorStats(obs.type);
                 if (stats)
                     tooltipParts.push(`**Stats:**${stats}`);
+                if (obs.gpu_memory_mb !== undefined) {
+                    const reserved = obs.gpu_reserved_mb !== undefined ? ` (${obs.gpu_reserved_mb.toFixed(0)}MB reserved)` : '';
+                    tooltipParts.push(`**GPU Memory:** \`${obs.gpu_memory_mb.toFixed(1)}MB allocated${reserved}\``);
+                }
+                else if (obs.cpu_memory_mb !== undefined) {
+                    tooltipParts.push(`**RAM:** \`${obs.cpu_memory_mb.toFixed(1)}MB\``);
+                }
                 if (obs.callFlow) {
                     tooltipParts.push(formatCallFlow(obs.callFlow, obs.type, obsLabels));
                 }
@@ -852,6 +962,248 @@ class TrickleInlayHintsProvider {
                     hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
                 }
                 hints.push(hint);
+            }
+        }
+        // Add LR schedule inlay hints at scheduler.step() lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const lrLines = lrScheduleIndex.get(filePath);
+            if (lrLines) {
+                for (const [lineNo, lr] of lrLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    // Format LRs: single value or array
+                    const lrStr = lr.lrs.length === 1
+                        ? lr.lrs[0].toExponential(3)
+                        : `[${lr.lrs.map(v => v.toExponential(2)).join(', ')}]`;
+                    // Add context (epoch/step) if available
+                    const ctxParts = [];
+                    for (const key of ['epoch', 'step', 'global_step', 'iteration']) {
+                        if (key in lr.context) {
+                            ctxParts.push(`${key}=${lr.context[key]}`);
+                            if (ctxParts.length >= 2)
+                                break;
+                        }
+                    }
+                    const ctxStr = ctxParts.length > 0 ? ` | ${ctxParts.join(' | ')}` : '';
+                    const label = ` 📈 lr=${lrStr}${ctxStr}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        const allCtx = Object.entries(lr.context).map(([k, v]) => `**${k}**: ${v}`).join(' · ');
+                        const md = new vscode.MarkdownString(`### 📈 Learning Rate: \`${lr.scheduler_class}\`\n\n` +
+                            `Current LR: \`${lrStr}\`\n\n` +
+                            (lr.lrs.length > 1 ? `Param groups: ${lr.lrs.map((v, i) => `group ${i}: \`${v.toExponential(3)}\``).join(', ')}\n\n` : '') +
+                            (allCtx ? `Context: ${allCtx}\n\n` : '') +
+                            `Step: ${lr.step_num}`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line out of range
+                    }
+                }
+            }
+        }
+        // Add checkpoint inlay hints at torch.save / save_pretrained lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const ckptLines = checkpointIndex.get(filePath);
+            if (ckptLines) {
+                for (const [lineNo, saves] of ckptLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    if (saves.length === 0)
+                        continue;
+                    // Show info from the most recent save at this line
+                    const latest = saves[saves.length - 1];
+                    const total = latest.save_count;
+                    const basename = latest.path.split('/').pop() || latest.path;
+                    // Build metrics string from the most recent save
+                    const PRIORITY_KEYS = ['epoch', 'step', 'loss', 'val_loss', 'acc', 'lr'];
+                    const metricParts = [];
+                    for (const key of PRIORITY_KEYS) {
+                        if (key in latest.metrics) {
+                            const v = latest.metrics[key];
+                            metricParts.push(`${key}=${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : v}`);
+                        }
+                    }
+                    // Add any remaining metrics not in the priority list
+                    for (const [k, v] of Object.entries(latest.metrics)) {
+                        if (!PRIORITY_KEYS.includes(k) && metricParts.length < 5) {
+                            metricParts.push(`${k}=${typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : v}`);
+                        }
+                    }
+                    const metricsStr = metricParts.length > 0 ? ` | ${metricParts.join(' | ')}` : '';
+                    const countStr = total > 1 ? ` (×${total})` : '';
+                    const label = ` 💾 ${basename}${metricsStr}${countStr}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        // Tooltip with history of all saves at this line
+                        const historyRows = saves.map((s, i) => {
+                            const mStr = Object.entries(s.metrics).map(([k, v]) => `${k}=${v}`).join(', ');
+                            const d = new Date(s.timestamp * 1000).toLocaleTimeString();
+                            return `${i + 1}. \`${s.path.split('/').pop()}\` — ${mStr || 'no metrics'} @ ${d}`;
+                        });
+                        const md = new vscode.MarkdownString(`### 💾 Checkpoint Saves\n\n${historyRows.join('\n\n')}`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add gradient flow inlay hints at the loss.backward() call line
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const gradLines = gradientIndex.get(filePath);
+            if (gradLines) {
+                for (const [lineNo, gr] of gradLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    if (gr.layers.length === 0)
+                        continue;
+                    // Build compact label showing gradient health
+                    const parts = [];
+                    if (gr.exploding.length > 0) {
+                        parts.push(`⚡ exploding: ${gr.exploding.slice(0, 2).join(', ')}`);
+                    }
+                    if (gr.vanishing.length > 0) {
+                        parts.push(`↓ vanishing: ${gr.vanishing.slice(0, 2).join(', ')}`);
+                    }
+                    if (parts.length === 0) {
+                        // All healthy — show top 3 layer norms
+                        const top = gr.layers.slice(0, 3).map(l => `${l.name}=${l.norm.toExponential(2)}`);
+                        parts.push(`${gr.num_layers} layers | ${top.join(' | ')}`);
+                    }
+                    const label = ` ∇ ${gr.model_var}: ${parts.join(' | ')}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        // Tooltip with full per-layer breakdown
+                        const layerRows = gr.layers.map(l => {
+                            const flag = l.exploding ? ' ⚡' : l.vanishing ? ' ↓' : '';
+                            return `| \`${l.name}\` | \`${l.norm.toExponential(3)}\`${flag} |`;
+                        });
+                        const md = new vscode.MarkdownString(`### ∇ Gradient Norms: \`${gr.model_var}\`\n\n` +
+                            `| Layer | Grad Norm |\n|---|---|\n${layerRows.join('\n')}\n\n` +
+                            `max: \`${gr.max_norm.toExponential(3)}\` · min: \`${gr.min_norm.toExponential(3)}\`\n\n` +
+                            (gr.exploding.length > 0 ? `⚡ **Exploding** (>${_EXPLODING_THRESHOLD}): ${gr.exploding.join(', ')}\n\n` : '') +
+                            (gr.vanishing.length > 0 ? `↓ **Vanishing** (<${_VANISHING_THRESHOLD}): ${gr.vanishing.join(', ')}` : ''));
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add DataLoader batch shape inlay hints at for-loop lines
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const dlLines = dataloaderIndex.get(filePath);
+            if (dlLines) {
+                for (const [lineNo, dl] of dlLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    if (dl.shapes.length === 0)
+                        continue;
+                    // Format shapes compactly
+                    const isDict = dl.shapes.some(s => s.key !== undefined);
+                    let shapeStr;
+                    if (isDict) {
+                        // Dict batch: {input_ids[32,512] int64, attention_mask[32,512]}
+                        const parts = dl.shapes.map(s => {
+                            const shapeRepr = s.shape ? `[${s.shape.join(',')}]` : '';
+                            const dtypeRepr = s.dtype ? ` ${s.dtype.replace('torch.', '')}` : '';
+                            return `${s.key}${shapeRepr}${dtypeRepr}`;
+                        });
+                        shapeStr = `{${parts.join(', ')}}`;
+                    }
+                    else {
+                        // Tuple/list/single tensor batch: [32,3,224,224] float32, [32] int64
+                        const parts = dl.shapes.map(s => {
+                            const shapeRepr = s.shape ? `[${s.shape.join(',')}]` : '';
+                            const dtypeRepr = s.dtype ? ` ${s.dtype.replace('torch.', '')}` : '';
+                            return `${shapeRepr}${dtypeRepr}`;
+                        });
+                        shapeStr = parts.join(', ');
+                    }
+                    const label = ` ⬛ ${shapeStr}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        // Tooltip with full shape breakdown
+                        const shapeRows = dl.shapes.map(s => {
+                            const nameStr = s.key !== undefined ? `\`${s.key}\`` : `item ${s.index ?? 0}`;
+                            const shapeRepr = s.shape ? `\`[${s.shape.join(', ')}]\`` : 'n/a';
+                            const dtypeStr = s.dtype ? ` · \`${s.dtype}\`` : '';
+                            return `${nameStr}: ${shapeRepr}${dtypeStr}`;
+                        });
+                        const md = new vscode.MarkdownString(`### ⬛ DataLoader Batch Shapes\n\n` +
+                            shapeRows.join('\n\n') +
+                            `\n\n*Batch #${dl.batch_num} captured by trickle*`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
+            }
+        }
+        // Add crash-site inlay hints showing local variable values at the exception line
+        if (document.uri.scheme === 'file') {
+            const filePath = document.uri.fsPath;
+            const crashLines = crashVarIndex.get(filePath);
+            if (crashLines) {
+                for (const [lineNo, vars] of crashLines) {
+                    if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
+                        continue;
+                    if (vars.length === 0)
+                        continue;
+                    // Build compact label: "✗ x: Tensor[32,784] | batch_size: 32"
+                    const MAX_VARS = 5;
+                    const parts = vars.slice(0, MAX_VARS).map(v => v.value !== null && v.value !== undefined
+                        ? `${v.name}: ${v.type_str} = ${v.value}`
+                        : `${v.name}: ${v.type_str}`);
+                    const remaining = vars.length - parts.length;
+                    const suffix = remaining > 0 ? ` | +${remaining} more` : '';
+                    const label = ` ✗ ${parts.join(' | ')}${suffix}`;
+                    try {
+                        const line = document.lineAt(lineNo - 1);
+                        const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                        const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                        hint.paddingLeft = true;
+                        // Tooltip with full list
+                        const tooltipLines = vars.map(v => v.value !== null && v.value !== undefined
+                            ? `**\`${v.name}\`**: \`${v.type_str}\` = \`${v.value}\``
+                            : `**\`${v.name}\`**: \`${v.type_str}\``);
+                        const md = new vscode.MarkdownString(`### Trickle: Variables at crash\n\n${tooltipLines.join('\n\n')}`);
+                        md.isTrusted = true;
+                        hint.tooltip = md;
+                        hints.push(hint);
+                    }
+                    catch {
+                        // Skip if line is out of range
+                    }
+                }
             }
         }
         return hints;
@@ -1003,6 +1355,15 @@ function typeNodeToString(node, depth = 3, dimLabels) {
                 return 'RegExp';
             if ('__error' in node.properties)
                 return 'Error';
+            // Plain Python dict: show {key: type, ...} (values shown via compact renderer using sample)
+            if (node.class_name === 'dict') {
+                if (entries.length <= 8) {
+                    const props = entries.map(([k, v]) => `${k}: ${typeNodeToString(v, depth - 1)}`);
+                    return `{${props.join(', ')}}`;
+                }
+                const first6 = entries.slice(0, 6).map(([k, v]) => `${k}: ${typeNodeToString(v, depth - 1)}`);
+                return `{${first6.join(', ')}, ...}`;
+            }
             // Special case for PyTorch Tensor / NumPy ndarray:
             // These have shape, dtype (and optionally device) as properties
             // where the values are stored as primitive name strings like "[1, 16, 32]"
@@ -1260,6 +1621,28 @@ function typeNodeToStringCompact(node, dimLabels, sample) {
     const sampleObj = (sample !== null && sample !== undefined && typeof sample === 'object' && !Array.isArray(sample))
         ? sample
         : null;
+    // Plain dict: show {key: value, ...} using sample values when available
+    if (node.class_name === 'dict') {
+        const MAX_SHOW = 5;
+        const shown = [];
+        let idx = 0;
+        for (const [key] of entries) {
+            if (idx >= MAX_SHOW)
+                break;
+            if (sampleObj) {
+                const val = sampleObj[key];
+                const formatted = formatScalarSample(val);
+                shown.push(formatted !== null ? `${key}: ${formatted}` : key);
+            }
+            else {
+                shown.push(key);
+            }
+            idx++;
+        }
+        const remaining = entries.length - shown.length;
+        const suffix = remaining > 0 ? `, +${remaining}` : '';
+        return `{${shown.join(', ')}${suffix}}`;
+    }
     if (node.class_name && sampleObj) {
         const MAX_SHOW = 4;
         const shown = [];

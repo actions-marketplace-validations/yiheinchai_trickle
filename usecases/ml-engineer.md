@@ -900,3 +900,40 @@ weights = torch.randn(1024, 1024)  # weights: Tensor[1024,1024] float32  261MB R
 ```
 
 **How it works:** `trickle.auto`'s variable tracer calls `torch.cuda.memory_allocated()` after tracing each CUDA tensor and `resource.getrusage()` for CPU tensors. The memory snapshot is stored in `gpu_memory_mb` / `cpu_memory_mb` fields of the variable record. The VSCode extension appends the memory suffix to the type hint label so it's visible at a glance.
+
+---
+
+## Use Case 22: Dataset Shape Observability
+
+**User:** ML engineer iterating over a DataLoader for the first time and wanting to immediately verify the batch shapes without adding print statements.
+
+**Before trickle:** Must add `print(batch[0].shape, batch[1].shape)` or `print({k: v.shape for k, v in batch.items()})` on the line after the for loop, then remove them after debugging.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+for images, labels in train_loader:
+    # ↑ inlay hint appears automatically: ⬛ [32,3,224,224] float32, [32] int64
+    loss = criterion(model(images), labels)
+    loss.backward()
+```
+
+HuggingFace-style dict batches:
+```python
+for batch in train_loader:
+    # ↑ ⬛ {input_ids[8,128] int64, attention_mask[8,128] int64, labels[8] int64}
+    outputs = model(**batch)
+```
+
+Hover shows full breakdown:
+```
+⬛ DataLoader Batch Shapes
+
+item 0: [32, 3, 224, 224] · torch.float32
+item 1: [32] · torch.int64
+
+Batch #1 captured by trickle
+```
+
+**How it works:** `trickle.auto` patches `_SingleProcessDataLoaderIter.__next__` and `_MultiProcessingDataLoaderIter.__next__`. After each `__next__` call, it walks the call stack to find the user's for-loop frame, extracts tensor shapes from the batch (handling tuples, lists, and dicts), and writes a `kind: "dataloader_batch"` record. Rate-limited to 3 batches per loop location (`TRICKLE_DL_BATCHES` to tune). The VSCode extension shows the shapes as an inlay hint on the for line.

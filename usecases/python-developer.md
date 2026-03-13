@@ -273,7 +273,47 @@ Environment variables to control behavior:
 |---|---|
 | `TRICKLE_INJECT=1` | Inject types directly into source `.py` files |
 | `TRICKLE_COVERAGE=1` | Print coverage report (% of functions typed) |
-| `TRICKLE_SUMMARY=1` | Print summary of captured types |
+| `TRICKLE_SUMMARY=1` | Print full type summary to terminal (no VSCode needed) |
+
+## Use Case: Terminal Type Summary (No IDE Needed)
+
+Don't have VSCode? Just want to see types in your terminal? Set `TRICKLE_SUMMARY=1`:
+
+```bash
+TRICKLE_SUMMARY=1 python app.py
+```
+
+Or use `trickle run python` which enables it automatically:
+
+```bash
+trickle run python app.py
+```
+
+After your script finishes, a summary prints to stderr showing all observed variable types and function signatures:
+
+```
+──────────────────────────────────────────────────────────────
+  trickle: 11 variables | 3 functions typed
+──────────────────────────────────────────────────────────────
+  app.py
+    L7   n                 int                   = 100
+    L9   data              DataFrame
+    L29  active_df         DataFrame
+    L31  top               dict                  = {count: 18, avg_salary: 60436.38}
+    L35  summary           dict                  = {total: 100, active: 74, ...}
+    top_performers()
+      L24  top               DataFrame
+      L25  count             int                   = 18
+      L26  avg_sal           float
+
+  Functions:
+    avg_by_dept(df: DataFrame) → Series
+    filter_active(df: DataFrame) → DataFrame
+    top_performers(df: DataFrame, threshold: float) → dict
+──────────────────────────────────────────────────────────────
+```
+
+Works with all Python types: scalars with values inline, DataFrames, ndarrays with shapes, dataclasses by name, lists with element types. Great for quick iteration in a terminal-only workflow (SSH, CI, containers).
 
 ## How It Works
 

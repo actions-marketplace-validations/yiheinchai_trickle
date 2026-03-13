@@ -9,11 +9,11 @@ Improve on the python developer experience, any arbituary python code (even with
 
 Next priorities for Python DX:
 
-1. **Type hints in terminal output** — For scripts run via `trickle run python script.py` or with `TRICKLE_SUMMARY=1`, print a summary of inferred types and variable values to stdout after the script finishes. Make it instant: no VSCode needed, just run your script and see what types were observed.
+1. **Test on more real-world Python repos** — Test on Django views, SQLAlchemy models, numpy/pandas data pipelines, async code (asyncio/aiohttp). Verify edge cases: generators, properties, class methods with decorators, context managers, unpacking assignments (`a, b = func()`). Fix any issues found.
 
-2. **Test on more real-world Python repos** — Test on Django views, SQLAlchemy models, numpy/pandas data pipelines, async code (asyncio/aiohttp). Verify edge cases: generators, properties, class methods with decorators, context managers, unpacking assignments (`a, b = func()`).
+2. **Improve type hint quality** — Better `List[dataclass]` types instead of `List[Dict[str, Any]]` in .pyi stubs. Show union types when a function is called with different arg types (multi-call overload merging). Improve terminal summary dict types to show `dict[str, int]` instead of just `dict` when value types are uniform.
 
-3. **Improve type hint quality** — The `.pyi` stubs currently show spurious zero-arg functions from dataclass `__init__` observations. Filter these out. Also improve: multi-call overload merging (show the union type when a function is called with different arg types), better `List[dataclass]` types instead of `List[Dict[str, Any]]`.
+3. **Suppress torch/sklearn stderr noise in trickle run path** — The `_entry_transform.py` path doesn't pre-warm optional imports, so torch/sklearn C-level stderr warnings appear when using `trickle run python`. Apply the same fd 2 suppression strategy used in `auto.py`'s `_prewarm_optional_imports`.
 
 </focus point>
 

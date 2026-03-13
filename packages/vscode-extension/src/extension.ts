@@ -1022,9 +1022,20 @@ function formatTensorType(className: string, properties: Record<string, TypeNode
   }
 
   // Scalar value: show actual number for 0-dim / 1-element tensors
-  const valueProp = properties['value'];
-  if (valueProp?.kind === 'primitive' && valueProp.name) {
-    parts.push(`= ${valueProp.name}`);
+  // If aggregation data exists (from loop tracking), show trend instead
+  const aggFirst = properties['agg_first'];
+  const aggLast = properties['agg_last'];
+  const aggSteps = properties['agg_steps'];
+  if (aggFirst?.kind === 'primitive' && aggFirst.name && aggLast?.kind === 'primitive' && aggLast.name && aggSteps?.kind === 'primitive' && aggSteps.name) {
+    const first = parseFloat(aggFirst.name);
+    const last = parseFloat(aggLast.name);
+    const trend = last < first ? '↓' : last > first ? '↑' : '→';
+    parts.push(`${aggFirst.name} ${trend} ${aggLast.name} (${aggSteps.name} steps)`);
+  } else {
+    const valueProp = properties['value'];
+    if (valueProp?.kind === 'primitive' && valueProp.name) {
+      parts.push(`= ${valueProp.name}`);
+    }
   }
 
   // no_grad context: show when tensor was computed without gradient tracking
@@ -1061,6 +1072,15 @@ function formatTensorStats(type: TypeNode): string {
   const mem = type.properties['memory'];
   if (mem?.kind === 'primitive' && mem.name) {
     parts.push(`mem=${mem.name}`);
+  }
+  // Scalar aggregation stats from loop tracking
+  const aggMin = type.properties['agg_min'];
+  const aggMax = type.properties['agg_max'];
+  const aggFirst = type.properties['agg_first'];
+  const aggLast = type.properties['agg_last'];
+  const aggSteps = type.properties['agg_steps'];
+  if (aggFirst?.kind === 'primitive' && aggLast?.kind === 'primitive') {
+    parts.push(`loop: ${aggFirst.name}→${aggLast.name} min=${aggMin?.name} max=${aggMax?.name} (${aggSteps?.name} steps)`);
   }
   if (parts.length === 0) return '';
   return ` \`${parts.join(' | ')}\``;

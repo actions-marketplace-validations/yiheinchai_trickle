@@ -44,6 +44,10 @@ _prev_shapes: dict = {}
 _curr_shapes: dict = {}
 _current_cell_idx: int = 0
 
+# Scalar tensor aggregation: tracks how scalar values evolve in loops
+# Key: (cell_id, line_no, var_name) -> {first, last, min, max, count}
+_scalar_agg: dict = {}
+
 
 def _get_vars_file() -> str:
     """Get (and lazily create) the path to variables.jsonl."""
@@ -73,6 +77,8 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
         cache_key = f"{cell_id}:{line_no}:{var_name}:{type_hash}"
 
         if cache_key in _tv_cache:
+            # For scalar tensors, track value evolution across loop iterations
+            _try_scalar_agg(value, var_name, line_no, cell_id, func_name)
             return
         _tv_cache.add(cache_key)
 
@@ -113,8 +119,120 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
         vars_file = _get_vars_file()
         with open(vars_file, "a") as f:
             f.write(json.dumps(record) + "\n")
+
+        # Initialize scalar aggregation for first occurrence
+        _try_scalar_agg_init(value, var_name, line_no, cell_id, cell_idx, func_name, type_node)
     except Exception:
         pass  # Never break user code
+
+
+# ---------------------------------------------------------------------------
+# Scalar tensor aggregation — track loss/metric evolution in loops
+# ---------------------------------------------------------------------------
+
+def _get_scalar_value(value: Any) -> Optional[float]:
+    """Extract a float from a scalar tensor or Python number."""
+    try:
+        if hasattr(value, "numel") and hasattr(value, "item"):
+            if value.numel() == 1:
+                return float(value.detach().item())
+        elif isinstance(value, (int, float)):
+            return float(value)
+    except Exception:
+        pass
+    return None
+
+
+def _try_scalar_agg_init(value: Any, var_name: str, line_no: int, cell_id: str,
+                         cell_idx: int, func_name: Optional[str], type_node: dict) -> None:
+    """Initialize scalar aggregation for a newly traced variable."""
+    v = _get_scalar_value(value)
+    if v is None:
+        return
+    key = (cell_id, line_no, var_name, func_name or "")
+    _scalar_agg[key] = {
+        "first": v, "last": v, "min": v, "max": v, "count": 1,
+        "cell_idx": cell_idx, "func_name": func_name, "type_node": type_node,
+    }
+
+
+def _try_scalar_agg(value: Any, var_name: str, line_no: int, cell_id: str,
+                    func_name: Optional[str]) -> None:
+    """Update scalar aggregation when a dedup cache hit occurs."""
+    v = _get_scalar_value(value)
+    if v is None:
+        return
+    key = (cell_id, line_no, var_name, func_name or "")
+    agg = _scalar_agg.get(key)
+    if agg is None:
+        return
+    agg["last"] = v
+    agg["count"] += 1
+    if v < agg["min"]:
+        agg["min"] = v
+    if v > agg["max"]:
+        agg["max"] = v
+
+
+def _write_scalar_agg_records() -> None:
+    """Write final aggregated scalar records to variables.jsonl."""
+    if not _scalar_agg:
+        return
+    vars_file = _get_vars_file()
+    records: list = []
+    for (cell_id, line_no, var_name, func_key), agg in _scalar_agg.items():
+        if agg["count"] <= 1:
+            continue  # Only write aggregates for variables traced multiple times
+        type_node = dict(agg["type_node"])
+        props = dict(type_node.get("properties", {}))
+        # Update the value to the last observed value
+        props["value"] = {"kind": "primitive", "name": f"{agg['last']:.6g}"}
+        # Add aggregation stats
+        props["agg_first"] = {"kind": "primitive", "name": f"{agg['first']:.6g}"}
+        props["agg_last"] = {"kind": "primitive", "name": f"{agg['last']:.6g}"}
+        props["agg_min"] = {"kind": "primitive", "name": f"{agg['min']:.6g}"}
+        props["agg_max"] = {"kind": "primitive", "name": f"{agg['max']:.6g}"}
+        props["agg_steps"] = {"kind": "primitive", "name": str(agg["count"])}
+        type_node["properties"] = props
+        record = {
+            "kind": "variable",
+            "varName": var_name,
+            "line": line_no,
+            "module": f"cell_{agg['cell_idx']}",
+            "file": cell_id,
+            "cellIndex": agg["cell_idx"],
+            "type": type_node,
+            "typeHash": json.dumps(type_node, sort_keys=True)[:32],
+        }
+        if agg["func_name"]:
+            record["funcName"] = agg["func_name"]
+        records.append(record)
+    if records:
+        with open(vars_file, "a") as f:
+            for r in records:
+                f.write(json.dumps(r) + "\n")
+
+
+def _print_scalar_agg_summary() -> None:
+    """Print a summary of scalar value evolution after cell execution."""
+    if not _scalar_agg:
+        return
+    summaries: list = []
+    for (cell_id, line_no, var_name, func_key), agg in _scalar_agg.items():
+        if agg["count"] <= 1:
+            continue
+        display_name = f"{func_key}.{var_name}" if func_key else var_name
+        first, last = agg["first"], agg["last"]
+        mn, mx = agg["min"], agg["max"]
+        steps = agg["count"]
+        trend = "↓" if last < first else ("↑" if last > first else "→")
+        summaries.append(
+            f"  {display_name} (L{line_no}): {first:.4g} {trend} {last:.4g} "
+            f"(min={mn:.4g}, max={mx:.4g}, {steps} steps)"
+        )
+    if summaries:
+        print("[trickle] Scalar tracking:")
+        print("\n".join(summaries))
 
 
 # ---------------------------------------------------------------------------
@@ -481,8 +599,11 @@ def _print_shape_changes() -> None:
 
 
 def _post_run_cell_hook(result: Any = None) -> None:
-    """IPython post_run_cell callback — print shape changes after cell execution."""
+    """IPython post_run_cell callback — print shape changes and scalar tracking."""
     _print_shape_changes()
+    _write_scalar_agg_records()
+    _print_scalar_agg_summary()
+    _scalar_agg.clear()
 
 
 class _TrickleASTTransformer:
@@ -564,6 +685,7 @@ def clear() -> None:
     _tv_cache.clear()
     _prev_shapes.clear()
     _curr_shapes.clear()
+    _scalar_agg.clear()
     if _tv_file and os.path.exists(_tv_file):
         with open(_tv_file, "w") as f:
             f.write("")

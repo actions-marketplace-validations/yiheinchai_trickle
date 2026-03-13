@@ -49,6 +49,13 @@ for epoch in range(5):
 
 Loop variables (`epoch`, `data`, `target`) are traced too. Same shape at the same line is deduplicated, so loops don't explode the data file.
 
+Scalar values like `loss` are tracked across iterations. After the cell finishes, trickle prints:
+```
+[trickle] Scalar tracking:
+  loss (L7): 2.513 ↓ 0.209 (min=0.2025, max=2.513, 50 steps)
+```
+The inline hint also updates to show the trend: `loss: 2.51 ↓ 0.21 (50 steps)`.
+
 **Cell 4 — defining model classes directly in notebook:**
 ```python
 class SimpleModel(nn.Module):
@@ -101,6 +108,7 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - Datasets: `TensorDataset(size=10000, tensors=2)`, `Subset(size=8000, from=TensorDataset)`
 - Memory footprint: hover shows `mem=4.0 MB` per tensor (helps debug OOM)
 - Model memory: `GPT(110280192 params 420.7 MB)` shows total model size inline
+- Scalar tracking: `loss: 2.51 ↓ 0.21 (50 steps)` tracks value evolution in loops
 - Variables inside imported local modules (your model.py, not torch internals)
 
 **Managing the session:**

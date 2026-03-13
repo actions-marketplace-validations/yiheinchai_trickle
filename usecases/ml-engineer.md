@@ -796,3 +796,38 @@ class GPT(nn.Module):
 ```
 
 **How it works:** The import hook in `trickle.auto` already wraps function calls in imported user modules for type inference. Multi-file tracing adds one more step: when a user module is imported, its source file is parsed by the AST variable tracer and registered in the assignment map. The existing `sys.settrace`-based global trace then picks it up automatically — no changes to `model.py` or any imported file required.
+
+---
+
+## Use Case 19: Model Checkpoint Observability
+
+**User:** ML engineer saving model checkpoints during training, wanting to know which metrics corresponded to each saved checkpoint without adding print statements.
+
+**Before trickle:** Must add `print(f"Saved checkpoint: epoch={epoch}, loss={loss:.4f}")` after every `torch.save()`, or check filename conventions to infer training state.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+for epoch in range(100):
+    loss = train_one_epoch(model, loader)
+    val_loss = evaluate(model, val_loader)
+    
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        torch.save(model.state_dict(), f'checkpoints/model_epoch{epoch}.pt')
+        # ↑ inlay hint appears here automatically:
+        # 💾 model_epoch42.pt | epoch=42 | step=12600 | loss=0.3421 | val_loss=0.3105 (×15)
+```
+
+Hover tooltip shows the full checkpoint history:
+```
+💾 Checkpoint Saves
+
+1. `model_epoch10.pt` — epoch=10, val_loss=0.8213 @ 14:32:01
+2. `model_epoch23.pt` — epoch=23, val_loss=0.5447 @ 14:45:12
+...
+15. `model_epoch42.pt` — epoch=42, val_loss=0.3105 @ 15:23:44
+```
+
+**How it works:** `trickle.auto` patches `torch.save()` and `transformers.PreTrainedModel.save_pretrained()`. After each save, it scans the caller's frame locals for training metric variables (`epoch`, `step`, `loss`, `val_loss`, `acc`, `lr`, etc.) and writes a `kind: "checkpoint"` record to `.trickle/variables.jsonl`. The VSCode extension reads these records and shows them as inlay hints at the save line, accumulating a history across the training run.

@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, and multi-file variable tracing are all implemented. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, and model checkpoint observability are all implemented. Next priorities:
 
-1. Model checkpoint observability: when `torch.save()` or `model.save_pretrained()` is called, automatically record which epoch/step it was saved at and show this as an inlay hint on the save line — so the user can see checkpoint history without checking filenames manually.
+1. Learning rate scheduler visualization: after each optimizer step, show the current LR as an inlay hint on the scheduler.step() line, so the user can see LR warmup/decay curves without adding print statements.
 
-2. Learning rate scheduler visualization: after each optimizer step, show the current LR as an inlay hint on the scheduler.step() line, so the user can see LR warmup/decay curves without adding print statements.
+2. Memory profiling inlay hints: show GPU/CPU memory usage (torch.cuda.memory_allocated()) as inlay hints on tensor creation lines during training, so users can spot memory leaks without adding explicit profiling calls.
 
 3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-4. Memory profiling inlay hints: show GPU/CPU memory usage (torch.cuda.memory_allocated()) as inlay hints on tensor creation lines during training, so users can spot memory leaks without adding explicit profiling calls.
+4. Dataset shape observability: when iterating over a DataLoader, automatically show the batch tensor shapes as inlay hints on the for loop line — so users immediately see what shape each batch has without adding print statements.
 
 </focus point>
 

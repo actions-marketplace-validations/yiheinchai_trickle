@@ -6,14 +6,20 @@ Focus on the typescript/javascript developer experience, thinking through the Re
 
 Already completed:
 - React component render counts: 🔄 ×N renders inlay hint on component definition lines (Vite plugin, zero instrumentation)
+- React prop observability: live prop values shown inline (eg. 🔄 ×3 | name="John" age=30), tested on real React Native codebase, 16 unit tests in vite-plugin.test.ts
+
+Testing requirements (MUST follow for every feature):
+- Write unit tests in the relevant test file (eg. packages/client-js/src/vite-plugin.test.ts) before publishing
+- Test on a real-world codebase (find React repos locally or online) to verify real-world value
+- Run `npm test` and ensure all tests pass before committing
 
 Next priorities:
 
-1. React component prop/state observability: show the actual prop types and state shapes as inline hints on component definition lines. The render count is shown — now show WHAT changed (which props/state triggered the re-render). Zero instrumentation required.
+1. React hook observability: track useEffect dependency changes, useCallback/useMemo cache hit/miss, useState update frequency — show as inlay hints on the hook call lines. Zero instrumentation required via Vite plugin transform.
 
 2. Next.js API route observability: capture request/response shapes, latency, and error rates for API routes, showing them as inlay hints on route handler lines. Hook into Next.js middleware or page router.
 
-3. React hook observability: track useEffect dependency arrays, useCallback/useMemo memoization hits/misses, and custom hook return shapes — show as inlay hints on the hook call lines.
+3. React component re-render cause detection: show WHICH prop or state value changed between renders that triggered the re-render — the most actionable performance insight for React developers.
 
 4. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 

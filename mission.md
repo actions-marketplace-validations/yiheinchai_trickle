@@ -2,17 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. Vitest+React integration is verified — the trickle Vite plugin (now published with dual CJS/ESM build) instruments both source files and test files. The `trickle-observe/vite-plugin` export now uses ESM when imported in an ESM context (Vite/Vitest). Next priorities:
+JS/TS and Python inline type hints are fully working. Vitest+React integration is verified. Nested type hover tooltips now render as structured, indented TypeScript-style type blocks (using `typeNodeToPretty`) instead of flat strings — complex objects and arrays of objects get pretty-printed in a code block on hover. Next priorities:
 
-1. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+1. pytest integration: when running `pytest`, Python test files should get variable tracing so developers see types while writing tests. Similar to Vitest for JS — instrument test function locals automatically. This is the highest-value next item for ML engineers writing model tests.
 
-2. Nested type compaction: when a compact type like `{id, name, +N}[]` is shown, hovering should show the full expanded object shape. Currently the hover tooltip shows the full TypeNode string but may be hard to read for deeply nested types — consider a structured hover card with collapsible sections.
+2. Multi-file project tracing: when a training script imports from local modules (e.g., `from model import GPT`), variables inside those imported modules are traced individually but not linked to the call site in the entry script. Improve by correlating variable traces across files — e.g., when `model = GPT(config)` is executed, the inline hint at the call site should show `GPT(n_layer=12, n_head=12, ...)` populated from the `__init__` trace in model.py.
 
-3. Multi-file project tracing: when a training script imports from local modules (e.g., `from model import GPT`), variables inside those imported modules are traced individually but not linked to the call site in the entry script. Improve by correlating variable traces across files — e.g., when `model = GPT(config)` is executed, the inline hint at the call site should show `GPT(n_layer=12, n_head=12, ...)` populated from the `__init__` trace in model.py.
+3. Python async support: `async def` functions and `asyncio.gather()` return values are not yet traced. Improve to trace coroutine results after `await`.
 
-4. Python async support: `async def` functions and `asyncio.gather()` return values are not yet traced. Improve to trace coroutine results after `await`.
-
-5. pytest integration: when running `pytest`, Python test files should get variable tracing so developers see types while writing tests. Similar to Vitest for JS — instrument test function locals automatically.
+4. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
 </focus point>
 

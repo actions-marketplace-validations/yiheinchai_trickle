@@ -1008,3 +1008,50 @@ Tracked by trickle (rolling avg)
 ```
 
 **How it works:** The DataLoader hook tracks inter-batch timing at each for-loop call site. After every 10 batches (configurable via `TRICKLE_THROUGHPUT_EVERY`), it computes a rolling average over the last 20 durations, derives samples/sec and batches/sec, and reads the total batch count from `_index_sampler` to compute ETA. The VSCode extension shows the throughput inlay hint on the for-loop line, after the shape hint.
+
+---
+
+## Use Case 25: Activation Statistics Observability
+
+**User:** ML engineer debugging a deep transformer where training loss stagnates. Suspects dead neurons or vanishing activations in the MLP layers but doesn't want to add manual `print(x.mean(), x.std())` calls after every layer.
+
+**Before trickle:** Must manually add hooks via `model.register_forward_hook()` or insert debug print statements, then remove them before committing.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+class MLP(nn.Module):
+    def forward(self, x):
+        x = self.gelu(self.c_fc(x))   # ◆ μ=0.11 σ=0.33
+        return self.c_proj(x)          # ◆ μ=-0.01 σ=0.20
+
+class Block(nn.Module):
+    def forward(self, x):
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))  # ◆ μ=0.05 σ=1.53 [sat:56%]
+        return x
+
+logits = model(idx)   # ◆ μ=-0.00 σ=0.54
+```
+
+When dead ReLUs are detected:
+```python
+x = self.relu(self.fc1(x))   # ◆ μ=0.23 σ=0.33 [dead:50%]
+```
+
+Hover tooltip shows:
+```
+◆ Activation Stats
+
+Module: ReLU
+Shape: [32, 256]
+Mean: 0.2266
+Std: 0.3338
+Min: 0.0 · Max: 2.847
+Zero fraction: 50.3% ⚠ dead neurons detected
+
+Sampled at call #20 by trickle
+```
+
+**How it works:** `trickle.auto` registers a global forward hook via `nn.modules.module.register_module_forward_hook()`. After each module's forward pass, the hook walks the call stack to find the user's call site (skipping site-packages and trickle internals), computes mean/std/min/max of the output tensor, and checks for dead neurons (>50% zeros), saturation (>50% of |values| > 0.9), vanishing (std < 1e-5), and exploding (|max| > 1e3). Rate-limited to every 20 calls per call site (`TRICKLE_ACT_EVERY` to tune). Works for all nn.Module subclasses including custom modules.

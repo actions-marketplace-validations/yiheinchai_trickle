@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, model checkpoint observability, LR scheduler visualization, memory profiling inlay hints, dataset shape observability, optimizer state observability, and training throughput metrics (samples/sec, batches/sec, ETA) are all implemented. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, model checkpoint observability, LR scheduler visualization, memory profiling inlay hints, dataset shape observability, optimizer state observability, training throughput metrics, and activation statistics observability (mean/std/min/max, dead ReLU, saturation detection) are all implemented. Next priorities:
 
 1. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-2. Activation statistics observability: show mean/std/min/max of layer activations as inlay hints on forward() lines, helping detect dead ReLUs, saturation, or vanishing activations without manual probing.
+2. Loss landscape probing: detect plateau/divergence/oscillation patterns in the loss sequence and surface them as inlay hints on the loss computation line, guiding users to adjust LR or switch optimizers.
 
-3. Loss landscape probing: detect plateau/divergence/oscillation patterns in the loss sequence and surface them as inlay hints on the loss computation line, guiding users to adjust LR or switch optimizers.
+3. Distributed training observability: when using torch.distributed or HuggingFace Accelerate, show per-rank tensor shapes and gradient sync status as inlay hints, helping debug synchronization issues across GPUs.
 
-4. Distributed training observability: when using torch.distributed or HuggingFace Accelerate, show per-rank tensor shapes and gradient sync status as inlay hints, helping debug synchronization issues across GPUs.
+4. Attention pattern visualization: for transformer models, capture attention weight statistics (entropy, max-attended position, dead heads) and show them as inlay hints on attention computation lines.
 
 </focus point>
 

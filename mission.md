@@ -16,7 +16,9 @@ Next priorities:
 
 2. ~~React Native observability~~ ✅ DONE — Metro transformer (`trickle-observe/metro-transformer`) instruments RN components at build time. Fixed `export default function` tracking (common RN screen pattern). Tested on real Expo and Ory RN codebases.
 
-3. Next: Arrow function components in React/React Native — `const MyScreen = () => {}` and `const MyScreen = (props) => {}` are not yet tracked for render counts. This is common in RN. Also consider: tracking prop changes that cause re-renders (already partially done for function declarations, extend to arrow functions).
+3. ~~Arrow function / typed component tracking~~ ✅ DONE — Now tracks `React.FC`, `React.FC<Props>`, `React.memo()`, `memo()`, `React.forwardRef()`, `export default function`, and plain arrows. Fixed type-annotated destructured props.
+
+4. Next: Consider what a React Native developer actually sees in VSCode — currently all trickle data (render counts, state, hooks) is written to `.trickle/variables.jsonl` and shown as inlay hints. But for React Native, the device posts to the backend URL. Add a `trickle rn` CLI command that prints setup instructions for React Native (similar to `trickle lambda setup`), covering: metro.config.js setup, real-device IP configuration, and how to view inline hints in VSCode.
 
 </focus point>
 

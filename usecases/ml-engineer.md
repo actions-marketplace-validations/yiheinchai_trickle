@@ -977,3 +977,34 @@ Step #100
 ```
 
 **How it works:** `trickle.auto` patches all concrete optimizer subclasses' `step()` methods (including custom user-defined optimizers via `__init_subclass__` hook). Before each step, captures the gradient norm across all parameters. After the step, computes the weight update norm (`||θ_new - θ_old||`) and per-group parameter statistics. Works with SGD, Adam, AdamW, RMSprop, and any custom optimizer. Rate-limited to every 10 steps by default (`TRICKLE_OPT_EVERY` to tune). The `⚡` warning triggers when `grad_norm > 10.0`, `↓` when `grad_norm < 1e-5`.
+
+---
+
+## Use Case 24: Training Throughput Metrics
+
+**User:** ML engineer training a ResNet on ImageNet and wanting to know if their DataLoader is a bottleneck, how fast they're processing samples, and how long until the epoch finishes.
+
+**Before trickle:** Must manually record timestamps, compute rolling averages, or use tqdm with `samples/s` display — all requiring explicit instrumentation.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+for batch in train_loader:   # ⬛ [32,3,224,224] float32  ⚡ 1.23k smp/s | ETA 0:42 (38%)
+    ...
+```
+
+Hover tooltip shows:
+```
+⚡ Training Throughput
+
+Samples/sec: 1234.5
+Batches/sec: 38.578
+Batch size: 32
+Batches done: 60 / 157
+ETA: 0:42
+
+Tracked by trickle (rolling avg)
+```
+
+**How it works:** The DataLoader hook tracks inter-batch timing at each for-loop call site. After every 10 batches (configurable via `TRICKLE_THROUGHPUT_EVERY`), it computes a rolling average over the last 20 durations, derives samples/sec and batches/sec, and reads the total batch count from `_index_sampler` to compute ETA. The VSCode extension shows the throughput inlay hint on the for-loop line, after the shape hint.

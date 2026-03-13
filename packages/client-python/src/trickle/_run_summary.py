@@ -239,6 +239,7 @@ _PY_NAMES: Dict[str, str] = {
     "datetime": "datetime",
     "date": "date",
     "time": "time",
+    "Generator": "Iterator",
 }
 
 

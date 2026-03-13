@@ -209,6 +209,7 @@ def _type_to_python(
             "datetime": "datetime",
             "date": "date",
             "time": "time",
+            "Generator": "Iterator[Any]",
         }
         return mapping.get(name, "Any")
 
@@ -257,6 +258,11 @@ def _type_to_python(
         }
         if cn in _DISPLAY_TYPE_NAMES:
             return _DISPLAY_TYPE_NAMES[cn]
+        # User-defined classes (dataclasses, Pydantic, NamedTuple, etc.)
+        # have a class_name that isn't "dict". Render as the class name
+        # directly — the user already has the class definition.
+        if cn and cn != "dict":
+            return cn
         if not props:
             return "Dict[str, Any]"
         if prop_name:
@@ -510,19 +516,26 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     args_type = fn["argsType"]
     return_type = fn["returnType"]
 
-    # Input type
-    _DISPLAY_CLS_IN = {"ndarray", "Tensor", "DataFrame", "Series",
-                       "DatasetDict", "Dataset"}
+    # Input type — render as TypedDict only for plain dicts, not user classes
+    _SKIP_TD_CLS = {"ndarray", "Tensor", "DataFrame", "Series",
+                    "DatasetDict", "Dataset"}
     if args_type.get("kind") == "tuple":
         elements = args_type.get("elements", [])
+        el_cn = elements[0].get("class_name", "") if len(elements) == 1 else ""
         if (len(elements) == 1 and elements[0].get("kind") == "object"
-                and elements[0].get("class_name", "") not in _DISPLAY_CLS_IN):
+                and el_cn not in _SKIP_TD_CLS
+                and (not el_cn or el_cn == "dict")):
             sections.append(_render_typed_dict(f"{base_name}Input", elements[0], extracted))
         else:
             py_type = _type_to_python(args_type, extracted, base_name, None)
             sections.append(f"{base_name}Input = {py_type}")
-    elif args_type.get("kind") == "object" and args_type.get("class_name", "") not in _DISPLAY_CLS_IN:
-        sections.append(_render_typed_dict(f"{base_name}Input", args_type, extracted))
+    elif args_type.get("kind") == "object":
+        a_cn = args_type.get("class_name", "")
+        if a_cn not in _SKIP_TD_CLS and (not a_cn or a_cn == "dict"):
+            sections.append(_render_typed_dict(f"{base_name}Input", args_type, extracted))
+        else:
+            py_type = _type_to_python(args_type, extracted, base_name, None)
+            sections.append(f"{base_name}Input = {py_type}")
     else:
         py_type = _type_to_python(args_type, extracted, base_name, None)
         sections.append(f"{base_name}Input = {py_type}")
@@ -533,8 +546,11 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     _DISPLAY_CLS = {"ndarray", "Tensor", "DataFrame", "Series",
                     "DatasetDict", "Dataset"}
     rt_cn = return_type.get("class_name", "")
+    # Render as TypedDict only for plain dicts (class_name "" or "dict")
+    # Skip for display types and user-defined classes (dataclass, etc.)
     if (return_type.get("kind") == "object" and return_type.get("properties")
-            and rt_cn not in _DISPLAY_CLS):
+            and rt_cn not in _DISPLAY_CLS
+            and (not rt_cn or rt_cn == "dict")):
         sections.append(_render_typed_dict(f"{base_name}Output", return_type, extracted))
     else:
         py_type = _type_to_python(return_type, extracted, base_name, None)
@@ -794,7 +810,7 @@ def generate_types() -> int:
             f"# Generated at {_iso_now()}",
             "# Do not edit — types update automatically as your code runs",
             "",
-            "from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, TypedDict, Union, overload",
+            "from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Iterator, List, Optional, Set, Tuple, TypedDict, Union, overload",
             "",
             "",
         ]

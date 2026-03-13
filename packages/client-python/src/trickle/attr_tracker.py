@@ -227,6 +227,22 @@ class TrackedObject:
         inner = object.__getattribute__(self, "_inner")
         return inner(*args, **kwargs)
 
+    def __enter__(self) -> Any:
+        inner = object.__getattribute__(self, "_inner")
+        return inner.__enter__()
+
+    def __exit__(self, *args: Any) -> Any:
+        inner = object.__getattribute__(self, "_inner")
+        return inner.__exit__(*args)
+
+    async def __aenter__(self) -> Any:
+        inner = object.__getattribute__(self, "_inner")
+        return await inner.__aenter__()
+
+    async def __aexit__(self, *args: Any) -> Any:
+        inner = object.__getattribute__(self, "_inner")
+        return await inner.__aexit__(*args)
+
     def __int__(self) -> int:
         inner = object.__getattribute__(self, "_inner")
         return int(inner)

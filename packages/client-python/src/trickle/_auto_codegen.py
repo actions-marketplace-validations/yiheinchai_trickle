@@ -403,7 +403,46 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
         param_names = fn.get("paramNames", [])
         variants = fn.get("variants")
 
-        if variants and len(variants) >= 2:
+        # Detect kwargs across all variants
+        all_kwargs = _collect_all_kwargs(fn)
+        has_kwargs = bool(all_kwargs)
+
+        # Return type
+        is_async = fn.get("isAsync", False)
+        def_keyword = "async def" if is_async else "def"
+        m_ret_type = _type_to_python(return_type, extracted, base_name, None)
+        if m_ret_type == "None":
+            ret_str = " -> None"
+        elif is_async:
+            ret_str = f" -> Awaitable[{m_ret_type}]"
+        else:
+            ret_str = f" -> {m_ret_type}"
+
+        if has_kwargs:
+            # Flatten kwargs into the method signature
+            params_list: List[str] = ["self"]
+            if args_type.get("kind") == "tuple":
+                elements = args_type.get("elements", [])
+                pos_elems, _ = _extract_kwargs_bundle(elements, param_names)
+                # Force-strip if kwargs found from variants but not merged type
+                if len(pos_elems) == len(elements) and len(elements) > 0:
+                    pos_elems = elements[:-1]
+                for i, el in enumerate(pos_elems):
+                    pname = param_names[i] if i < len(param_names) else f"arg{i}"
+                    if pname == "self":
+                        continue
+                    py_type = _type_to_python(el, extracted, base_name, pname)
+                    params_list.append(f"{pname}: {py_type}")
+            # Add kwargs as keyword params
+            sorted_kw = sorted(all_kwargs.keys(),
+                             key=lambda k: param_names.index(k) if k in param_names else 999)
+            for k in sorted_kw:
+                v = all_kwargs[k]
+                py_type = _type_to_python(v, extracted, base_name, k)
+                params_list.append(f"{k}: {py_type} = ...")
+            lines.append(f"    {def_keyword} {method_snake}({', '.join(params_list)}){ret_str}: ...")
+
+        elif variants and len(variants) >= 2:
             # Generate overloaded method signatures
             for variant in variants:
                 v_args = variant["argsType"]
@@ -442,19 +481,10 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                     else:
                         py_type = _type_to_python(el, extracted, base_name, pname)
                         params.append(f"{pname}: {py_type}")
-            is_async = fn.get("isAsync", False)
-            def_keyword = "async def" if is_async else "def"
-            ret_type = _type_to_python(return_type, extracted, base_name, None)
-            if ret_type == "None":
-                ret_str = " -> None"
-            elif is_async:
-                ret_str = f" -> Awaitable[{ret_type}]"
-            else:
-                ret_str = f" -> {ret_type}"
             lines.append(f"    {def_keyword} {method_snake}({', '.join(params)}){ret_str}: ...")
         else:
             # Build params (skip 'self' from observed param names)
-            params_list: List[str] = ["self"]
+            params_list2: List[str] = ["self"]
             if args_type.get("kind") == "tuple":
                 elements = args_type.get("elements", [])
                 for i, el in enumerate(elements):
@@ -464,23 +494,12 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                     is_opt, inner = _extract_optional(el)
                     if is_opt:
                         py_type = _type_to_python(inner, extracted, base_name, pname)
-                        params_list.append(f"{pname}: Optional[{py_type}] = None")
+                        params_list2.append(f"{pname}: Optional[{py_type}] = None")
                     else:
                         py_type = _type_to_python(el, extracted, base_name, pname)
-                        params_list.append(f"{pname}: {py_type}")
+                        params_list2.append(f"{pname}: {py_type}")
 
-            # Return type
-            is_async = fn.get("isAsync", False)
-            ret_type = _type_to_python(return_type, extracted, base_name, None)
-            if ret_type == "None":
-                ret_str = " -> None"
-            elif is_async:
-                ret_str = f" -> Awaitable[{ret_type}]"
-            else:
-                ret_str = f" -> {ret_type}"
-
-            def_keyword = "async def" if is_async else "def"
-            lines.append(f"    {def_keyword} {method_snake}({', '.join(params_list)}){ret_str}: ...")
+            lines.append(f"    {def_keyword} {method_snake}({', '.join(params_list2)}){ret_str}: ...")
 
     if len(lines) == 1:
         lines.append("    pass")
@@ -506,6 +525,76 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
     return "\n".join(result)
 
 
+def _extract_kwargs_bundle(
+    elements: List[Dict[str, Any]],
+    param_names: List[str],
+) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    """Separate positional args from a trailing kwargs bundle.
+
+    Returns (positional_elements, kwargs_dict) where kwargs_dict maps
+    kwarg name → type node. If the last element is not a kwargs bundle,
+    returns (elements, {}).
+
+    A kwargs bundle is detected as the last element being an object with
+    no class_name (or class_name "") whose property keys are a subset of
+    paramNames but are NOT positional params.
+    """
+    if not elements:
+        return elements, {}
+
+    last = elements[-1]
+    if last.get("kind") != "object":
+        return elements, {}
+
+    cn = last.get("class_name", "")
+    if cn and cn != "dict":
+        return elements, {}
+
+    props = last.get("properties", {})
+    if not props:
+        return elements, {}
+
+    # Check if all property keys match paramNames
+    n_positional = len(elements) - 1
+    positional_names = set(param_names[:n_positional])
+    kwarg_keys = set(props.keys())
+
+    # Kwargs keys should match param names that aren't positional
+    non_pos_params = set(param_names) - positional_names
+    if param_names and kwarg_keys and kwarg_keys.issubset(non_pos_params):
+        return elements[:-1], dict(props)
+
+    # If all paramNames are accounted for by positional elements,
+    # the trailing object is kwargs (keyword-only args after *)
+    if param_names and n_positional == len(param_names):
+        return elements[:-1], dict(props)
+
+    return elements, {}
+
+
+def _collect_all_kwargs(fn: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """Collect all kwargs from all variants of a function, merging types."""
+    all_kwargs: Dict[str, Dict[str, Any]] = {}
+    param_names = fn.get("paramNames", [])
+    variants = fn.get("variants", [])
+
+    sources = variants if variants else [fn]
+    for src in sources:
+        args_type = src.get("argsType", {})
+        if args_type.get("kind") != "tuple":
+            continue
+        elements = args_type.get("elements", [])
+        v_names = src.get("paramNames", param_names)
+        _, kwargs = _extract_kwargs_bundle(elements, v_names)
+        for k, v in kwargs.items():
+            if k in all_kwargs:
+                all_kwargs[k] = _merge_type_nodes(all_kwargs[k], v)
+            else:
+                all_kwargs[k] = v
+
+    return all_kwargs
+
+
 def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     """Generate Python stub for a single function."""
     name = fn["name"]
@@ -515,29 +604,44 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
 
     args_type = fn["argsType"]
     return_type = fn["returnType"]
+    param_names = fn.get("paramNames", [])
 
-    # Input type — render as TypedDict only for plain dicts, not user classes
-    _SKIP_TD_CLS = {"ndarray", "Tensor", "DataFrame", "Series",
-                    "DatasetDict", "Dataset"}
+    # Separate positional args from kwargs bundle
+    all_kwargs = _collect_all_kwargs(fn)
+    pos_elements: List[Dict[str, Any]] = []
     if args_type.get("kind") == "tuple":
         elements = args_type.get("elements", [])
-        el_cn = elements[0].get("class_name", "") if len(elements) == 1 else ""
-        if (len(elements) == 1 and elements[0].get("kind") == "object"
+        pos_elements, _ = _extract_kwargs_bundle(elements, param_names)
+        # If kwargs were found from variants but not from merged type
+        # (merged type has union), force-strip the last element
+        if all_kwargs and len(pos_elements) == len(elements) and len(elements) > 0:
+            pos_elements = elements[:-1]
+    else:
+        pos_elements = []
+
+    # Input type — only render positional args (kwargs go in signature)
+    _SKIP_TD_CLS = {"ndarray", "Tensor", "DataFrame", "Series",
+                    "DatasetDict", "Dataset"}
+    pos_args_type = {"kind": "tuple", "elements": pos_elements} if pos_elements else args_type
+    if pos_args_type.get("kind") == "tuple":
+        p_elements = pos_args_type.get("elements", [])
+        el_cn = p_elements[0].get("class_name", "") if len(p_elements) == 1 else ""
+        if (len(p_elements) == 1 and p_elements[0].get("kind") == "object"
                 and el_cn not in _SKIP_TD_CLS
                 and (not el_cn or el_cn == "dict")):
-            sections.append(_render_typed_dict(f"{base_name}Input", elements[0], extracted))
+            sections.append(_render_typed_dict(f"{base_name}Input", p_elements[0], extracted))
         else:
-            py_type = _type_to_python(args_type, extracted, base_name, None)
+            py_type = _type_to_python(pos_args_type, extracted, base_name, None)
             sections.append(f"{base_name}Input = {py_type}")
-    elif args_type.get("kind") == "object":
-        a_cn = args_type.get("class_name", "")
+    elif pos_args_type.get("kind") == "object":
+        a_cn = pos_args_type.get("class_name", "")
         if a_cn not in _SKIP_TD_CLS and (not a_cn or a_cn == "dict"):
-            sections.append(_render_typed_dict(f"{base_name}Input", args_type, extracted))
+            sections.append(_render_typed_dict(f"{base_name}Input", pos_args_type, extracted))
         else:
-            py_type = _type_to_python(args_type, extracted, base_name, None)
+            py_type = _type_to_python(pos_args_type, extracted, base_name, None)
             sections.append(f"{base_name}Input = {py_type}")
     else:
-        py_type = _type_to_python(args_type, extracted, base_name, None)
+        py_type = _type_to_python(pos_args_type, extracted, base_name, None)
         sections.append(f"{base_name}Input = {py_type}")
     sections.append("")
     sections.append("")
@@ -575,7 +679,6 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     is_async = fn.get("isAsync", False)
     def_keyword = "async def" if is_async else "def"
     ret_type = f"Awaitable[{base_name}Output]" if is_async else f"{base_name}Output"
-    param_names = fn.get("paramNames", [])
 
     result: List[str] = []
     if extracted_lines:
@@ -583,19 +686,47 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     result.extend(sections)
     result.append("")
 
+    # Build positional params
+    def _build_pos_params(elems: List[Dict[str, Any]], names: List[str]) -> List[str]:
+        params = []
+        for idx, el in enumerate(elems):
+            pname = names[idx] if idx < len(names) else f"arg{idx}"
+            is_opt, inner = _extract_optional(el)
+            if is_opt:
+                py_type = _type_to_python(inner, extracted, base_name, pname)
+                params.append(f"{pname}: Optional[{py_type}] = None")
+            else:
+                py_type = _type_to_python(el, extracted, base_name, pname)
+                params.append(f"{pname}: {py_type}")
+        return params
+
+    # Build kwargs params (all optional with defaults)
+    def _build_kwarg_params(kwargs: Dict[str, Dict[str, Any]]) -> List[str]:
+        params = []
+        # Sort kwargs by their position in paramNames for stable ordering
+        sorted_keys = sorted(kwargs.keys(),
+                           key=lambda k: param_names.index(k) if k in param_names else 999)
+        for k in sorted_keys:
+            v = kwargs[k]
+            py_type = _type_to_python(v, extracted, base_name, k)
+            params.append(f"{k}: {py_type} = ...")
+        return params
+
     # Generate overloads if we have multiple distinct type patterns
     variants = fn.get("variants")
-    if variants and len(variants) >= 2:
+    has_kwargs = bool(all_kwargs)
+
+    if variants and len(variants) >= 2 and not has_kwargs:
+        # Only use overloads when differences are in positional arg types,
+        # not just kwargs presence
         seen_sigs: Set[str] = set()
         overload_lines: List[str] = []
         for variant in variants:
             v_args = variant["argsType"]
-            v_ret = variant["returnType"]
             v_names = variant.get("paramNames", param_names)
             v_async = variant.get("isAsync", False)
             v_def = "async def" if v_async else "def"
             v_ext: List[Tuple[str, Dict[str, Any]]] = []
-            # Use the Output type name for overload return types (already defined above)
             v_ret_str = f"{base_name}Output"
             if v_async:
                 v_ret_str = f"Awaitable[{v_ret_str}]"
@@ -610,48 +741,22 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
                 seen_sigs.add(sig)
                 overload_lines.append("@overload")
                 overload_lines.append(sig)
-        # Only emit overloads if we have 2+ distinct rendered signatures
         if len(seen_sigs) >= 2:
             result.extend(overload_lines)
 
-        # Implementation signature (merged types)
-        if args_type.get("kind") == "tuple":
-            elements = args_type.get("elements", [])
-            params = []
-            for idx, el in enumerate(elements):
-                pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
-                is_opt, inner = _extract_optional(el)
-                if is_opt:
-                    py_type = _type_to_python(inner, extracted, base_name, pname)
-                    params.append(f"{pname}: Optional[{py_type}] = None")
-                else:
-                    py_type = _type_to_python(el, extracted, base_name, pname)
-                    params.append(f"{pname}: {py_type}")
-            result.append(f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ...")
-        else:
-            result.append(f"{def_keyword} {func_name}() -> {ret_type}: ...")
+        # Implementation signature
+        params = _build_pos_params(pos_elements, param_names)
+        result.append(f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ...")
     else:
-        if args_type.get("kind") == "tuple":
-            elements = args_type.get("elements", [])
-            if len(elements) == 1 and elements[0].get("kind") == "object":
-                pname = param_names[0] if param_names else "input"
-                sig = f"{def_keyword} {func_name}({pname}: {base_name}Input) -> {ret_type}: ..."
-            else:
-                params = []
-                for idx, el in enumerate(elements):
-                    pname = param_names[idx] if idx < len(param_names) else f"arg{idx}"
-                    is_opt, inner = _extract_optional(el)
-                    if is_opt:
-                        py_type = _type_to_python(inner, extracted, base_name, pname)
-                        params.append(f"{pname}: Optional[{py_type}] = None")
-                    else:
-                        py_type = _type_to_python(el, extracted, base_name, pname)
-                        params.append(f"{pname}: {py_type}")
-                sig = f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ..."
-        elif args_type.get("kind") == "object" and args_type.get("properties"):
+        # Single signature with kwargs flattened
+        params = _build_pos_params(pos_elements, param_names)
+        if has_kwargs:
+            params.extend(_build_kwarg_params(all_kwargs))
+
+        if not params and pos_args_type.get("kind") == "object" and pos_args_type.get("properties"):
             sig = f"{def_keyword} {func_name}(input: {base_name}Input) -> {ret_type}: ..."
         else:
-            sig = f"{def_keyword} {func_name}() -> {ret_type}: ..."
+            sig = f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ..."
 
         # Add docstring with example if sample data is available
         example_docstring = _build_example_docstring(fn)

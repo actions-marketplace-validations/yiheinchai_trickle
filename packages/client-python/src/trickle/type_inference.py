@@ -126,13 +126,14 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
                             props["nan_count"] = {"kind": "primitive", "name": str(nan_count)}
                         if inf_count > 0:
                             props["inf_count"] = {"kind": "primitive", "name": str(inf_count)}
-                        # Min/max/mean for non-scalar tensors (only on finite values)
+                        # Min/max/mean/std for non-scalar tensors (only on finite values)
                         if numel > 1:
                             finite = v[torch.isfinite(v)] if (nan_count + inf_count) > 0 else v
                             if finite.numel() > 0:
                                 props["min"] = {"kind": "primitive", "name": f"{finite.min().item():.4g}"}
                                 props["max"] = {"kind": "primitive", "name": f"{finite.max().item():.4g}"}
                                 props["mean"] = {"kind": "primitive", "name": f"{finite.mean().item():.4g}"}
+                                props["std"] = {"kind": "primitive", "name": f"{finite.std().item():.4g}"}
                     else:
                         # For very large tensors, only check NaN on a sample
                         sample_idx = torch.randint(0, numel, (min(100_000, numel),))
@@ -186,6 +187,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
                         props["min"] = {"kind": "primitive", "name": f"{finite.min():.4g}"}
                         props["max"] = {"kind": "primitive", "name": f"{finite.max():.4g}"}
                         props["mean"] = {"kind": "primitive", "name": f"{finite.mean():.4g}"}
+                        props["std"] = {"kind": "primitive", "name": f"{finite.std():.4g}"}
             except Exception:
                 pass
         return {"kind": "object", "properties": props, "class_name": "ndarray"}

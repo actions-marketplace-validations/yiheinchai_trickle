@@ -1192,7 +1192,12 @@ function formatTensorStats(type: TypeNode): string {
   const max = type.properties['max'];
   const mean = type.properties['mean'];
   if (min && max && mean) {
-    parts.push(`min=${min.name} max=${max.name} mean=${mean.name}`);
+    const std = type.properties['std'];
+    let statsStr = `min=${min.name} max=${max.name} mean=${mean.name}`;
+    if (std?.kind === 'primitive' && std.name) {
+      statsStr += ` std=${std.name}`;
+    }
+    parts.push(statsStr);
   }
   const mem = type.properties['memory'];
   if (mem?.kind === 'primitive' && mem.name) {

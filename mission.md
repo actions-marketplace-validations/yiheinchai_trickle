@@ -11,22 +11,22 @@ Find the pain points. Implement features to fix the pain point.
 <focus point>
 
 Recently completed:
-- `TRICKLE_STUBS=0` env var for user control over stub generation
-- Fixed invalid .pyi from numeric dict keys (now emits `Dict[K, V]` instead of broken TypedDict)
-- Fixed @classmethod crash (AST transform now skips classmethod/staticmethod/property descriptors)
-- Fixed undefined TypeNode guards in type converters
+- Class methods now emitted as proper class stubs in .pyi (not top-level functions)
+- Polymorphic methods (e.g. forward on LinearModel vs ConvModel) get separate per-class stubs
+- Entry transform wraps methods with ClassName.method format
+- `TRICKLE_STUBS=0` env var, numeric key fix, @classmethod crash fix
 
 Next priorities:
 
-1. **Methods appear as top-level functions in .pyi** — `forward()`, `num_parameters()` etc. are emitted as free functions instead of class methods. Need to group observations by class and emit proper method stubs inside class bodies.
+1. **Context manager return types** — `@contextlib.contextmanager` hides the generator nature. The variable tracer captures the yielded value's type, but function observation shows `Callable` instead of `ContextManager[T]`.
 
-2. **Polymorphic methods only show one variant** — When a method is observed on multiple classes (e.g. `forward` on `AttentionLayer` and `FeedForwardLayer`), only one variant appears in .pyi. Need to emit overloads or per-class stubs.
+2. **ESM entry file observation** — JS/TS ESM entry files don't get top-level functions observed. CJS require-hook works, but ESM loader hooks can't patch the entry module.
 
-3. **Context manager return types** — `@contextlib.contextmanager` hides the generator nature. The variable tracer captures the yielded value's type, but function observation shows `Callable` instead of `ContextManager[T]`.
+3. **variables.jsonl lacks function scope** — Variable entries are flat with no function scope field. Terminal groups by function on-the-fly but the persisted JSONL is hard to consume programmatically.
 
-4. **ESM entry file observation** — JS/TS ESM entry files don't get top-level functions observed. CJS require-hook works, but ESM loader hooks can't patch the entry module.
+4. **TS class stubs** — TypeScript .d.ts output still emits class methods as flat functions. Should group into class declarations like the Python side now does.
 
-5. **variables.jsonl lacks function scope** — All 136 variable entries are flat with no function scope field. Terminal groups by function on-the-fly but the persisted JSONL is hard to consume programmatically.
+5. **Real-world testing** — Test on larger codebases (karpathy/nanoGPT, Flask apps, React TS projects) to find remaining pain points.
 
 </focus point>
 

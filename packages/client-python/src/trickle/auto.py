@@ -81,6 +81,13 @@ try:
 except Exception:
     pass
 
+# Install loss probe hook for loss landscape pattern detection
+try:
+    from trickle._loss_probe_hook import install as _install_loss_probe_hook  # noqa: E402
+    _install_loss_probe_hook()
+except Exception:
+    pass
+
 # Import the codegen
 from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 

@@ -154,6 +154,20 @@ interface OptimizerStepRecord {
   timestamp: number;
 }
 
+/** Loss probe record emitted after each loss.backward() call */
+interface LossProbeRecord {
+  kind: 'loss_probe';
+  file: string;
+  line: number;
+  loss: number;
+  loss_avg: number;
+  loss_delta: number;
+  loss_std: number;
+  pattern: 'decreasing' | 'increasing' | 'plateau' | 'oscillating' | 'diverging' | 'stable' | 'unknown';
+  step: number;
+  timestamp: number;
+}
+
 /** Activation statistics record emitted after each nn.Module forward pass */
 interface ActivationStatsRecord {
   kind: 'activation_stats';
@@ -233,6 +247,8 @@ let dataloaderIndex: Map<string, Map<number, DataloaderBatchRecord>> = new Map()
 let throughputIndex: Map<string, Map<number, TrainingThroughputRecord>> = new Map();
 /** Activation statistics: filePath -> lineNo -> ActivationStatsRecord (latest) */
 let activationIndex: Map<string, Map<number, ActivationStatsRecord>> = new Map();
+/** Loss probe records: filePath -> lineNo -> LossProbeRecord (latest) */
+let lossProbeIndex: Map<string, Map<number, LossProbeRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -575,6 +591,7 @@ function loadAllVariables() {
   optimizerIndex.clear();
   throughputIndex.clear();
   activationIndex.clear();
+  lossProbeIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -666,6 +683,20 @@ function loadAllVariables() {
             const existing = lineMap.get(dl.line);
             if (!existing || dl.timestamp > existing.timestamp) {
               lineMap.set(dl.line, dl);
+            }
+            continue;
+          }
+
+          // Handle loss probe records
+          if (record.kind === 'loss_probe') {
+            const lp = record as LossProbeRecord;
+            if (!lossProbeIndex.has(lp.file)) {
+              lossProbeIndex.set(lp.file, new Map());
+            }
+            const lineMap = lossProbeIndex.get(lp.file)!;
+            const existing = lineMap.get(lp.line);
+            if (!existing || lp.timestamp > existing.timestamp) {
+              lineMap.set(lp.line, lp);
             }
             continue;
           }
@@ -1598,6 +1629,71 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             md.isTrusted = true;
             hint.tooltip = md;
 
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add loss probe inlay hints at loss.backward() call lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const lpLines = lossProbeIndex.get(filePath);
+      if (lpLines) {
+        for (const [lineNo, lp] of lpLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          const patternIcon: Record<string, string> = {
+            decreasing: '↘', increasing: '↗', plateau: '—',
+            oscillating: '〰', diverging: '⚠', stable: '→', unknown: '?',
+          };
+          const patternTip: Record<string, string> = {
+            plateau: 'try raising LR or check gradient vanishing',
+            oscillating: 'try lowering LR or add gradient clipping',
+            increasing: 'check LR, data, or possible bug',
+            diverging: 'NaN/Inf detected — lower LR or add gradient clipping',
+            decreasing: 'training healthy',
+            stable: '', unknown: '',
+          };
+
+          const icon = patternIcon[lp.pattern] ?? '?';
+          const fmtLoss = (v: number): string => {
+            if (!isFinite(v)) return String(v);
+            if (Math.abs(v) >= 100) return v.toFixed(1);
+            if (Math.abs(v) >= 10) return v.toFixed(2);
+            return v.toFixed(4);
+          };
+          const deltaStr = lp.loss_delta !== 0
+            ? ` Δ=${lp.loss_delta >= 0 ? '+' : ''}${lp.loss_delta.toFixed(4)}/step`
+            : '';
+          const patternNote = ['plateau', 'oscillating', 'increasing', 'diverging'].includes(lp.pattern)
+            ? ` [${lp.pattern}]` : '';
+
+          let label = ` ${icon} loss=${fmtLoss(lp.loss)}${deltaStr}${patternNote}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            const tip = patternTip[lp.pattern] ?? '';
+            const tooltipLines = [
+              `**Pattern:** \`${lp.pattern}\`${tip ? '  —  ' + tip : ''}`,
+              `**Current loss:** \`${lp.loss}\``,
+              `**Moving avg:** \`${lp.loss_avg}\``,
+              `**Std (window):** \`${lp.loss_std}\``,
+              `**Δ/step:** \`${lp.loss_delta >= 0 ? '+' : ''}${lp.loss_delta}\``,
+              `**Step:** \`${lp.step}\``,
+            ];
+            const md = new vscode.MarkdownString(
+              `### ${icon} Loss Landscape\n\n` + tooltipLines.join('\n\n') +
+              `\n\n*Tracked by trickle (20-step rolling window)*`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
             hints.push(hint);
           } catch {
             // Skip if line is out of range

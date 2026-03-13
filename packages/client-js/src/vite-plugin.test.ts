@@ -40,6 +40,13 @@ describe('React file detection', () => {
     }
   });
 
+  it('tracks export default function components', () => {
+    const code = `export default function HomeScreen() { return null; }`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'export default function should be tracked as component');
+  });
+
   it('does not track lowercase functions as components', () => {
     const code = `function helper(x) { return x + 1; }`;
     const out = transformTsx(code);

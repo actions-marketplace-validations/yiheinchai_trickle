@@ -481,7 +481,7 @@ function escapeRegexStr(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function transformEsmSource(
+export function transformEsmSource(
   source: string,
   filename: string,
   moduleName: string,
@@ -493,8 +493,8 @@ function transformEsmSource(
   // Detect React files for component render tracking
   const isReactFile = /\.(tsx|jsx)$/.test(filename);
 
-  // Match top-level and nested function declarations (including async, export)
-  const funcRegex = /^[ \t]*(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
+  // Match top-level and nested function declarations (including async, export, export default)
+  const funcRegex = /^[ \t]*(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
   const funcInsertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
   // Body insertions: insert at start of function body (for React render tracking)
   // propsExpr: JS expression to evaluate as the props object at render time

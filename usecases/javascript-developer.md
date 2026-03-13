@@ -133,7 +133,45 @@ const byRole = normalized.reduce((acc, user) => {
 
 ---
 
-## Use Case 5: Understand Unfamiliar Code
+## Use Case 5: Multi-file ESM Data Pipeline
+
+A modern data analytics script spanning multiple ESM modules:
+
+```bash
+trickle run node analytics.mjs
+```
+
+```javascript
+// analytics.mjs
+import { users, projects } from './data.mjs';
+
+const activeUsers = users.filter(u => u.active);
+// → activeUsers: {id, name, email, +4}[]   (compact: 7 keys, hover for full type)
+
+const byDepartment = activeUsers.reduce((acc, user) => {
+  const dept = user.dept;
+  // → dept: "eng"
+  if (!acc[dept]) acc[dept] = [];
+  acc[dept].push(user);
+  return acc;
+}, {});
+// → byDepartment: {eng, data}   (shows discovered keys from runtime)
+
+const deptStats = Object.entries(byDepartment).map(([dept, members]) => {
+  const salaries = members.map(m => m.salary);
+  // → salaries: number[]
+  const avgSalary = salaries.reduce((sum, s) => sum + s, 0) / salaries.length;
+  // → avgSalary: 133333.3333
+  return { dept, headcount: members.length, avgSalary };
+});
+// → deptStats: {dept, headcount, avgSalary}[]
+```
+
+Both `analytics.mjs` and `data.mjs` get traced in a single run. Open either file in VSCode to see types inline.
+
+---
+
+## Use Case 6: Understand Unfamiliar Code
 
 Inherited a JS codebase with no types? Run it through trickle:
 

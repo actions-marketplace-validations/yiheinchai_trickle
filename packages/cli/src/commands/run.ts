@@ -404,9 +404,12 @@ async function executeSingleRun(
 
   const { generateLocalStubs, generateFromJsonl, readObservations } = await import("../local-codegen");
 
+  // Check if stub generation is enabled (TRICKLE_STUBS=0 disables .pyi/.d.ts files)
+  const stubsEnabled = (env.TRICKLE_STUBS || process.env.TRICKLE_STUBS || "1").toLowerCase() !== "0";
+
   // Start live type generation — types update while the process runs
   let liveTypesStop: (() => void) | null = null;
-  if (singleFile) {
+  if (singleFile && stubsEnabled) {
     liveTypesStop = startLiveLocalTypes(singleFile, jsonlPath, generateLocalStubs);
   }
 
@@ -425,7 +428,7 @@ async function executeSingleRun(
   }
 
   // Final type generation (catches any remaining observations)
-  if (singleFile) {
+  if (singleFile && stubsEnabled) {
     generateLocalStubs(singleFile, jsonlPath);
   }
 
@@ -434,12 +437,12 @@ async function executeSingleRun(
   const totalFunctions = observations.length;
 
   console.log("");
-  console.log(chalk.bold("  Summary (local mode)"));
+  console.log(chalk.bold("  trickle summary"));
   console.log(chalk.gray("  " + "─".repeat(50)));
-  console.log(`  Functions observed: ${chalk.bold(String(totalFunctions))}`);
 
+  // ── Function signatures ──
   if (totalFunctions > 0) {
-    console.log("");
+    console.log(`  ${chalk.bold("Function types")} — ${totalFunctions} observed`);
     // Group by module
     const byModule = new Map<string, typeof observations>();
     for (const fn of observations) {
@@ -455,30 +458,32 @@ async function executeSingleRun(
       const shown = fns.slice(0, 15);
       for (const fn of shown) {
         const sig = _formatLocalSignature(fn);
-        console.log(`    ${chalk.green("+")} ${sig}`);
+        console.log(`    ${chalk.green("→")} ${sig}`);
       }
       if (fns.length > 15) {
         console.log(chalk.gray(`    ... and ${fns.length - 15} more`));
       }
     }
-  }
 
-  console.log("");
-  console.log(`  Data saved to: ${chalk.gray(jsonlPath)}`);
-
-  if (singleFile) {
-    const ext = path.extname(singleFile).toLowerCase();
-    const isPython = ext === ".py";
-    const baseName = path.basename(singleFile, ext);
-    const stubExt = isPython ? ".pyi" : ".d.ts";
-    const stubFile = path.join(path.dirname(singleFile), `${baseName}${stubExt}`);
-    if (fs.existsSync(stubFile)) {
-      const relPath = path.relative(process.cwd(), stubFile);
-      console.log(chalk.green(`  Types written to ${chalk.bold(relPath)}`));
+    // Stub file status
+    if (singleFile && stubsEnabled) {
+      const ext = path.extname(singleFile).toLowerCase();
+      const isPython = ext === ".py";
+      const baseName = path.basename(singleFile, ext);
+      const stubExt = isPython ? ".pyi" : ".d.ts";
+      const stubFile = path.join(path.dirname(singleFile), `${baseName}${stubExt}`);
+      if (fs.existsSync(stubFile)) {
+        const relPath = path.relative(process.cwd(), stubFile);
+        console.log(`  ${chalk.green("✓")} Stub file: ${chalk.bold(relPath)} ${chalk.gray("(for type checkers)")}`);
+      }
+    } else if (singleFile && !stubsEnabled) {
+      console.log(chalk.gray(`  ⊘ Stub generation disabled (TRICKLE_STUBS=0)`));
     }
+  } else {
+    console.log(chalk.gray(`  No functions observed.`));
   }
 
-  // Show variable/tensor summary if variables.jsonl exists
+  // ── Variable/tensor summary ──
   const varsJsonlPath = path.join(localDir, "variables.jsonl");
   if (fs.existsSync(varsJsonlPath)) {
     try {
@@ -487,6 +492,7 @@ async function executeSingleRun(
     } catch {
       // vars module not available, skip
     }
+    console.log(chalk.gray(`  ↳ Variable data feeds VSCode inline hints`));
   }
 
   console.log(chalk.gray("  " + "─".repeat(50)));

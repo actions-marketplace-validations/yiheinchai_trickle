@@ -116,14 +116,16 @@ def main() -> None:
         except BaseException as exc:
             _user_code_error = exc
 
-    # Generate .pyi stubs from observations
-    try:
-        from trickle._auto_codegen import generate_types
-        count = generate_types()
-        if count and count > 0:
-            print(f"[trickle] {count} function type(s) written to .pyi")
-    except Exception:
-        pass
+    # Generate .pyi stubs from observations (unless TRICKLE_STUBS=0)
+    _stubs_enabled = os.environ.get("TRICKLE_STUBS", "1").lower() not in ("0", "false")
+    if _stubs_enabled:
+        try:
+            from trickle._auto_codegen import generate_types
+            count = generate_types()
+            if count and count > 0:
+                print(f"[trickle] {count} function type(s) written to .pyi")
+        except Exception:
+            pass
 
     # Print summary after run (success or failure)
     if _trace_vars:

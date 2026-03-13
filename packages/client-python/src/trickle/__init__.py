@@ -2,6 +2,7 @@ from .decorator import trickle
 from .transport import configure
 from .instrument import instrument, instrument_fastapi, instrument_flask, instrument_django
 from .observe import observe, observe_fn
+from .progress import progress
 
 __all__ = [
     "trickle",
@@ -12,6 +13,7 @@ __all__ = [
     "instrument_django",
     "observe",
     "observe_fn",
+    "progress",
 ]
 
 

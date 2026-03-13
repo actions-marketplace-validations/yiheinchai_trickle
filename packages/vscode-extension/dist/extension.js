@@ -41,6 +41,7 @@ const path = __importStar(require("path"));
 let varIndex = new Map();
 let notebookCellIndex = new Map();
 let dimLabelIndex = new Map();
+let latestProgress = null;
 let fileWatcher;
 let errorFileWatcher;
 let statusBarItem;
@@ -52,6 +53,42 @@ const inlayHintsChangeEmitter = new vscode.EventEmitter();
 let prevTypeHashes = new Map();
 /** Variables whose type changed since the last run: "file:line:varName" */
 let changedVarKeys = new Set();
+/** Load persisted type hashes from .trickle/type_history.json for cross-session drift detection. */
+function loadTypeHistory() {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders)
+        return;
+    const historyPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'type_history.json');
+    try {
+        if (fs.existsSync(historyPath)) {
+            const data = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+            if (data && typeof data === 'object') {
+                prevTypeHashes = new Map(Object.entries(data));
+            }
+        }
+    }
+    catch {
+        // Ignore — corrupt or missing history is non-fatal
+    }
+}
+/** Persist current type hashes to .trickle/type_history.json for next session. */
+function saveTypeHistory(hashes) {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders)
+        return;
+    const trickleDir = path.join(workspaceFolders[0].uri.fsPath, '.trickle');
+    const historyPath = path.join(trickleDir, 'type_history.json');
+    try {
+        if (!fs.existsSync(trickleDir))
+            fs.mkdirSync(trickleDir, { recursive: true });
+        const obj = {};
+        hashes.forEach((v, k) => { obj[k] = v; });
+        fs.writeFileSync(historyPath, JSON.stringify(obj), 'utf8');
+    }
+    catch {
+        // Non-fatal — persistence is best-effort
+    }
+}
 function activate(context) {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
     statusBarItem.command = 'trickle.refreshVariables';
@@ -59,6 +96,8 @@ function activate(context) {
     // Create diagnostic collection for error reporting
     diagnosticCollection = vscode.languages.createDiagnosticCollection('trickle');
     context.subscriptions.push(diagnosticCollection);
+    // Load persisted type hashes before first variable load (enables cross-session drift detection)
+    loadTypeHistory();
     // Load variable data
     loadAllVariables();
     loadErrors();
@@ -241,7 +280,46 @@ function countVars() {
     }
     return count;
 }
+/** Ordered list of common training metric keys — shown first in status bar. */
+const PROGRESS_KEY_ORDER = ['epoch', 'step', 'batch', 'iter', 'loss', 'train_loss',
+    'val_loss', 'acc', 'accuracy', 'val_acc', 'lr', 'f1', 'auc'];
+/** Format a single metric value for the status bar (compact). */
+function formatProgressValue(val) {
+    if (typeof val === 'boolean')
+        return val ? 'true' : 'false';
+    if (typeof val === 'number') {
+        if (Number.isInteger(val))
+            return String(val);
+        return val.toFixed(4).replace(/\.?0+$/, '');
+    }
+    return String(val);
+}
 function updateStatusBar() {
+    // Show training progress when a recent trickle.progress() record exists (< 120 s)
+    if (latestProgress) {
+        const ageSeconds = Date.now() / 1000 - latestProgress.timestamp;
+        if (ageSeconds < 120) {
+            const m = latestProgress.metrics;
+            const parts = [];
+            // Priority keys first, then any remaining ones
+            for (const key of PROGRESS_KEY_ORDER) {
+                if (key in m) {
+                    parts.push(`${key} ${formatProgressValue(m[key])}`);
+                }
+            }
+            for (const [key, val] of Object.entries(m)) {
+                if (!PROGRESS_KEY_ORDER.includes(key)) {
+                    parts.push(`${key} ${formatProgressValue(val)}`);
+                }
+            }
+            if (parts.length > 0) {
+                statusBarItem.text = `$(sync~spin) Training: ${parts.join(' | ')}`;
+                statusBarItem.tooltip = `Training progress from trickle.progress()\n${latestProgress.file}:${latestProgress.line}\nCall #${latestProgress.call_count}\nClick to refresh`;
+                statusBarItem.show();
+                return;
+            }
+        }
+    }
     const count = countVars();
     if (count > 0) {
         statusBarItem.text = `$(symbol-variable) Trickle: ${count} vars`;
@@ -259,19 +337,10 @@ function loadAllVariables() {
         updateStatusBar();
         return;
     }
-    // Snapshot current hashes before clearing, for drift detection
-    const currentHashes = new Map();
-    for (const [filePath, lineMap] of varIndex) {
-        for (const [lineNo, obsArr] of lineMap) {
-            for (const obs of obsArr) {
-                const key = `${filePath}:${lineNo}:${obs.varName}`;
-                currentHashes.set(key, obs.typeHash);
-            }
-        }
-    }
     varIndex.clear();
     notebookCellIndex.clear();
     dimLabelIndex.clear();
+    latestProgress = null;
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (!workspaceFolders)
         return;
@@ -285,6 +354,14 @@ function loadAllVariables() {
             for (const line of lines) {
                 try {
                     const record = JSON.parse(line);
+                    // Handle progress records from trickle.progress()
+                    if (record.kind === 'progress') {
+                        const pr = record;
+                        if (!latestProgress || pr.timestamp > latestProgress.timestamp) {
+                            latestProgress = pr;
+                        }
+                        continue;
+                    }
                     // Handle dim_labels records
                     if (record.kind === 'dim_labels') {
                         const dl = record;
@@ -340,23 +417,29 @@ function loadAllVariables() {
             // File read error
         }
     }
-    // Detect type drift: compare new hashes against previous run's hashes
-    changedVarKeys.clear();
-    if (prevTypeHashes.size > 0) {
-        for (const [filePath, lineMap] of varIndex) {
-            for (const [lineNo, obsArr] of lineMap) {
-                for (const obs of obsArr) {
-                    const key = `${filePath}:${lineNo}:${obs.varName}`;
-                    const prev = prevTypeHashes.get(key);
-                    if (prev !== undefined && prev !== obs.typeHash) {
-                        changedVarKeys.add(key);
-                    }
-                }
+    // Build hashes from freshly-loaded data
+    const newHashes = new Map();
+    for (const [filePath, lineMap] of varIndex) {
+        for (const [lineNo, obsArr] of lineMap) {
+            for (const obs of obsArr) {
+                const key = `${filePath}:${lineNo}:${obs.varName}`;
+                newHashes.set(key, obs.typeHash);
             }
         }
     }
-    // Update prevTypeHashes with the current run's data
-    prevTypeHashes = currentHashes;
+    // Detect type drift: compare new hashes against previous run's hashes
+    changedVarKeys.clear();
+    if (prevTypeHashes.size > 0) {
+        for (const [key, newHash] of newHashes) {
+            const prev = prevTypeHashes.get(key);
+            if (prev !== undefined && prev !== newHash) {
+                changedVarKeys.add(key);
+            }
+        }
+    }
+    // Update baseline and persist for cross-session drift detection
+    prevTypeHashes = newHashes;
+    saveTypeHistory(newHashes);
     updateStatusBar();
     refreshInlineHints();
 }
@@ -551,15 +634,22 @@ class TrickleHoverProvider {
                         const shape = extractShapeStr(fo.type, foLabels);
                         const stats = formatTensorStats(fo.type);
                         const marker = fo.line === obs.line ? ' **←**' : '';
-                        flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${marker}`);
+                        const callStr = fo.callFlow ? ` ← ${fo.callFlow.callee}(${fo.callFlow.calleeClass || ''})` : '';
+                        flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${callStr}${marker}`);
                     }
                     parts.push(flowLines.join('\n\n'));
+                    if (obs.callFlow) {
+                        parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+                    }
                 }
                 else {
                     parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
                     const stats = formatTensorStats(obs.type);
                     if (stats)
                         parts.push(stats);
+                    if (obs.callFlow) {
+                        parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+                    }
                 }
             }
             else if (className === 'Tensor' || className === 'ndarray') {
@@ -567,9 +657,15 @@ class TrickleHoverProvider {
                 const stats = formatTensorStats(obs.type);
                 if (stats)
                     parts.push(stats);
+                if (obs.callFlow) {
+                    parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+                }
             }
             else {
                 parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
+                if (obs.callFlow) {
+                    parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+                }
                 if (showSamples && obs.sample !== undefined) {
                     const sampleStr = formatSample(obs.sample);
                     parts.push(`\n*Sample:*\n\`\`\`json\n${sampleStr}\n\`\`\``);
@@ -746,6 +842,9 @@ class TrickleInlayHintsProvider {
                 const stats = formatTensorStats(obs.type);
                 if (stats)
                     tooltipParts.push(`**Stats:**${stats}`);
+                if (obs.callFlow) {
+                    tooltipParts.push(formatCallFlow(obs.callFlow, obs.type, obsLabels));
+                }
                 if (config.get('showSampleValues', true) && obs.sample !== undefined) {
                     tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
                 }
@@ -757,6 +856,22 @@ class TrickleInlayHintsProvider {
         }
         return hints;
     }
+}
+/** Format a callFlow record as a Markdown string for hover display.
+ * Example: "**Flow:** layer (Linear)\n  x: Tensor[32, 784] → Tensor[32, 10]" */
+function formatCallFlow(cf, outputType, dimLabels) {
+    const calleePart = cf.calleeClass && cf.calleeClass !== cf.callee
+        ? `\`${cf.callee}\` (${cf.calleeClass})`
+        : `\`${cf.callee}\``;
+    const inputParts = cf.inputs.map(inp => {
+        const typeStr = extractShapeStr(inp.type);
+        return `\`${inp.name}\`: \`${typeStr}\``;
+    });
+    const outputStr = extractShapeStr(outputType, dimLabels);
+    const arrow = inputParts.length > 0
+        ? `${inputParts.join(', ')} → \`${outputStr}\``
+        : `→ \`${outputStr}\``;
+    return `**Flow:** ${calleePart}: ${arrow}`;
 }
 /** Collect all observations of a variable within the same function, sorted by line. */
 function collectShapeFlow(lineMap, varName, funcName) {
@@ -871,7 +986,8 @@ function typeNodeToString(node, depth = 3, dimLabels) {
             return 'unknown[]';
         case 'tuple':
             if (node.elements) {
-                return `[${node.elements.map(e => typeNodeToString(e, depth - 1)).join(', ')}]`;
+                const tuplePrefix = node.class_name === 'list' ? 'list' : '';
+                return `${tuplePrefix}[${node.elements.map(e => typeNodeToString(e, depth - 1)).join(', ')}]`;
             }
             return '[]';
         case 'object': {
@@ -1336,7 +1452,8 @@ function typeNodeToPretty(node, indent = 0, dimLabels) {
         }
         case 'tuple':
             if (node.elements) {
-                return `[${node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(', ')}]`;
+                const prettyPrefix = node.class_name === 'list' ? 'list' : '';
+                return `${prettyPrefix}[${node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(', ')}]`;
             }
             return '[]';
         case 'object': {

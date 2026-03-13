@@ -69,9 +69,20 @@ interface ErrorRecord {
   frames: { file: string; line: number; function: string }[];
 }
 
+/** A training progress record emitted by trickle.progress() */
+interface ProgressRecord {
+  kind: 'progress';
+  file: string;
+  line: number;
+  metrics: Record<string, number | boolean | string>;
+  timestamp: number;
+  call_count: number;
+}
+
 let varIndex: VarIndex = new Map();
 let notebookCellIndex: NotebookCellIndex = new Map();
 let dimLabelIndex: DimLabelIndex = new Map();
+let latestProgress: ProgressRecord | null = null;
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let errorFileWatcher: vscode.FileSystemWatcher | undefined;
 let statusBarItem: vscode.StatusBarItem;
@@ -338,7 +349,49 @@ function countVars(): number {
   return count;
 }
 
+/** Ordered list of common training metric keys — shown first in status bar. */
+const PROGRESS_KEY_ORDER = ['epoch', 'step', 'batch', 'iter', 'loss', 'train_loss',
+  'val_loss', 'acc', 'accuracy', 'val_acc', 'lr', 'f1', 'auc'];
+
+/** Format a single metric value for the status bar (compact). */
+function formatProgressValue(val: number | boolean | string): string {
+  if (typeof val === 'boolean') return val ? 'true' : 'false';
+  if (typeof val === 'number') {
+    if (Number.isInteger(val)) return String(val);
+    return val.toFixed(4).replace(/\.?0+$/, '');
+  }
+  return String(val);
+}
+
 function updateStatusBar() {
+  // Show training progress when a recent trickle.progress() record exists (< 120 s)
+  if (latestProgress) {
+    const ageSeconds = Date.now() / 1000 - latestProgress.timestamp;
+    if (ageSeconds < 120) {
+      const m = latestProgress.metrics;
+      const parts: string[] = [];
+
+      // Priority keys first, then any remaining ones
+      for (const key of PROGRESS_KEY_ORDER) {
+        if (key in m) {
+          parts.push(`${key} ${formatProgressValue(m[key])}`);
+        }
+      }
+      for (const [key, val] of Object.entries(m)) {
+        if (!PROGRESS_KEY_ORDER.includes(key)) {
+          parts.push(`${key} ${formatProgressValue(val)}`);
+        }
+      }
+
+      if (parts.length > 0) {
+        statusBarItem.text = `$(sync~spin) Training: ${parts.join(' | ')}`;
+        statusBarItem.tooltip = `Training progress from trickle.progress()\n${latestProgress.file}:${latestProgress.line}\nCall #${latestProgress.call_count}\nClick to refresh`;
+        statusBarItem.show();
+        return;
+      }
+    }
+  }
+
   const count = countVars();
   if (count > 0) {
     statusBarItem.text = `$(symbol-variable) Trickle: ${count} vars`;
@@ -360,6 +413,7 @@ function loadAllVariables() {
   varIndex.clear();
   notebookCellIndex.clear();
   dimLabelIndex.clear();
+  latestProgress = null;
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -375,6 +429,15 @@ function loadAllVariables() {
       for (const line of lines) {
         try {
           const record = JSON.parse(line);
+
+          // Handle progress records from trickle.progress()
+          if (record.kind === 'progress') {
+            const pr = record as ProgressRecord;
+            if (!latestProgress || pr.timestamp > latestProgress.timestamp) {
+              latestProgress = pr;
+            }
+            continue;
+          }
 
           // Handle dim_labels records
           if (record.kind === 'dim_labels') {

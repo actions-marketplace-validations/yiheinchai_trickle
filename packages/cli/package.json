@@ -1,12 +1,13 @@
 {
   "name": "trickle-cli",
-  "version": "0.1.63",
+  "version": "0.1.64",
   "description": "CLI for trickle runtime type observability",
   "bin": {
     "trickle": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --experimental-strip-types --test src/commands/rn.test.ts",
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {

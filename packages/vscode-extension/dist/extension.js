@@ -686,7 +686,18 @@ class TrickleInlayHintsProvider {
                     tooltipParts.push(`**Function:** \`${obs.funcName}\``);
                 // Show full type in tooltip when inline was compacted
                 if (fullTypeStr !== typeStr) {
-                    tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
+                    if (obs.type && isComplexType(obs.type)) {
+                        const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+                        tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
+                    }
+                    else {
+                        tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
+                    }
+                }
+                else if (obs.type && isComplexType(obs.type)) {
+                    // Even when not compacted, show pretty-printed hover for complex types
+                    const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+                    tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
                 }
                 const stats = formatTensorStats(obs.type);
                 if (stats)
@@ -1255,6 +1266,83 @@ function formatTensorStats(type) {
     if (parts.length === 0)
         return '';
     return ` \`${parts.join(' | ')}\``;
+}
+/**
+ * Render a TypeNode as a pretty-printed, indented type string suitable for
+ * hover tooltips. Uses TypeScript-like syntax with newlines for readability.
+ * Falls back to the compact single-line form for simple types.
+ */
+function typeNodeToPretty(node, indent = 0, dimLabels) {
+    const pad = '  '.repeat(indent);
+    const innerPad = '  '.repeat(indent + 1);
+    switch (node.kind) {
+        case 'primitive':
+            return node.name || 'unknown';
+        case 'array': {
+            if (!node.element)
+                return 'unknown[]';
+            const inner = node.element;
+            // If element is a complex object, expand it on multiple lines
+            if (inner.kind === 'object' && inner.properties && Object.keys(inner.properties).length > 2) {
+                const innerStr = typeNodeToPretty(inner, indent, dimLabels);
+                return innerStr.includes('\n') ? `Array<\n${innerPad}${innerStr}\n${pad}>` : `${innerStr}[]`;
+            }
+            const innerStr = typeNodeToString(inner, 3, dimLabels);
+            return innerStr.includes('{') ? `Array<${innerStr}>` : `${innerStr}[]`;
+        }
+        case 'tuple':
+            if (node.elements) {
+                return `[${node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(', ')}]`;
+            }
+            return '[]';
+        case 'object': {
+            if (!node.properties)
+                return node.class_name || 'object';
+            const entries = Object.entries(node.properties);
+            if (entries.length === 0)
+                return node.class_name ? `${node.class_name} {}` : '{}';
+            // Special types handled by typeNodeToString
+            if ('__date' in node.properties)
+                return 'Date';
+            if ('__regexp' in node.properties)
+                return 'RegExp';
+            if ('__error' in node.properties)
+                return 'Error';
+            if (node.class_name === 'Tensor' || node.class_name === 'ndarray' ||
+                node.class_name === 'DataFrame' || node.class_name === 'Series') {
+                return typeNodeToString(node, 3, dimLabels);
+            }
+            const header = node.class_name ? `${node.class_name} ` : '';
+            const fieldLines = entries.map(([k, v]) => {
+                const valStr = typeNodeToPretty(v, indent + 1, dimLabels);
+                return `${innerPad}${k}: ${valStr}`;
+            });
+            return `${header}{\n${fieldLines.join('\n')}\n${pad}}`;
+        }
+        case 'union':
+            if (node.elements) {
+                return node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
+            }
+            return 'unknown';
+        case 'promise':
+            return node.resolved ? `Promise<${typeNodeToString(node.resolved, 3, dimLabels)}>` : 'Promise<unknown>';
+        default:
+            return typeNodeToString(node, 3, dimLabels);
+    }
+}
+/**
+ * Decide if a TypeNode is complex enough to warrant a pretty-printed hover card.
+ * Returns true for objects with nested objects or many fields.
+ */
+function isComplexType(node) {
+    if (node.kind === 'array' && node.element)
+        return isComplexType(node.element);
+    if (node.kind !== 'object' || !node.properties)
+        return false;
+    const entries = Object.entries(node.properties);
+    if (entries.length > 4)
+        return true;
+    return entries.some(([, v]) => v.kind === 'object' && v.properties && Object.keys(v.properties).length > 0);
 }
 /** Format a sample value for display */
 function formatSample(sample) {

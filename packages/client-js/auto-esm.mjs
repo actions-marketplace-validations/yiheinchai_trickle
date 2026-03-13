@@ -39,6 +39,7 @@ register(pathToFileURL(hooksPath).href, {
     wrapperPath: join(__dirname, 'dist', 'wrap.js'),
     transportPath: join(__dirname, 'dist', 'transport.js'),
     envDetectPath: join(__dirname, 'dist', 'env-detect.js'),
+    traceVarPath: join(__dirname, 'dist', 'trace-var.js'),
     backendUrl: 'http://localhost:4888', // unused in local mode but configure() needs it
     debug,
     includePatterns: process.env.TRICKLE_OBSERVE_INCLUDE

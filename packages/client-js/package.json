@@ -1,6 +1,6 @@
 {
   "name": "trickle-observe",
-  "version": "0.2.33",
+  "version": "0.2.34",
   "description": "Runtime type observability for JavaScript applications",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,7 +19,9 @@
     "build": "tsc",
     "prepublishOnly": "npm run build"
   },
-  "dependencies": {},
+  "optionalDependencies": {
+    "esbuild": "^0.27.4"
+  },
   "devDependencies": {
     "typescript": "^5.4.0"
   },

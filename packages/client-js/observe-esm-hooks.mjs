@@ -11,7 +11,50 @@
  */
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { basename, sep } from 'node:path';
+import { basename, sep, extname } from 'node:path';
+import { readFileSync } from 'node:fs';
+
+// Lazy esbuild loader for JSX/TSX stripping
+let _esbuild = null;
+async function getEsbuild() {
+  if (_esbuild !== null) return _esbuild;
+  try {
+    _esbuild = await import('esbuild');
+    return _esbuild;
+  } catch {
+    _esbuild = false;
+    return false;
+  }
+}
+
+/**
+ * Strip JSX/TSX syntax using esbuild, returning plain ESM JavaScript.
+ * Preserves line count as much as possible so line numbers stay accurate.
+ */
+async function stripJsx(source, filePath) {
+  const esbuild = await getEsbuild();
+  if (!esbuild) return null; // esbuild not available
+
+  const ext = extname(filePath).slice(1); // 'jsx' | 'tsx'
+  const loader = ext === 'tsx' ? 'tsx' : 'jsx';
+  try {
+    const result = await esbuild.transform(source, {
+      loader,
+      format: 'esm',
+      jsx: 'automatic',
+      target: 'esnext',
+      sourcemap: false,
+      treeShaking: false,
+      minify: false,
+      minifyWhitespace: false,
+      minifySyntax: false,
+    });
+    return result.code;
+  } catch (err) {
+    if (config.debug) console.error('[trickle/esm] esbuild JSX transform failed:', err.message);
+    return null;
+  }
+}
 
 let config = {
   wrapperPath: '',
@@ -352,7 +395,46 @@ function extractDestructuredNamesESM(pattern) {
   return names;
 }
 
-function transformSource(source, url) {
+/**
+ * Map a transformed line number to the original source file line.
+ * Searches within ±80 lines for a `const/let/var <varName>` pattern.
+ */
+function findOriginalLineESM(origLines, varName, transformedLine) {
+  const pattern = new RegExp(`\\b(const|let|var)\\s+${varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`);
+  for (let delta = 0; delta <= 80; delta++) {
+    const fwd = transformedLine - 1 + delta;
+    if (fwd >= 0 && fwd < origLines.length && pattern.test(origLines[fwd])) return fwd + 1;
+    if (delta > 0 && delta <= 10) {
+      const bwd = transformedLine - 1 - delta;
+      if (bwd >= 0 && bwd < origLines.length && pattern.test(origLines[bwd])) return bwd + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Map a transformed destructured declaration line to the original source.
+ */
+function findOriginalLineDestructuredESM(origLines, varNames, transformedLine) {
+  const namePatterns = varNames.map(n => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b(?!\\s*:)`));
+  for (let delta = 0; delta <= 80; delta++) {
+    const fwd = transformedLine - 1 + delta;
+    if (fwd >= 0 && fwd < origLines.length) {
+      const line = origLines[fwd];
+      if (/\b(const|let|var)\s+[\[{]/.test(line) && namePatterns.some(p => p.test(line))) return fwd + 1;
+    }
+    if (delta > 0 && delta <= 10) {
+      const bwd = transformedLine - 1 - delta;
+      if (bwd >= 0 && bwd < origLines.length) {
+        const line = origLines[bwd];
+        if (/\b(const|let|var)\s+[\[{]/.test(line) && namePatterns.some(p => p.test(line))) return bwd + 1;
+      }
+    }
+  }
+  return -1;
+}
+
+function transformSource(source, url, originalSource) {
   const moduleName = moduleNameFromUrl(url);
   let filePath = url;
   try { filePath = fileURLToPath(url); } catch {}
@@ -367,6 +449,21 @@ function transformSource(source, url) {
   const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0' && config.traceVarPath;
   const varDecls = varTraceEnabled ? findVarDeclarationsESM(source) : [];
   const destructDecls = varTraceEnabled ? findDestructuredDeclarationsESM(source) : [];
+
+  // Map transformed line numbers to original source line numbers (if original source differs)
+  if (originalSource && originalSource !== source) {
+    const origLines = originalSource.split('\n');
+    for (const vi of varDecls) {
+      const orig = findOriginalLineESM(origLines, vi.varName, vi.lineNo);
+      if (orig !== -1) vi.lineNo = orig;
+    }
+    for (const di of destructDecls) {
+      if (di.varNames.length > 0) {
+        const orig = findOriginalLineDestructuredESM(origLines, di.varNames, di.lineNo);
+        if (orig !== -1) di.lineNo = orig;
+      }
+    }
+  }
 
   // Build a map: line number → trace calls to insert AFTER that line
   const traceAfterLine = new Map();
@@ -563,6 +660,34 @@ function transformSource(source, url) {
  * ESM load hook — intercepts module loading to transform user modules.
  */
 export async function load(url, context, nextLoad) {
+  // Handle JSX/TSX files ourselves — Node.js cannot parse JSX natively.
+  // We read the file, strip JSX with esbuild, apply trickle instrumentation,
+  // and return the result without calling nextLoad (which would fail for JSX).
+  if (shouldObserve(url) && /\.(jsx|tsx)$/.test(url)) {
+    let filePath;
+    try { filePath = fileURLToPath(url); } catch { filePath = null; }
+
+    if (filePath) {
+      try {
+        const rawSource = readFileSync(filePath, 'utf-8');
+        const jsSource = await stripJsx(rawSource, filePath);
+        if (jsSource !== null) {
+          const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0' && config.traceVarPath;
+          const hasVarDecls = varTraceEnabled && /^[ \t]*(?:export\s+)?(?:const|let|var)\s+[a-zA-Z_$]/m.test(jsSource);
+          if (jsSource.includes('export ') || hasVarDecls) {
+            // Pass rawSource as originalSource so line numbers map to the .jsx/.tsx file
+            const transformed = transformSource(jsSource, url, rawSource);
+            return { source: transformed, format: 'module', shortCircuit: true };
+          }
+          // No observable exports/vars — return stripped JS so Node can execute it
+          return { source: jsSource, format: 'module', shortCircuit: true };
+        }
+      } catch (err) {
+        if (config.debug) console.error(`[trickle/esm] JSX load failed for ${url}:`, err.message);
+      }
+    }
+  }
+
   const result = await nextLoad(url, context);
 
   // Only transform ESM modules we should observe

@@ -103,7 +103,54 @@ app.get('/api/users', async (req, res) => {
 
 ---
 
-## Use Case 4: React / Next.js (via Node.js script)
+## Use Case 4: React Components (.jsx / .tsx files)
+
+Trickle traces variables inside React component functions directly in `.jsx`/`.tsx` files. Add the trickle Vite plugin to your project — inline type hints appear in all components automatically.
+
+**Setup (Vite + React):**
+```typescript
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { tricklePlugin } from 'trickle-observe/vite-plugin';
+
+export default defineConfig({
+  plugins: [react(), tricklePlugin()],
+});
+```
+
+**Your component:**
+```tsx
+// src/components/UserCard.tsx
+import { useState, useEffect } from 'react';
+
+export function UserCard({ userId }: { userId: number }) {
+  const [user, setUser] = useState(null);
+  // → user: null (then updates to: {id, name, email, +2})
+
+  const displayName = user ? `${user.firstName} ${user.lastName}` : 'Loading...';
+  // → displayName: "John Doe"
+
+  const initials = displayName.split(' ').map(n => n[0]).join('');
+  // → initials: "JD"
+
+  return <div>{displayName}</div>;
+}
+```
+
+Inline hints appear for every `const`/`let` declaration and destructured variable — including `useState` results, computed values, and mapped arrays.
+
+**Via ESM loader (for scripts and tests without Vite):**
+```bash
+# Run a .jsx file with trickle tracing
+node --import trickle-observe/auto-esm component-utils.jsx
+```
+
+This works for any `.jsx`/`.tsx` file — trickle strips JSX automatically (via esbuild if available), instruments the variable declarations, and writes hints to `.trickle/variables.jsonl`.
+
+---
+
+## Use Case 4b: React / Next.js (via Node.js script)
 
 For React state and data processing logic:
 

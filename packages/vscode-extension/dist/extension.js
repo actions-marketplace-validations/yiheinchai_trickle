@@ -897,6 +897,30 @@ function typeNodeToString(node, depth = 3, dimLabels) {
                     parts.push(freq);
                 return `DatetimeIndex(${parts.join(', ')})`;
             }
+            // HuggingFace Dataset: show rows and columns
+            if (node.class_name === 'Dataset' && node.properties['rows']) {
+                const rows = node.properties['rows']?.name;
+                const cols = node.properties['columns']?.name;
+                const split = node.properties['split']?.name;
+                const fmt = node.properties['format']?.name;
+                const parts = [];
+                if (rows)
+                    parts.push(`${rows} rows`);
+                if (cols)
+                    parts.push(cols);
+                const badges = [];
+                if (split)
+                    badges.push(split);
+                if (fmt)
+                    badges.push(fmt);
+                const badgeStr = badges.length > 0 ? ` [${badges.join(', ')}]` : '';
+                return `Dataset(${parts.join(', ')})${badgeStr}`;
+            }
+            // HuggingFace DatasetDict: show splits with row counts
+            if (node.class_name === 'DatasetDict' && node.properties['splits']) {
+                const splits = node.properties['splits']?.name;
+                return `DatasetDict(${splits || ''})`;
+            }
             // Sklearn estimators: show key info compactly
             if (node.properties && (node.properties['fitted'] || node.properties['steps'])) {
                 const fitted = node.properties['fitted']?.name === 'True';

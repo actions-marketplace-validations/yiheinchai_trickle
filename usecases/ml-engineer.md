@@ -106,6 +106,7 @@ Re-running the cell automatically re-traces all variables with updated shapes. N
 - Loss functions: `CrossEntropyLoss(ignore_index=-100, label_smoothing=0.0)`
 - DataLoaders: `DataLoader(batch_size=32, dataset_size=8000, batches=250, ...)`
 - Datasets: `TensorDataset(size=10000, tensors=2)`, `Subset(size=8000, from=TensorDataset)`
+- HuggingFace datasets: `Dataset(200 rows, text, label) [train]`, `DatasetDict(train: 160, test: 40)`
 - Memory footprint: hover shows `mem=4.0 MB` per tensor (helps debug OOM)
 - Model memory: `GPT(110280192 params 420.7 MB)` shows total model size inline
 - Gradient norms: after `loss.backward()`, models show `GPT(834304 params) |∇|=5.32` — total gradient norm across all parameters, plus top layers by norm on hover

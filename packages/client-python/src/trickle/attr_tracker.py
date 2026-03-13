@@ -74,6 +74,7 @@ _SKIP_MODULES = frozenset({
     "numpy", "np", "pandas", "pd", "sklearn", "torch", "tensorflow", "tf",
     "scipy", "matplotlib", "PIL", "cv2", "jax", "xgboost", "lightgbm",
     "catboost", "statsmodels", "networkx", "sympy", "dask",
+    "datasets", "pyarrow",
 })
 
 

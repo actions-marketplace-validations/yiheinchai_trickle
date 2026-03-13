@@ -80,6 +80,8 @@ You can see null counts drop as you clean, and memory change as you convert type
 | **Sklearn models** | type, hyperparams, fitted status, features/classes |
 | **Sklearn Pipeline** | step names, fitted status |
 | **NumPy arrays** | shape, dtype, memory |
+| **HF Dataset** | rows, columns, features (types), split, format |
+| **HF DatasetDict** | splits with row counts, columns |
 
 ## Use Case 2: Python Scripts
 

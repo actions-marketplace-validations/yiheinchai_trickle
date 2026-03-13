@@ -240,6 +240,14 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _estimator_type is not None and isinstance(value, _estimator_type):
         return _infer_sklearn_estimator(value)
 
+    # --- HuggingFace datasets ---
+    _hf_dataset_type = _get_hf_dataset_type()
+    if _hf_dataset_type is not None and isinstance(value, _hf_dataset_type):
+        return _infer_hf_dataset(value)
+    _hf_dataset_dict_type = _get_hf_dataset_dict_type()
+    if _hf_dataset_dict_type is not None and isinstance(value, _hf_dataset_dict_type):
+        return _infer_hf_dataset_dict(value)
+
     # --- Callable (functions, methods, lambdas, built-ins) ---
     if callable(value) and not isinstance(value, type):
         name = getattr(value, "__name__", getattr(value, "__qualname__", "anonymous"))
@@ -1128,6 +1136,136 @@ def _get_numpy_ndarray_type() -> Any:
     except ImportError:
         pass
     return _numpy_ndarray_type
+
+
+# --- HuggingFace datasets support ---
+
+_hf_dataset_type: Any = None
+_hf_dataset_checked = False
+
+
+def _get_hf_dataset_type() -> Any:
+    """Lazily resolve datasets.Dataset."""
+    global _hf_dataset_type, _hf_dataset_checked
+    if _hf_dataset_checked:
+        return _hf_dataset_type
+    _hf_dataset_checked = True
+    try:
+        from datasets import Dataset
+        _hf_dataset_type = Dataset
+    except ImportError:
+        pass
+    return _hf_dataset_type
+
+
+_hf_dataset_dict_type: Any = None
+_hf_dataset_dict_checked = False
+
+
+def _get_hf_dataset_dict_type() -> Any:
+    """Lazily resolve datasets.DatasetDict."""
+    global _hf_dataset_dict_type, _hf_dataset_dict_checked
+    if _hf_dataset_dict_checked:
+        return _hf_dataset_dict_type
+    _hf_dataset_dict_checked = True
+    try:
+        from datasets import DatasetDict
+        _hf_dataset_dict_type = DatasetDict
+    except ImportError:
+        pass
+    return _hf_dataset_dict_type
+
+
+def _infer_hf_dataset(value: Any) -> Dict[str, Any]:
+    """Infer type for a HuggingFace datasets.Dataset."""
+    props: Dict[str, Any] = {}
+
+    try:
+        props["rows"] = {"kind": "primitive", "name": str(value.num_rows)}
+    except Exception:
+        pass
+
+    # Column names
+    try:
+        cols = value.column_names
+        if cols:
+            col_str = ", ".join(cols[:8])
+            if len(cols) > 8:
+                col_str += f", ... +{len(cols) - 8}"
+            props["columns"] = {"kind": "primitive", "name": col_str}
+    except Exception:
+        pass
+
+    # Feature types (e.g., text: string, label: ClassLabel)
+    try:
+        features = value.features
+        if features:
+            feat_parts = []
+            for name, feat in list(features.items())[:6]:
+                feat_type = type(feat).__name__
+                if feat_type == "Value":
+                    feat_parts.append(f"{name}: {feat.dtype}")
+                elif feat_type == "ClassLabel":
+                    n_classes = feat.num_classes
+                    feat_parts.append(f"{name}: {n_classes} classes")
+                elif feat_type == "Sequence":
+                    feat_parts.append(f"{name}: Sequence")
+                else:
+                    feat_parts.append(f"{name}: {feat_type}")
+            if len(features) > 6:
+                feat_parts.append(f"... +{len(features) - 6}")
+            props["features"] = {"kind": "primitive", "name": ", ".join(feat_parts)}
+    except Exception:
+        pass
+
+    # Split name
+    try:
+        split = value.split
+        if split is not None:
+            props["split"] = {"kind": "primitive", "name": str(split)}
+    except Exception:
+        pass
+
+    # Format (torch, numpy, etc.)
+    try:
+        fmt = value.format
+        if fmt:
+            fmt_type = fmt.get("type") if isinstance(fmt, dict) else getattr(fmt, "type", None)
+            if fmt_type is not None:
+                props["format"] = {"kind": "primitive", "name": str(fmt_type)}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": "Dataset"}
+
+
+def _infer_hf_dataset_dict(value: Any) -> Dict[str, Any]:
+    """Infer type for a HuggingFace datasets.DatasetDict."""
+    props: Dict[str, Any] = {}
+
+    try:
+        splits = list(value.keys())
+        split_parts = []
+        for split_name in splits[:5]:
+            ds = value[split_name]
+            n_rows = ds.num_rows if hasattr(ds, "num_rows") else "?"
+            split_parts.append(f"{split_name}: {n_rows}")
+        if len(splits) > 5:
+            split_parts.append(f"... +{len(splits) - 5}")
+        props["splits"] = {"kind": "primitive", "name": ", ".join(split_parts)}
+    except Exception:
+        pass
+
+    # Show features from first split
+    try:
+        first_ds = next(iter(value.values()))
+        cols = first_ds.column_names
+        if cols:
+            props["columns"] = {"kind": "primitive", "name": ", ".join(cols[:8])}
+    except Exception:
+        pass
+
+    return {"kind": "object", "properties": props, "class_name": "DatasetDict"}
 
 
 def _unify_element_types(elements: list, max_depth: int, _seen: Set[int]) -> Dict[str, Any]:

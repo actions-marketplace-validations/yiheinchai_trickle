@@ -30,27 +30,31 @@ _entry_file: Optional[str] = None
 _old_trace: Any = None
 _infer_type: Any = None
 _func_context: Dict[str, Dict[int, str]] = {}  # filename -> {line_no -> func_name}
+# Call-site info: filename -> {line_no -> (callee_var_name, [arg_var_names])}
+_call_args_map: Dict[str, Dict[int, Tuple[str, List[str]]]] = {}
 
 # Per-frame pending state: after seeing an assignment line, we defer reading
 # until the next event. Key = id(frame), value = (line_no, [var_names], func_name)
 _pending: Dict[int, Tuple[int, List[str], Optional[str]]] = {}
 
 
-def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]], Dict[int, str]]:
+def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]], Dict[int, str], Dict[int, Tuple[str, List[str]]]]:
     """Parse source AST to find assignment line numbers and variable names.
 
     Returns:
-        (assignments, func_context) where:
+        (assignments, func_context, call_args) where:
         - assignments: {line_no: [var_names]}
         - func_context: {line_no: qualified_func_name}
+        - call_args: {line_no: (callee_var_name, [arg_var_names])} for call-site lines
     """
     try:
         tree = ast.parse(source, filename)
     except SyntaxError:
-        return {}, {}
+        return {}, {}, {}
 
     assignments: Dict[int, List[str]] = {}
     func_ctx: Dict[int, str] = {}
+    call_args: Dict[int, Tuple[str, List[str]]] = {}
 
     def _extract_names(target: ast.AST) -> List[str]:
         if isinstance(target, ast.Name):
@@ -142,6 +146,19 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                 for target in node.targets:
                     names.extend(_extract_names(target))
                     names.extend(_extract_attr_names(target))
+                # Detect call sites: `out = layer(x)`, `out = self.fc1(x)`, `out = model(x, mask)`
+                if isinstance(node.value, ast.Call):
+                    func = node.value.func
+                    callee: Optional[str] = None
+                    if isinstance(func, ast.Name):
+                        callee = func.id
+                    elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                        # e.g. self.fc1(x) → callee = "self.fc1" for precise identification
+                        callee = f"{func.value.id}.{func.attr}"
+                    if callee:
+                        arg_vars = [a.id for a in node.value.args if isinstance(a, ast.Name)]
+                        if arg_vars:
+                            call_args[line] = (callee, arg_vars)
             elif isinstance(node, ast.AnnAssign) and node.value is not None:
                 names.extend(_extract_names(node.target))
             elif isinstance(node, ast.AugAssign):
@@ -202,7 +219,7 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                     _visit_body(node.finalbody, func_name)
 
     _visit_body(tree.body)
-    return assignments, func_ctx
+    return assignments, func_ctx, call_args
 
 
 def _simple_scalar(v: Any) -> Any:
@@ -309,7 +326,8 @@ def _config_call_sample(value: Any) -> Optional[str]:
 
 
 def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
-               module_name: str, func_name: Optional[str] = None) -> None:
+               module_name: str, func_name: Optional[str] = None,
+               call_flow: Optional[dict] = None) -> None:
     """Trace a single variable assignment."""
     global _vars_file
 
@@ -390,11 +408,45 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
         }
         if func_name:
             record["funcName"] = func_name
+        if call_flow:
+            record["callFlow"] = call_flow
 
         with open(_vars_file, "a") as f:
             f.write(json.dumps(record) + "\n")
     except Exception:
         pass
+
+
+def _resolve_dotted(name: str, locals_dict: dict) -> Any:
+    """Resolve a simple name or dotted name (e.g. 'self.fc1') from locals."""
+    parts = name.split(".", 1)
+    obj = locals_dict.get(parts[0])
+    if obj is None:
+        return None
+    if len(parts) == 1:
+        return obj
+    return getattr(obj, parts[1], None)
+
+
+def _build_call_flow(filename: str, line_no: int, locals_dict: dict) -> Optional[dict]:
+    """Build a callFlow dict for a call-site line, or None if not a call site."""
+    call_info = _call_args_map.get(filename, {}).get(line_no)
+    if not call_info:
+        return None
+    callee_name, arg_names = call_info
+    try:
+        callee_val = _resolve_dotted(callee_name, locals_dict)
+        callee_class = type(callee_val).__name__ if callee_val is not None else None
+        inputs = []
+        for arg_name in arg_names:
+            arg_val = locals_dict.get(arg_name)
+            if arg_val is not None:
+                inputs.append({"name": arg_name, "type": _infer_type(arg_val, max_depth=2)})
+        if callee_class or inputs:
+            return {"callee": callee_name, "calleeClass": callee_class, "inputs": inputs}
+    except Exception:
+        pass
+    return None
 
 
 def _flush_pending(frame: Any) -> None:
@@ -408,6 +460,7 @@ def _flush_pending(frame: Any) -> None:
     filename = frame.f_code.co_filename
     locals_dict = frame.f_locals
     module_name = os.path.basename(filename).rsplit(".", 1)[0]
+    call_flow = _build_call_flow(filename, line_no, locals_dict)
 
     for name in var_names:
         try:
@@ -418,11 +471,11 @@ def _flush_pending(frame: Any) -> None:
                 if obj is not None:
                     val = getattr(obj, parts[1], None)
                     if val is not None:
-                        _trace_var(val, name, line_no, filename, module_name, func_name)
+                        _trace_var(val, name, line_no, filename, module_name, func_name, call_flow)
             else:
                 val = locals_dict.get(name)
                 if val is not None:
-                    _trace_var(val, name, line_no, filename, module_name, func_name)
+                    _trace_var(val, name, line_no, filename, module_name, func_name, call_flow)
         except Exception:
             pass
 
@@ -577,12 +630,14 @@ def install() -> None:
     except Exception:
         return
 
-    assignments, func_ctx = _parse_assignments(source, _entry_file)
+    assignments, func_ctx, call_args = _parse_assignments(source, _entry_file)
     if not assignments:
         return
 
     _assignment_map[_entry_file] = assignments
     _func_context[_entry_file] = func_ctx
+    if call_args:
+        _call_args_map[_entry_file] = call_args
 
     # Import type inference lazily
     from trickle.type_inference import infer_type
@@ -638,10 +693,12 @@ def install_files(file_paths: List[str]) -> None:
         except Exception:
             continue
 
-        assignments, func_ctx = _parse_assignments(source, fpath)
+        assignments, func_ctx, call_args = _parse_assignments(source, fpath)
         if assignments:
             _assignment_map[fpath] = assignments
             _func_context[fpath] = func_ctx
+            if call_args:
+                _call_args_map[fpath] = call_args
 
     if file_paths:
         _activate()

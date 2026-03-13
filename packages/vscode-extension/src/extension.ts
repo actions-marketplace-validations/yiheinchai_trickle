@@ -2,6 +2,17 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
+interface CallFlowInput {
+  name: string;
+  type: TypeNode;
+}
+
+interface CallFlow {
+  callee: string;
+  calleeClass?: string;
+  inputs: CallFlowInput[];
+}
+
 /** A single variable observation from variables.jsonl */
 interface VariableObservation {
   kind: 'variable';
@@ -14,6 +25,7 @@ interface VariableObservation {
   typeHash: string;
   sample: unknown;
   funcName?: string;
+  callFlow?: CallFlow;
 }
 
 interface TypeNode {
@@ -67,6 +79,11 @@ let inlineHintsProvider: vscode.Disposable | undefined;
 let diagnosticCollection: vscode.DiagnosticCollection;
 /** Fires to tell VSCode to re-query inlay hints after data changes. */
 const inlayHintsChangeEmitter = new vscode.EventEmitter<void>();
+
+/** Type hashes from the previous load: "file:line:varName" → typeHash */
+let prevTypeHashes: Map<string, string> = new Map();
+/** Variables whose type changed since the last run: "file:line:varName" */
+let changedVarKeys: Set<string> = new Set();
 
 export function activate(context: vscode.ExtensionContext) {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
@@ -304,6 +321,17 @@ function loadAllVariables() {
     return;
   }
 
+  // Snapshot current hashes before clearing, for drift detection
+  const currentHashes: Map<string, string> = new Map();
+  for (const [filePath, lineMap] of varIndex) {
+    for (const [lineNo, obsArr] of lineMap) {
+      for (const obs of obsArr) {
+        const key = `${filePath}:${lineNo}:${obs.varName}`;
+        currentHashes.set(key, obs.typeHash);
+      }
+    }
+  }
+
   varIndex.clear();
   notebookCellIndex.clear();
   dimLabelIndex.clear();
@@ -379,6 +407,24 @@ function loadAllVariables() {
       // File read error
     }
   }
+
+  // Detect type drift: compare new hashes against previous run's hashes
+  changedVarKeys.clear();
+  if (prevTypeHashes.size > 0) {
+    for (const [filePath, lineMap] of varIndex) {
+      for (const [lineNo, obsArr] of lineMap) {
+        for (const obs of obsArr) {
+          const key = `${filePath}:${lineNo}:${obs.varName}`;
+          const prev = prevTypeHashes.get(key);
+          if (prev !== undefined && prev !== obs.typeHash) {
+            changedVarKeys.add(key);
+          }
+        }
+      }
+    }
+  }
+  // Update prevTypeHashes with the current run's data
+  prevTypeHashes = currentHashes;
 
   updateStatusBar();
   refreshInlineHints();
@@ -598,20 +644,33 @@ class TrickleHoverProvider implements vscode.HoverProvider {
             const shape = extractShapeStr(fo.type, foLabels);
             const stats = formatTensorStats(fo.type);
             const marker = fo.line === obs.line ? ' **←**' : '';
-            flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${marker}`);
+            const callStr = fo.callFlow ? ` ← ${fo.callFlow.callee}(${fo.callFlow.calleeClass || ''})` : '';
+            flowLines.push(`  L${fo.line}: \`${shape}\`${stats}${callStr}${marker}`);
           }
           parts.push(flowLines.join('\n\n'));
+          if (obs.callFlow) {
+            parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+          }
         } else {
           parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
           const stats = formatTensorStats(obs.type);
           if (stats) parts.push(stats);
+          if (obs.callFlow) {
+            parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+          }
         }
       } else if (className === 'Tensor' || className === 'ndarray') {
         parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
         const stats = formatTensorStats(obs.type);
         if (stats) parts.push(stats);
+        if (obs.callFlow) {
+          parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+        }
       } else {
         parts.push(`**\`${obs.varName}\`** (line ${obs.line}${funcCtx}): \`${typeStr}\``);
+        if (obs.callFlow) {
+          parts.push(formatCallFlow(obs.callFlow, obs.type, labels));
+        }
         if (showSamples && obs.sample !== undefined) {
           const sampleStr = formatSample(obs.sample);
           parts.push(`\n*Sample:*\n\`\`\`json\n${sampleStr}\n\`\`\``);
@@ -756,22 +815,48 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           }
         }
 
+        // For class instances with a config, sample is a constructor-call string like
+        // "GPT(n_layer=12, n_head=12, n_embd=768)" — use it as the inline hint directly.
+        if (obs.type.kind === 'object' && obs.type.class_name &&
+            typeof obs.sample === 'string' &&
+            obs.sample.startsWith(obs.type.class_name + '(') &&
+            obs.sample.endsWith(')')) {
+          typeStr = obs.sample;
+        }
+
         const position = new vscode.Position(lineNo - 1, varEnd);
 
-        const label = isPython ? `: ${typeStr}` : `: ${typeStr}`;
+        // Check for type drift (type changed since last run)
+        const driftKey = `${obs.file}:${obs.line}:${obs.varName}`;
+        const hasDrift = changedVarKeys.has(driftKey);
+
+        const label = hasDrift ? `: ${typeStr} ⚠` : `: ${typeStr}`;
         const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Type);
         hint.paddingLeft = false;
         hint.paddingRight = true;
 
         // Add funcName, full type (if compacted), tensor stats, and sample value as tooltip
         const tooltipParts: string[] = [];
+        if (hasDrift) tooltipParts.push(`⚠ **Type changed since last run**`);
         if (obs.funcName) tooltipParts.push(`**Function:** \`${obs.funcName}\``);
         // Show full type in tooltip when inline was compacted
         if (fullTypeStr !== typeStr) {
-          tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
+          if (obs.type && isComplexType(obs.type)) {
+            const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+            tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
+          } else {
+            tooltipParts.push(`**Type:** \`${fullTypeStr}\``);
+          }
+        } else if (obs.type && isComplexType(obs.type)) {
+          // Even when not compacted, show pretty-printed hover for complex types
+          const prettyType = typeNodeToPretty(obs.type, 0, obsLabels);
+          tooltipParts.push(`**Type:**\n\`\`\`typescript\n${prettyType}\n\`\`\``);
         }
         const stats = formatTensorStats(obs.type);
         if (stats) tooltipParts.push(`**Stats:**${stats}`);
+        if (obs.callFlow) {
+          tooltipParts.push(formatCallFlow(obs.callFlow, obs.type, obsLabels));
+        }
         if (config.get('showSampleValues', true) && obs.sample !== undefined) {
           tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
         }
@@ -785,6 +870,23 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
 
     return hints;
   }
+}
+
+/** Format a callFlow record as a Markdown string for hover display.
+ * Example: "**Flow:** layer (Linear)\n  x: Tensor[32, 784] → Tensor[32, 10]" */
+function formatCallFlow(cf: CallFlow, outputType: TypeNode, dimLabels?: string[]): string {
+  const calleePart = cf.calleeClass && cf.calleeClass !== cf.callee
+    ? `\`${cf.callee}\` (${cf.calleeClass})`
+    : `\`${cf.callee}\``;
+  const inputParts = cf.inputs.map(inp => {
+    const typeStr = extractShapeStr(inp.type);
+    return `\`${inp.name}\`: \`${typeStr}\``;
+  });
+  const outputStr = extractShapeStr(outputType, dimLabels);
+  const arrow = inputParts.length > 0
+    ? `${inputParts.join(', ')} → \`${outputStr}\``
+    : `→ \`${outputStr}\``;
+  return `**Flow:** ${calleePart}: ${arrow}`;
 }
 
 /** Collect all observations of a variable within the same function, sorted by line. */
@@ -1125,7 +1227,11 @@ function formatScalarSample(val: unknown): string | null {
     if (!isFinite(val)) return null;
     return Number.isInteger(val) ? String(val) : val.toFixed(4).replace(/\.?0+$/, '');
   }
-  if (typeof val === 'string' && val.length <= 20) return `"${val}"`;
+  if (typeof val === 'string') {
+    // Class reference like "ModelConfig(...)" — show without quotes
+    if (/^\w+\(\.\.\.\)$/.test(val)) return val;
+    if (val.length <= 20) return `"${val}"`;
+  }
   return null;
 }
 
@@ -1336,6 +1442,85 @@ function formatTensorStats(type: TypeNode): string {
   }
   if (parts.length === 0) return '';
   return ` \`${parts.join(' | ')}\``;
+}
+
+/**
+ * Render a TypeNode as a pretty-printed, indented type string suitable for
+ * hover tooltips. Uses TypeScript-like syntax with newlines for readability.
+ * Falls back to the compact single-line form for simple types.
+ */
+function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string[]): string {
+  const pad = '  '.repeat(indent);
+  const innerPad = '  '.repeat(indent + 1);
+
+  switch (node.kind) {
+    case 'primitive':
+      return node.name || 'unknown';
+
+    case 'array': {
+      if (!node.element) return 'unknown[]';
+      const inner = node.element;
+      // If element is a complex object, expand it on multiple lines
+      if (inner.kind === 'object' && inner.properties && Object.keys(inner.properties).length > 2) {
+        const innerStr = typeNodeToPretty(inner, indent, dimLabels);
+        return innerStr.includes('\n') ? `Array<\n${innerPad}${innerStr}\n${pad}>` : `${innerStr}[]`;
+      }
+      const innerStr = typeNodeToString(inner, 3, dimLabels);
+      return innerStr.includes('{') ? `Array<${innerStr}>` : `${innerStr}[]`;
+    }
+
+    case 'tuple':
+      if (node.elements) {
+        return `[${node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(', ')}]`;
+      }
+      return '[]';
+
+    case 'object': {
+      if (!node.properties) return node.class_name || 'object';
+      const entries = Object.entries(node.properties);
+      if (entries.length === 0) return node.class_name ? `${node.class_name} {}` : '{}';
+
+      // Special types handled by typeNodeToString
+      if ('__date' in node.properties) return 'Date';
+      if ('__regexp' in node.properties) return 'RegExp';
+      if ('__error' in node.properties) return 'Error';
+      if (node.class_name === 'Tensor' || node.class_name === 'ndarray' ||
+          node.class_name === 'DataFrame' || node.class_name === 'Series') {
+        return typeNodeToString(node, 3, dimLabels);
+      }
+
+      const header = node.class_name ? `${node.class_name} ` : '';
+      const fieldLines = entries.map(([k, v]) => {
+        const valStr = typeNodeToPretty(v, indent + 1, dimLabels);
+        return `${innerPad}${k}: ${valStr}`;
+      });
+      return `${header}{\n${fieldLines.join('\n')}\n${pad}}`;
+    }
+
+    case 'union':
+      if (node.elements) {
+        return node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
+      }
+      return 'unknown';
+
+    case 'promise':
+      return node.resolved ? `Promise<${typeNodeToString(node.resolved, 3, dimLabels)}>` : 'Promise<unknown>';
+
+    default:
+      return typeNodeToString(node, 3, dimLabels);
+  }
+}
+
+/**
+ * Decide if a TypeNode is complex enough to warrant a pretty-printed hover card.
+ * Returns true for objects with nested objects or many fields.
+ */
+function isComplexType(node: TypeNode): boolean {
+  if (node.kind === 'array' && node.element) return isComplexType(node.element);
+  if (node.kind !== 'object' || !node.properties) return false;
+  const entries = Object.entries(node.properties);
+  if (entries.length > 4) return true;
+  return entries.some(([, v]) => v.kind === 'object' && v.properties && Object.keys(v.properties).length > 0);
 }
 
 /** Format a sample value for display */

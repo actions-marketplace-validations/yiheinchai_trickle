@@ -159,6 +159,33 @@ const Dashboard = () => {  // 🔄 ×3 renders
 
 Hover over the hint to see the component name and cumulative render count since the dev server started. Useful for spotting unnecessary re-renders without adding any `console.log` or profiler setup.
 
+**React hook invocation tracking:**
+
+Trickle also tracks how many times each hook's callback fires and shows it as an inlay hint on the hook call line — zero instrumentation required:
+
+```tsx
+// src/components/Dashboard.tsx
+function Dashboard({ userId }) {
+  useEffect(() => {         // ⚡ ran ×3
+    fetchUser(userId);
+  }, [userId]);
+
+  const name = useMemo(() => {   // 💾 computed ×1
+    return formatName(user);
+  }, [user]);
+
+  const handleClick = useCallback(() => {  // 🎯 called ×5
+    doAction();
+  }, []);
+}
+```
+
+- `useEffect` → ⚡ ran ×N: each invocation means deps changed (or first mount)
+- `useMemo` → 💾 computed ×N: each invocation is a cache miss (expensive recalculation)
+- `useCallback` → 🎯 called ×N: each invocation means the memoized callback was actually invoked
+
+Hover over the hint for a tooltip explaining what it means. Instantly spot hooks running more than expected — no React DevTools setup required.
+
 **Via ESM loader (for scripts and tests without Vite):**
 ```bash
 # Run a .jsx file with trickle tracing

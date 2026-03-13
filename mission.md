@@ -10,17 +10,23 @@ Find the pain points. Implement features to fix the pain point.
 
 <focus point>
 
-Completed: Users can now control stub generation via `TRICKLE_STUBS=0` env var (disables .pyi/.d.ts while keeping JSONL + inline hints). Implemented in Python (`auto.py`, `observe_runner.py`) and CLI local mode (`run.ts`). Terminal summary improved to label outputs clearly.
+Recently completed:
+- `TRICKLE_STUBS=0` env var for user control over stub generation
+- Fixed invalid .pyi from numeric dict keys (now emits `Dict[K, V]` instead of broken TypedDict)
+- Fixed @classmethod crash (AST transform now skips classmethod/staticmethod/property descriptors)
+- Fixed undefined TypeNode guards in type converters
 
 Next priorities:
 
-1. **Context manager return types** — `@contextlib.contextmanager` hides the generator nature of the function. The variable tracer captures the yielded value's type, but the function observation shows `Callable` instead of `ContextManager[T]`. Need to detect and handle `@contextmanager`-decorated functions.
+1. **Methods appear as top-level functions in .pyi** — `forward()`, `num_parameters()` etc. are emitted as free functions instead of class methods. Need to group observations by class and emit proper method stubs inside class bodies.
 
-2. **ESM entry file observation** — JS/TS ESM entry files (using `import`/`export`) don't get their top-level functions observed. The CJS `require`-hook works, but ESM loader hooks can't patch the entry module. Investigate `--import` flag or AST-transform approach.
+2. **Polymorphic methods only show one variant** — When a method is observed on multiple classes (e.g. `forward` on `AttentionLayer` and `FeedForwardLayer`), only one variant appears in .pyi. Need to emit overloads or per-class stubs.
 
-3. **Async generator support testing** — Async generators (`async def ... yield`) are now supported but need testing on real-world async codebases (e.g., aiohttp handlers, async data streams).
+3. **Context manager return types** — `@contextlib.contextmanager` hides the generator nature. The variable tracer captures the yielded value's type, but function observation shows `Callable` instead of `ContextManager[T]`.
 
-4. **Real-world ML testing** — Test trickle on real ML codebases (e.g., karpathy/nanoGPT, huggingface transformers) to find pain points with tensor shapes, dataloader types, model forward pass signatures.
+4. **ESM entry file observation** — JS/TS ESM entry files don't get top-level functions observed. CJS require-hook works, but ESM loader hooks can't patch the entry module.
+
+5. **variables.jsonl lacks function scope** — All 136 variable entries are flat with no function scope field. Terminal groups by function on-the-fly but the persisted JSONL is hard to consume programmatically.
 
 </focus point>
 

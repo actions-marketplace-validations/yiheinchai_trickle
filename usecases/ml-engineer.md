@@ -937,3 +937,43 @@ Batch #1 captured by trickle
 ```
 
 **How it works:** `trickle.auto` patches `_SingleProcessDataLoaderIter.__next__` and `_MultiProcessingDataLoaderIter.__next__`. After each `__next__` call, it walks the call stack to find the user's for-loop frame, extracts tensor shapes from the batch (handling tuples, lists, and dicts), and writes a `kind: "dataloader_batch"` record. Rate-limited to 3 batches per loop location (`TRICKLE_DL_BATCHES` to tune). The VSCode extension shows the shapes as an inlay hint on the for line.
+
+---
+
+## Use Case 23: Optimizer State Observability
+
+**User:** ML engineer training a transformer and wanting to monitor gradient health and weight update magnitudes on optimizer.step() lines without adding manual gradient clipping checks or custom callbacks.
+
+**Before trickle:** Must add `torch.nn.utils.clip_grad_norm_()` monitoring, custom `optimizer.step_post_hook()`, or print statements after each step.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+optimizer.step()  # ⚙ grad=6.50e-01 | Δθ=7.66e-02 | σ=5.40e-01
+```
+
+When gradients explode:
+```python
+optimizer.step()  # ⚡ grad=1.46e+02 | Δθ=1.46e+00 | σ=1.60
+```
+
+Hover tooltip shows full breakdown:
+```
+⚙ Optimizer: `AdamW`
+
+Gradient norm: `6.5013e-01`
+
+Weight update: `||Δθ|| = 7.6595e-02`
+
+Parameter groups:
+| Group | LR | Norm | Mean | Std | #Params |
+|---|---|---|---|---|---|
+| group 0 | lr=`0.0003` | norm=`259.2211` | μ=`-0.0000` | σ=`0.5404` | params=`230,144` |
+
+Context: epoch: 1 · step: 100 · loss: 2.438
+
+Step #100
+```
+
+**How it works:** `trickle.auto` patches all concrete optimizer subclasses' `step()` methods (including custom user-defined optimizers via `__init_subclass__` hook). Before each step, captures the gradient norm across all parameters. After the step, computes the weight update norm (`||θ_new - θ_old||`) and per-group parameter statistics. Works with SGD, Adam, AdamW, RMSprop, and any custom optimizer. Rate-limited to every 10 steps by default (`TRICKLE_OPT_EVERY` to tune). The `⚡` warning triggers when `grad_norm > 10.0`, `↓` when `grad_norm < 1e-5`.

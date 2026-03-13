@@ -67,6 +67,13 @@ try:
 except Exception:
     pass
 
+# Install optimizer hook for parameter/gradient state observability
+try:
+    from trickle._optimizer_hook import install as _install_optimizer_hook  # noqa: E402
+    _install_optimizer_hook()
+except Exception:
+    pass
+
 # Import the codegen
 from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 

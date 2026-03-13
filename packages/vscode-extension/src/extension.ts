@@ -130,6 +130,30 @@ interface CheckpointRecord {
   save_count: number;
 }
 
+/** An optimizer step record emitted after optimizer.step() */
+interface OptimizerParamStat {
+  lr: number;
+  n_params: number;
+  param_norm: number;
+  param_mean: number;
+  param_std: number;
+}
+
+interface OptimizerStepRecord {
+  kind: 'optimizer_step';
+  file: string;
+  line: number;
+  grad_norm: number;
+  update_norm: number;
+  param_stats: OptimizerParamStat[];
+  step_num: number;
+  context: Record<string, number>;
+  optimizer_class: string;
+  exploding: boolean;
+  vanishing: boolean;
+  timestamp: number;
+}
+
 /** A DataLoader batch shape record emitted on each iteration */
 interface DataloaderBatchShape {
   shape?: number[];
@@ -167,6 +191,8 @@ let gradientIndex: Map<string, Map<number, GradientRecord>> = new Map();
 let checkpointIndex: Map<string, Map<number, CheckpointRecord[]>> = new Map();
 /** LR schedule records: filePath -> lineNo -> LrScheduleRecord (latest per line) */
 let lrScheduleIndex: Map<string, Map<number, LrScheduleRecord>> = new Map();
+/** Optimizer step records: filePath -> lineNo -> OptimizerStepRecord (latest) */
+let optimizerIndex: Map<string, Map<number, OptimizerStepRecord>> = new Map();
 /** DataLoader batch shapes: filePath -> lineNo -> DataloaderBatchRecord (latest) */
 let dataloaderIndex: Map<string, Map<number, DataloaderBatchRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
@@ -508,6 +534,7 @@ function loadAllVariables() {
   checkpointIndex.clear();
   lrScheduleIndex.clear();
   dataloaderIndex.clear();
+  optimizerIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -571,6 +598,20 @@ function loadAllVariables() {
             const existing = lineMap.get(gr.line);
             if (!existing || gr.timestamp > existing.timestamp) {
               lineMap.set(gr.line, gr);
+            }
+            continue;
+          }
+
+          // Handle optimizer step records
+          if (record.kind === 'optimizer_step') {
+            const op = record as OptimizerStepRecord;
+            if (!optimizerIndex.has(op.file)) {
+              optimizerIndex.set(op.file, new Map());
+            }
+            const lineMap = optimizerIndex.get(op.file)!;
+            const existing = lineMap.get(op.line);
+            if (!existing || op.timestamp > existing.timestamp) {
+              lineMap.set(op.line, op);
             }
             continue;
           }
@@ -1307,6 +1348,61 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
               `max: \`${gr.max_norm.toExponential(3)}\` · min: \`${gr.min_norm.toExponential(3)}\`\n\n` +
               (gr.exploding.length > 0 ? `⚡ **Exploding** (>${_EXPLODING_THRESHOLD}): ${gr.exploding.join(', ')}\n\n` : '') +
               (gr.vanishing.length > 0 ? `↓ **Vanishing** (<${_VANISHING_THRESHOLD}): ${gr.vanishing.join(', ')}` : ''),
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add optimizer step inlay hints at optimizer.step() lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const optLines = optimizerIndex.get(filePath);
+      if (optLines) {
+        for (const [lineNo, op] of optLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          // Build compact label
+          const gradStr = op.grad_norm.toExponential(3);
+          const healthIcon = op.exploding ? '⚡' : op.vanishing ? '↓' : '⚙';
+
+          const parts: string[] = [`grad=${gradStr}`];
+          if (op.update_norm > 0) {
+            parts.push(`Δθ=${op.update_norm.toExponential(3)}`);
+          }
+          if (op.param_stats.length > 0) {
+            const s = op.param_stats[0];
+            parts.push(`σ=${s.param_std.toExponential(2)}`);
+          }
+          const label = ` ${healthIcon} ${parts.join(' | ')}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            // Build detailed tooltip
+            const groupRows = op.param_stats.map((s, i) =>
+              `| group ${i} | lr=\`${s.lr}\` | norm=\`${s.param_norm.toFixed(4)}\` | μ=\`${s.param_mean.toFixed(4)}\` | σ=\`${s.param_std.toFixed(4)}\` | params=\`${s.n_params.toLocaleString()}\` |`,
+            ).join('\n');
+
+            const ctxStr = Object.entries(op.context).map(([k, v]) => `**${k}**: ${v}`).join(' · ');
+
+            const md = new vscode.MarkdownString(
+              `### ${op.exploding ? '⚡' : op.vanishing ? '↓' : '⚙'} Optimizer: \`${op.optimizer_class}\`\n\n` +
+              `**Gradient norm:** \`${op.grad_norm.toExponential(4)}\`` +
+              (op.exploding ? ' — ⚡ **EXPLODING**' : op.vanishing ? ' — ↓ **VANISHING**' : '') + '\n\n' +
+              (op.update_norm > 0 ? `**Weight update:** \`||Δθ|| = ${op.update_norm.toExponential(4)}\`\n\n` : '') +
+              (groupRows ? `**Parameter groups:**\n\n| Group | LR | Norm | Mean | Std | #Params |\n|---|---|---|---|---|---|\n${groupRows}\n\n` : '') +
+              (ctxStr ? `**Context:** ${ctxStr}\n\n` : '') +
+              `Step #${op.step_num}`,
             );
             md.isTrusted = true;
             hint.tooltip = md;

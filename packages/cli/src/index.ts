@@ -39,6 +39,7 @@ import { varsCommand } from "./commands/vars";
 import { lambdaCommand } from "./commands/lambda";
 import { rnCommand } from "./commands/rn";
 import { nextCommand } from "./commands/next";
+import { pythonCommand } from "./commands/python";
 
 const program = new Command();
 
@@ -442,6 +443,9 @@ rnCommand(program);
 
 // trickle next [setup]
 nextCommand(program);
+
+// trickle python [setup]
+pythonCommand(program);
 
 // trickle annotate <file>
 program

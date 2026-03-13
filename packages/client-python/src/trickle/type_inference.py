@@ -297,7 +297,12 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         props = {}
         for k, v in value.items():
             props[str(k)] = infer_type(v, max_depth - 1, _seen)
-        return {"kind": "object", "properties": props}
+        result: Dict[str, Any] = {"kind": "object", "properties": props}
+        # For small dicts with string keys, set class_name so the renderer
+        # can display inline values as {key: value} instead of {key: type}
+        if len(value) <= 20 and all(isinstance(k, str) for k in value):
+            result["class_name"] = "dict"
+        return result
 
     # --- dataclass ---
     if dataclasses.is_dataclass(value) and not isinstance(value, type):

@@ -386,6 +386,19 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
                 sample = {k: v for k, v in list(fields.items())[:8]}
             except Exception:
                 sample = str(value)[:100]
+        elif isinstance(value, dict) and len(value) <= 20:
+            # Plain dict with string keys + primitive values — build a JSON-serializable
+            # sample so the VSCode renderer can show {key: value} inline
+            try:
+                sample_dict = {}
+                for k, v in list(value.items())[:20]:
+                    if isinstance(k, str):
+                        sv = _simple_scalar(v)
+                        if sv is not None:
+                            sample_dict[k] = sv
+                sample = sample_dict if sample_dict else str(value)[:100]
+            except Exception:
+                sample = str(value)[:100]
         else:
             # For class instances with a `config` attribute, generate a constructor-call
             # style sample: "GPT(vocab_size=50257, n_embd=768, n_layer=12)" — this is the ML

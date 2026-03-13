@@ -1121,6 +1121,16 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
       if ('__regexp' in node.properties) return 'RegExp';
       if ('__error' in node.properties) return 'Error';
 
+      // Plain Python dict: show {key: type, ...} (values shown via compact renderer using sample)
+      if (node.class_name === 'dict') {
+        if (entries.length <= 8) {
+          const props = entries.map(([k, v]) => `${k}: ${typeNodeToString(v, depth - 1)}`);
+          return `{${props.join(', ')}}`;
+        }
+        const first6 = entries.slice(0, 6).map(([k, v]) => `${k}: ${typeNodeToString(v, depth - 1)}`);
+        return `{${first6.join(', ')}, ...}`;
+      }
+
       // Special case for PyTorch Tensor / NumPy ndarray:
       // These have shape, dtype (and optionally device) as properties
       // where the values are stored as primitive name strings like "[1, 16, 32]"
@@ -1366,6 +1376,27 @@ function typeNodeToStringCompact(node: TypeNode, dimLabels?: string[], sample?: 
   const sampleObj = (sample !== null && sample !== undefined && typeof sample === 'object' && !Array.isArray(sample))
     ? sample as Record<string, unknown>
     : null;
+
+  // Plain dict: show {key: value, ...} using sample values when available
+  if (node.class_name === 'dict') {
+    const MAX_SHOW = 5;
+    const shown: string[] = [];
+    let idx = 0;
+    for (const [key] of entries) {
+      if (idx >= MAX_SHOW) break;
+      if (sampleObj) {
+        const val = sampleObj[key];
+        const formatted = formatScalarSample(val);
+        shown.push(formatted !== null ? `${key}: ${formatted}` : key);
+      } else {
+        shown.push(key);
+      }
+      idx++;
+    }
+    const remaining = entries.length - shown.length;
+    const suffix = remaining > 0 ? `, +${remaining}` : '';
+    return `{${shown.join(', ')}${suffix}}`;
+  }
 
   if (node.class_name && sampleObj) {
     const MAX_SHOW = 4;

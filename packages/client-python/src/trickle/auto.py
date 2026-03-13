@@ -399,12 +399,38 @@ _old_excepthook = sys.excepthook
 
 
 def _trickle_excepthook(exc_type, exc_value, exc_tb) -> None:
-    # Always show the original traceback first
+    # Print the traceback with trickle internal frames filtered out.
+    # This prevents trickle's import hook (_observe_auto._hooked_import) from
+    # cluttering every import error traceback and looking like trickle caused it.
+    import traceback as _tb_mod
     try:
-        _old_excepthook(exc_type, exc_value, exc_tb)
+        _trickle_markers = (
+            "trickle/_observe_auto.py", "trickle\\_observe_auto.py",
+            "trickle/_entry_transform.py", "trickle\\_entry_transform.py",
+            "trickle/_trace_import_hook.py", "trickle\\_trace_import_hook.py",
+        )
+        lines = _tb_mod.format_exception(exc_type, exc_value, exc_tb)
+        filtered: list[str] = []
+        skip_next = False
+        for line in lines:
+            # traceback.format_exception returns multi-line strings where
+            # each "File ..." line may be followed by source code lines.
+            # We filter out entries whose "File" line mentions trickle internals.
+            if any(m in line for m in _trickle_markers):
+                skip_next = True
+                continue
+            if skip_next and not line.startswith("  File ") and not line.startswith("Traceback"):
+                # This is a continuation line (source code) of a filtered frame
+                if line.startswith("    "):
+                    continue
+            skip_next = False
+            filtered.append(line)
+        sys.stderr.write("".join(filtered))
     except Exception:
-        import traceback
-        traceback.print_exception(exc_type, exc_value, exc_tb)
+        try:
+            _old_excepthook(exc_type, exc_value, exc_tb)
+        except Exception:
+            _tb_mod.print_exception(exc_type, exc_value, exc_tb)
 
     # Then capture context for VSCode
     try:

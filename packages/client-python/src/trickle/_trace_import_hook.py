@@ -187,7 +187,7 @@ def _trickle_tv(_val, _name, _line, _func=None):
                 if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v
                 if isinstance(v, str): return v[:40]
                 _cn = type(v).__name__
-                if _cn not in ('list','dict','tuple','set'): return f'{_cn}(...)'
+                if _cn not in ('list','dict','tuple','set'): return _cn + '(...)'
                 return None
             _s = {{f: _sv(getattr(_val, f, None)) for f in list(_val._fields)[:8]}}
         else:
@@ -196,7 +196,7 @@ def _trickle_tv(_val, _name, _line, _func=None):
                 if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v
                 if isinstance(v, str): return v[:40]
                 _cn = type(v).__name__
-                if _cn not in ('list','dict','tuple','set'): return f'{_cn}(...)'
+                if _cn not in ('list','dict','tuple','set'): return _cn + '(...)'
                 return None
             if _dc.is_dataclass(_val) and not isinstance(_val, type):
                 _s = {{f.name: _sv2(getattr(_val, f.name, None)) for f in list(_dc.fields(_val))[:8]}}

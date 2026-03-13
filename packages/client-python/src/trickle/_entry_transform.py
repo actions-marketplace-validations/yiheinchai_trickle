@@ -381,12 +381,59 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "        pass",
         ])
 
-    # Backward hook: re-emit nn.Module variables with gradient info after loss.backward()
+    # Pre-warm optional imports (torch, sklearn, etc.) with fd 2 suppressed.
+    # infer_type() lazily imports these on first call; doing it here silently
+    # avoids C-level stderr noise (e.g. numpy 2.x vs old torch warnings).
     if trace_vars:
         lines.extend([
             "try:",
-            "    from trickle._backward_hook import install as _trickle_bh_install",
-            f"    _trickle_bh_install(trace_fn=_trickle_tv, file_path={filename!r})",
+            "    _trickle_devnull_pw = _trickle_os.open(_trickle_os.devnull, _trickle_os.O_WRONLY)",
+            "    _trickle_old_fd2_pw = _trickle_os.dup(2)",
+            "    _trickle_os.dup2(_trickle_devnull_pw, 2)",
+            "    import sys as _trickle_sys",
+            "    _trickle_old_stderr = _trickle_sys.stderr",
+            "    _trickle_sys.stderr = open(_trickle_os.devnull, 'w')",
+            "    try:",
+            "        from trickle.type_inference import (",
+            "            _get_torch_tensor_type, _get_sklearn_estimator_type,",
+            "            _get_pandas_dataframe_type, _get_numpy_ndarray_type,",
+            "        )",
+            "        _get_torch_tensor_type()",
+            "        _get_sklearn_estimator_type()",
+            "        _get_pandas_dataframe_type()",
+            "        _get_numpy_ndarray_type()",
+            "    except Exception:",
+            "        pass",
+            "    finally:",
+            "        _trickle_os.dup2(_trickle_old_fd2_pw, 2)",
+            "        _trickle_os.close(_trickle_old_fd2_pw)",
+            "        _trickle_os.close(_trickle_devnull_pw)",
+            "        try:",
+            "            _trickle_sys.stderr.close()",
+            "        except Exception:",
+            "            pass",
+            "        _trickle_sys.stderr = _trickle_old_stderr",
+            "except Exception:",
+            "    pass",
+        ])
+
+    # Backward hook: re-emit nn.Module variables with gradient info after loss.backward()
+    # Suppress fd 2 during install to silence C-level torch/numpy warnings
+    if trace_vars:
+        lines.extend([
+            "try:",
+            "    _trickle_devnull = _trickle_os.open(_trickle_os.devnull, _trickle_os.O_WRONLY)",
+            "    _trickle_old_fd2 = _trickle_os.dup(2)",
+            "    _trickle_os.dup2(_trickle_devnull, 2)",
+            "    try:",
+            "        from trickle._backward_hook import install as _trickle_bh_install",
+            f"        _trickle_bh_install(trace_fn=_trickle_tv, file_path={filename!r})",
+            "    except Exception:",
+            "        pass",
+            "    finally:",
+            "        _trickle_os.dup2(_trickle_old_fd2, 2)",
+            "        _trickle_os.close(_trickle_old_fd2)",
+            "        _trickle_os.close(_trickle_devnull)",
             "except Exception:",
             "    pass",
         ])

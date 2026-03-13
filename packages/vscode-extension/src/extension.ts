@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const _EXPLODING_THRESHOLD = 100.0;
+const _VANISHING_THRESHOLD = 1e-6;
+
 interface CallFlowInput {
   name: string;
   type: TypeNode;
@@ -79,6 +82,28 @@ interface ErrorRecord {
   frames: { file: string; line: number; function: string }[];
 }
 
+/** A gradient flow record emitted after loss.backward() */
+interface GradientLayer {
+  name: string;
+  norm: number;
+  vanishing: boolean;
+  exploding: boolean;
+}
+
+interface GradientRecord {
+  kind: 'gradient';
+  file: string;
+  line: number;
+  model_var: string;
+  layers: GradientLayer[];
+  max_norm: number;
+  min_norm: number;
+  num_layers: number;
+  vanishing: string[];
+  exploding: string[];
+  timestamp: number;
+}
+
 /** A training progress record emitted by trickle.progress() */
 interface ProgressRecord {
   kind: 'progress';
@@ -93,6 +118,8 @@ let varIndex: VarIndex = new Map();
 let notebookCellIndex: NotebookCellIndex = new Map();
 let dimLabelIndex: DimLabelIndex = new Map();
 let latestProgress: ProgressRecord | null = null;
+/** Gradient flow records: filePath -> lineNo -> GradientRecord (latest per line) */
+let gradientIndex: Map<string, Map<number, GradientRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -428,6 +455,7 @@ function loadAllVariables() {
   notebookCellIndex.clear();
   dimLabelIndex.clear();
   latestProgress = null;
+  gradientIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -449,6 +477,20 @@ function loadAllVariables() {
             const pr = record as ProgressRecord;
             if (!latestProgress || pr.timestamp > latestProgress.timestamp) {
               latestProgress = pr;
+            }
+            continue;
+          }
+
+          // Handle gradient flow records emitted after loss.backward()
+          if (record.kind === 'gradient') {
+            const gr = record as GradientRecord;
+            if (!gradientIndex.has(gr.file)) {
+              gradientIndex.set(gr.file, new Map());
+            }
+            const lineMap = gradientIndex.get(gr.file)!;
+            const existing = lineMap.get(gr.line);
+            if (!existing || gr.timestamp > existing.timestamp) {
+              lineMap.set(gr.line, gr);
             }
             continue;
           }
@@ -996,6 +1038,61 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
 
         hints.push(hint);
+      }
+    }
+
+    // Add gradient flow inlay hints at the loss.backward() call line
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const gradLines = gradientIndex.get(filePath);
+      if (gradLines) {
+        for (const [lineNo, gr] of gradLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+          if (gr.layers.length === 0) continue;
+
+          // Build compact label showing gradient health
+          const parts: string[] = [];
+
+          if (gr.exploding.length > 0) {
+            parts.push(`⚡ exploding: ${gr.exploding.slice(0, 2).join(', ')}`);
+          }
+          if (gr.vanishing.length > 0) {
+            parts.push(`↓ vanishing: ${gr.vanishing.slice(0, 2).join(', ')}`);
+          }
+          if (parts.length === 0) {
+            // All healthy — show top 3 layer norms
+            const top = gr.layers.slice(0, 3).map(l => `${l.name}=${l.norm.toExponential(2)}`);
+            parts.push(`${gr.num_layers} layers | ${top.join(' | ')}`);
+          }
+
+          const label = ` ∇ ${gr.model_var}: ${parts.join(' | ')}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            // Tooltip with full per-layer breakdown
+            const layerRows = gr.layers.map(l => {
+              const flag = l.exploding ? ' ⚡' : l.vanishing ? ' ↓' : '';
+              return `| \`${l.name}\` | \`${l.norm.toExponential(3)}\`${flag} |`;
+            });
+            const md = new vscode.MarkdownString(
+              `### ∇ Gradient Norms: \`${gr.model_var}\`\n\n` +
+              `| Layer | Grad Norm |\n|---|---|\n${layerRows.join('\n')}\n\n` +
+              `max: \`${gr.max_norm.toExponential(3)}\` · min: \`${gr.min_norm.toExponential(3)}\`\n\n` +
+              (gr.exploding.length > 0 ? `⚡ **Exploding** (>${_EXPLODING_THRESHOLD}): ${gr.exploding.join(', ')}\n\n` : '') +
+              (gr.vanishing.length > 0 ? `↓ **Vanishing** (<${_VANISHING_THRESHOLD}): ${gr.vanishing.join(', ')}` : ''),
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
       }
     }
 

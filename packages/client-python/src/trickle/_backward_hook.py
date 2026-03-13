@@ -3,6 +3,10 @@
 After loss.backward(), model parameters have .grad populated. This hook
 walks the caller's frame to find nn.Module variables and re-emits their
 type info (now including gradient norms) to the JSONL trace file.
+
+Also emits `kind: "gradient"` records with per-layer gradient norms so the
+VSCode extension can show gradient flow inlay hints (vanishing/exploding alerts)
+at the backward() call site.
 """
 
 from __future__ import annotations
@@ -10,10 +14,63 @@ from __future__ import annotations
 import inspect
 import json
 import os
-from typing import Any, Callable, Optional
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 _installed = False
 _original_backward: Any = None
+
+# Thresholds for vanishing / exploding gradient detection
+_VANISHING_THRESHOLD = 1e-6
+_EXPLODING_THRESHOLD = 100.0
+
+
+def _collect_layer_norms(model: Any) -> List[Dict[str, Any]]:
+    """Collect gradient norms grouped by top-level layer name.
+
+    Returns list of dicts: {name, norm, vanishing, exploding}
+    Grouped by first component of parameter path so Transformer blocks like
+    'layers.0.attn.weight' and 'layers.0.ffn.weight' both map to 'layers.0'.
+    """
+    # Accumulate squared norms per layer group
+    layer_sq: Dict[str, float] = {}
+    layer_count: Dict[str, int] = {}
+
+    for param_name, param in model.named_parameters():
+        if param.grad is None:
+            continue
+        try:
+            norm = float(param.grad.detach().norm().item())
+        except Exception:
+            continue
+
+        # Group by first two components (e.g. "layers.0", "fc1", "embedding")
+        parts = param_name.split(".")
+        group = ".".join(parts[:2]) if len(parts) >= 2 else parts[0]
+
+        if group not in layer_sq:
+            layer_sq[group] = 0.0
+            layer_count[group] = 0
+        layer_sq[group] += norm * norm
+        layer_count[group] += 1
+
+    if not layer_sq:
+        return []
+
+    layers = []
+    for group, sq in layer_sq.items():
+        count = layer_count[group]
+        combined_norm = (sq ** 0.5) / max(count, 1)
+        layers.append({
+            "name": group,
+            "norm": round(combined_norm, 8),
+            "vanishing": combined_norm < _VANISHING_THRESHOLD,
+            "exploding": combined_norm > _EXPLODING_THRESHOLD,
+        })
+
+    # Sort by norm descending so most significant layers appear first
+    layers.sort(key=lambda x: x["norm"], reverse=True)
+    return layers
 
 
 def install(trace_fn: Optional[Callable] = None, file_path: Optional[str] = None) -> None:
@@ -84,8 +141,9 @@ def install(trace_fn: Optional[Callable] = None, file_path: Optional[str] = None
                     line_no = caller.f_lineno
                     trace_fn(model, var_name, line_no)
                 else:
-                    # Emit directly to JSONL
+                    # Emit variable record and gradient record directly to JSONL
                     _emit_direct(model, var_name, caller, file_path)
+                    _emit_gradient(model, var_name, caller, file_path)
         except Exception:
             pass  # Never break user code
         finally:
@@ -119,6 +177,44 @@ def _emit_direct(model: Any, var_name: str, frame: Any, file_path: Optional[str]
             "type": type_node,
             "typeHash": type_hash,
             "sample": f"nn.Module({var_name})",
+        }
+
+        with open(vars_file, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    except Exception:
+        pass
+
+
+def _emit_gradient(model: Any, var_name: str, frame: Any, file_path: Optional[str] = None) -> None:
+    """Emit a gradient flow record with per-layer gradient norms."""
+    try:
+        layers = _collect_layer_norms(model)
+        if not layers:
+            return
+
+        local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+        os.makedirs(local_dir, exist_ok=True)
+        vars_file = os.path.join(local_dir, "variables.jsonl")
+
+        src_file = file_path or frame.f_code.co_filename
+        line_no = frame.f_lineno
+
+        norms = [l["norm"] for l in layers]
+        vanishing = [l["name"] for l in layers if l["vanishing"]]
+        exploding = [l["name"] for l in layers if l["exploding"]]
+
+        record: Dict[str, Any] = {
+            "kind": "gradient",
+            "file": src_file,
+            "line": line_no,
+            "model_var": var_name,
+            "layers": layers,
+            "max_norm": max(norms),
+            "min_norm": min(norms),
+            "num_layers": len(layers),
+            "vanishing": vanishing,
+            "exploding": exploding,
+            "timestamp": time.time(),
         }
 
         with open(vars_file, "a") as f:

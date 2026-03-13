@@ -510,3 +510,39 @@ x shape flow (in MLP.forward):
   L12: Tensor[8, 256] (AddmmBackward0) ← self.fc1(Linear) ←
   L13: Tensor[8, 64]  (AddmmBackward0) ← self.fc2(Linear) ←
 ```
+
+---
+
+## Use Case 12: Cross-Run Type History — Persist Drift Detection Across VSCode Restarts
+
+Type drift alerts now survive VSCode restarts. Trickle persists type hashes to `.trickle/type_history.json` so that when you reload VSCode and re-run your training script, drift is still detected compared to previous runs.
+
+```python
+import trickle.auto
+import torch
+import torch.nn as nn
+
+# Run on Monday: hidden_size=256
+model = nn.Linear(256, 10)
+x = torch.randn(32, 256)
+out = model(x)  # → Tensor[32, 10] float32
+
+# [close VSCode, reopen Tuesday]
+
+# Run on Tuesday after refactoring to hidden_size=512:
+model = nn.Linear(512, 10)
+x = torch.randn(32, 512)
+out = model(x)  # → Tensor[32, 10] float32 ⚠  ← detected even after restart!
+```
+
+**How it works:** 
+- `.trickle/type_history.json` is written after every run, keyed by `file:line:varName`
+- On VSCode activation, this file is loaded into memory as the baseline for drift detection
+- Drift is now persistent across sessions — not just within a single VSCode window
+
+**When this matters:**
+- Day-over-day experiments where you refactor and reopen VSCode between runs
+- CI pipelines that open a fresh editor for each run
+- Team workflows where one engineer's type history catches a regression introduced by another's merge
+
+Commit `.trickle/type_history.json` to share drift baselines with your team, or add it to `.gitignore` to keep history local.

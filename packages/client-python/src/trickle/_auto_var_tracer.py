@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 _installed = False
+_entry_file_setup_done = False  # tracks whether install() has run entry-file setup
 _assignment_map: Dict[str, Dict[int, List[str]]] = {}  # filename -> {line_no -> [var_names]}
 _cache: Set[str] = set()
 _vars_file: Optional[str] = None
@@ -767,11 +768,11 @@ def install() -> None:
     Parses the entry file's AST to find assignment lines, then installs
     a trace function that captures variable values on those lines.
     """
-    global _installed, _entry_file, _old_trace, _infer_type
+    global _installed, _entry_file_setup_done, _entry_file, _old_trace, _infer_type
 
-    if _installed:
+    if _entry_file_setup_done:
         return
-    _installed = True
+    _entry_file_setup_done = True
 
     # Check if variable tracing is enabled
     if os.environ.get("TRICKLE_TRACE_VARS", "1") in ("0", "false"):
@@ -804,27 +805,43 @@ def install() -> None:
     if not assignments:
         return
 
+    # Register under both the logical path (abspath) and the real path (realpath).
+    # On macOS /tmp is a symlink to /private/tmp, so frame.f_code.co_filename may
+    # differ from os.path.abspath(sys.argv[0]).
+    _entry_file_real = os.path.realpath(_entry_file)
     _assignment_map[_entry_file] = assignments
     _func_context[_entry_file] = func_ctx
+    if _entry_file_real != _entry_file:
+        _assignment_map[_entry_file_real] = assignments
+        _func_context[_entry_file_real] = func_ctx
     if call_args:
         _call_args_map[_entry_file] = call_args
+        if _entry_file_real != _entry_file:
+            _call_args_map[_entry_file_real] = call_args
     if loop_lines:
         _loop_body_lines[_entry_file] = loop_lines
+        if _entry_file_real != _entry_file:
+            _loop_body_lines[_entry_file_real] = loop_lines
 
     # Import type inference lazily
-    from trickle.type_inference import infer_type
-    _infer_type = infer_type
+    if _infer_type is None:
+        from trickle.type_inference import infer_type
+        _infer_type = infer_type
 
-    # Install the trace function
+    # Install the trace function (only if not already installed by install_files/activate)
     # Note: sys.settrace and sys.setprofile are independent — both can coexist
-    _old_trace = sys.gettrace()
-    sys.settrace(_global_trace)
+    if not _installed:
+        _installed = True
+        _old_trace = sys.gettrace()
+        sys.settrace(_global_trace)
 
-    # Also set f_trace on the caller's frame chain so that module-level code
+    # Always set f_trace on the caller's frame chain so that module-level code
     # (which is already executing when we're imported) gets line tracing too.
+    # This must be done even if settrace was already active (e.g. via install_files).
     frame = sys._getframe(0)
     while frame is not None:
-        if frame.f_code.co_filename == _entry_file:
+        fname = frame.f_code.co_filename
+        if fname == _entry_file or fname == _entry_file_real:
             frame.f_trace = _local_trace
             break
         frame = frame.f_back

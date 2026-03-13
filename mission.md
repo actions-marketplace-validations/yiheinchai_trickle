@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. Vitest+React integration is verified. Nested type hover tooltips now render as structured, indented TypeScript-style type blocks (using `typeNodeToPretty`) instead of flat strings — complex objects and arrays of objects get pretty-printed in a code block on hover. Next priorities:
+JS/TS and Python inline type hints are fully working. Vitest+React integration is verified. Nested type hover tooltips render as structured, indented TypeScript-style type blocks. pytest plugin (`pytest11` entry point) auto-activates when `trickle-observe` is installed — no config needed, just run `pytest`. Next priorities:
 
-1. pytest integration: when running `pytest`, Python test files should get variable tracing so developers see types while writing tests. Similar to Vitest for JS — instrument test function locals automatically. This is the highest-value next item for ML engineers writing model tests.
+1. Multi-file project tracing: when a training script imports from local modules (e.g., `from model import GPT`), variables inside those imported modules are traced individually but not linked to the call site in the entry script. Improve by correlating variable traces across files — e.g., when `model = GPT(config)` is executed, the inline hint at the call site should show `GPT(n_layer=12, n_head=12, ...)` populated from the `__init__` trace in model.py.
 
-2. Multi-file project tracing: when a training script imports from local modules (e.g., `from model import GPT`), variables inside those imported modules are traced individually but not linked to the call site in the entry script. Improve by correlating variable traces across files — e.g., when `model = GPT(config)` is executed, the inline hint at the call site should show `GPT(n_layer=12, n_head=12, ...)` populated from the `__init__` trace in model.py.
+2. Python async support: `async def` functions and `asyncio.gather()` return values are not yet traced. Improve to trace coroutine results after `await`.
 
-3. Python async support: `async def` functions and `asyncio.gather()` return values are not yet traced. Improve to trace coroutine results after `await`.
+3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-4. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+4. Type drift alerts: when a variable's type changes between two runs (e.g., a tensor shape changes unexpectedly), surface a warning inline in VSCode — useful for catching shape regressions between training iterations.
 
 </focus point>
 

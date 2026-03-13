@@ -413,8 +413,6 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
         m_ret_type = _type_to_python(return_type, extracted, base_name, None)
         if m_ret_type == "None":
             ret_str = " -> None"
-        elif is_async:
-            ret_str = f" -> Awaitable[{m_ret_type}]"
         else:
             ret_str = f" -> {m_ret_type}"
 
@@ -433,10 +431,15 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                         continue
                     py_type = _type_to_python(el, extracted, base_name, pname)
                     params_list.append(f"{pname}: {py_type}")
-            # Add kwargs as keyword params
+            # Add kwargs as keyword params (skip duplicates of positional names)
+            cls_pos_names = {param_names[i] if i < len(param_names) else f"arg{i}"
+                           for i in range(len(pos_elems) if args_type.get("kind") == "tuple" else 0)}
+            cls_pos_names.add("self")
             sorted_kw = sorted(all_kwargs.keys(),
                              key=lambda k: param_names.index(k) if k in param_names else 999)
             for k in sorted_kw:
+                if k in cls_pos_names:
+                    continue
                 v = all_kwargs[k]
                 py_type = _type_to_python(v, extracted, base_name, k)
                 params_list.append(f"{k}: {py_type} = ...")
@@ -452,10 +455,7 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                 v_def = "async def" if v_async else "def"
                 v_ext: List[Tuple[str, Dict[str, Any]]] = []
                 v_ret_type = _type_to_python(v_ret, v_ext, base_name, None)
-                if v_async:
-                    v_ret_str = f" -> Awaitable[{v_ret_type}]"
-                else:
-                    v_ret_str = f" -> {v_ret_type}"
+                v_ret_str = f" -> {v_ret_type}"
                 v_params: List[str] = ["self"]
                 if v_args.get("kind") == "tuple":
                     for i, el in enumerate(v_args.get("elements", [])):
@@ -678,7 +678,7 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     func_name = _to_snake_case(name)
     is_async = fn.get("isAsync", False)
     def_keyword = "async def" if is_async else "def"
-    ret_type = f"Awaitable[{base_name}Output]" if is_async else f"{base_name}Output"
+    ret_type = f"{base_name}Output"
 
     result: List[str] = []
     if extracted_lines:
@@ -701,12 +701,15 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
         return params
 
     # Build kwargs params (all optional with defaults)
-    def _build_kwarg_params(kwargs: Dict[str, Dict[str, Any]]) -> List[str]:
+    def _build_kwarg_params(kwargs: Dict[str, Dict[str, Any]], pos_names: Set[str] = None) -> List[str]:
         params = []
+        skip = pos_names or set()
         # Sort kwargs by their position in paramNames for stable ordering
         sorted_keys = sorted(kwargs.keys(),
                            key=lambda k: param_names.index(k) if k in param_names else 999)
         for k in sorted_keys:
+            if k in skip:
+                continue
             v = kwargs[k]
             py_type = _type_to_python(v, extracted, base_name, k)
             params.append(f"{k}: {py_type} = ...")
@@ -728,8 +731,6 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
             v_def = "async def" if v_async else "def"
             v_ext: List[Tuple[str, Dict[str, Any]]] = []
             v_ret_str = f"{base_name}Output"
-            if v_async:
-                v_ret_str = f"Awaitable[{v_ret_str}]"
             v_params: List[str] = []
             if v_args.get("kind") == "tuple":
                 for idx, el in enumerate(v_args.get("elements", [])):
@@ -751,7 +752,8 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
         # Single signature with kwargs flattened
         params = _build_pos_params(pos_elements, param_names)
         if has_kwargs:
-            params.extend(_build_kwarg_params(all_kwargs))
+            pos_names = {param_names[i] if i < len(param_names) else f"arg{i}" for i in range(len(pos_elements))}
+            params.extend(_build_kwarg_params(all_kwargs, pos_names))
 
         if not params and pos_args_type.get("kind") == "object" and pos_args_type.get("properties"):
             sig = f"{def_keyword} {func_name}(input: {base_name}Input) -> {ret_type}: ..."
@@ -915,7 +917,7 @@ def generate_types() -> int:
             f"# Generated at {_iso_now()}",
             "# Do not edit — types update automatically as your code runs",
             "",
-            "from typing import Any, AsyncIterator, Awaitable, Callable, Dict, Iterator, List, Optional, Set, Tuple, TypedDict, Union, overload",
+            "from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Set, Tuple, TypedDict, Union, overload",
             "",
             "",
         ]
@@ -1424,7 +1426,7 @@ def _build_py_signature(fn: Dict[str, Any]) -> str:
     ret = _type_to_compact(return_type)
     is_async = fn.get("isAsync", False)
     prefix = "async " if is_async else ""
-    ret_display = f"Awaitable[{ret}]" if is_async else ret
+    ret_display = ret
     return f"{prefix}{name}({params_str}) \u2192 {ret_display}"
 
 

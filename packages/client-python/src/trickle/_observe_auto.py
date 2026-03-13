@@ -100,7 +100,7 @@ def _wrap_module_functions(module: types.ModuleType, fullname: str) -> None:
     """Wrap all public callable attributes on a module."""
     from .decorator import _wrap
 
-    module_name = fullname.rsplit(".", 1)[-1]
+    module_name = fullname
     count = 0
 
     for name in dir(module):
@@ -116,10 +116,33 @@ def _wrap_module_functions(module: types.ModuleType, fullname: str) -> None:
         if isinstance(val, type):
             cls = val
             for method_name in list(vars(cls)):
-                if method_name.startswith("_"):
+                # Allow __init__ and public methods, skip other dunders/private
+                if method_name.startswith("_") and method_name != "__init__":
                     continue
                 method_val = getattr(cls, method_name, None)
                 if method_val is None:
+                    continue
+                # Handle staticmethod and classmethod descriptors
+                raw_val = vars(cls).get(method_name)
+                if isinstance(raw_val, staticmethod):
+                    inner = raw_val.__func__
+                    if callable(inner):
+                        try:
+                            wrapped_method = _wrap(inner, name=f"{name}.{method_name}", module=module_name)
+                            setattr(cls, method_name, staticmethod(wrapped_method))
+                            count += 1
+                        except Exception:
+                            logger.debug("trickle: failed to wrap %s.%s.%s", fullname, name, method_name, exc_info=True)
+                    continue
+                if isinstance(raw_val, classmethod):
+                    inner = raw_val.__func__
+                    if callable(inner):
+                        try:
+                            wrapped_method = _wrap(inner, name=f"{name}.{method_name}", module=module_name)
+                            setattr(cls, method_name, classmethod(wrapped_method))
+                            count += 1
+                        except Exception:
+                            logger.debug("trickle: failed to wrap %s.%s.%s", fullname, name, method_name, exc_info=True)
                     continue
                 if not (inspect.isfunction(method_val) or inspect.iscoroutinefunction(method_val)):
                     continue

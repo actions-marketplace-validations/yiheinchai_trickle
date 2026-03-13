@@ -9,11 +9,11 @@ Improve on the python developer experience, any arbituary python code (even with
 
 Next priorities for Python DX:
 
-1. **Improve `trickle run python` function observation capture** — When running `trickle run python script.py` on scripts that use `if __name__ == "__main__"`, functions defined in the entry file are not captured as function observations (only variable tracing works). This means .pyi stubs are not generated for the entry file in this path.
+1. **Improve async generator and context manager type inference** — Async generators return `Iterator[Any]` instead of `AsyncIterator[YieldType]`. Context managers show as `Callable` instead of `ContextManager[YieldType]`. The profile hook doesn't distinguish sync vs async generators.
 
-2. **Improve async generator and context manager type inference** — Async generators return `Iterator[Any]` instead of `AsyncIterator[YieldType]`. Context managers show as `Callable` instead of `ContextManager[YieldType]`. The profile hook doesn't distinguish sync vs async generators.
+2. **Improve kwargs rendering in .pyi stubs** — Keyword arguments are captured as a TypedDict element in the args tuple (e.g. `fetch_with_limit(ids, limit=3)` shows `limit: FetchWithLimitLimit`). Should render kwargs as normal keyword parameters with defaults.
 
-3. **Improve kwargs rendering in .pyi stubs** — Keyword arguments are captured as a TypedDict element in the args tuple (e.g. `fetch_with_limit(ids, limit=3)` shows `limit: FetchWithLimitLimit`). Should render kwargs as normal keyword parameters with defaults.
+3. **Better `List[dataclass]` types** — When a function returns `List[Item]`, the .pyi shows the correct class name, but the elements inside the list aren't typed (e.g. `List[Dict[str, Any]]` for a list of dicts with uniform structure). Could infer and render proper element TypedDicts.
 
 </focus point>
 

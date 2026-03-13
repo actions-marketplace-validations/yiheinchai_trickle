@@ -741,7 +741,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
 
         const obsLabels = getDimLabels(obs);
         const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
-        let typeStr = typeNodeToStringCompact(obs.type, obsLabels);
+        let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
 
         // For primitive types, show actual value inline instead of just "number"/"integer"
         if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
@@ -1117,7 +1117,28 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
  * For objects with many keys, shows just key names: {key1, key2, +N more}
  * This keeps inline hints short. Full type is shown in hover tooltip.
  */
-function typeNodeToStringCompact(node: TypeNode, dimLabels?: string[]): string {
+/** Format a scalar sample value as a short string for inline display. Returns null if not suitable. */
+function formatScalarSample(val: unknown): string | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'boolean') return val ? 'True' : 'False';
+  if (typeof val === 'number') {
+    if (!isFinite(val)) return null;
+    return Number.isInteger(val) ? String(val) : val.toFixed(4).replace(/\.?0+$/, '');
+  }
+  if (typeof val === 'string' && val.length <= 20) return `"${val}"`;
+  return null;
+}
+
+function typeNodeToStringCompact(node: TypeNode, dimLabels?: string[], sample?: unknown): string {
+  // Arrays: recursively compact the element type
+  if (node.kind === 'array' && node.element) {
+    const inner = typeNodeToStringCompact(node.element, dimLabels);
+    // Wrap in Array<...> if inner contains special chars, else use T[]
+    const needsWrapper = inner.includes('|') || inner.includes('(') ||
+      (inner.includes('<') && !inner.endsWith('>'));
+    return needsWrapper ? `Array<${inner}>` : `${inner}[]`;
+  }
+
   if (node.kind !== 'object' || !node.properties) {
     return typeNodeToString(node, 3, dimLabels);
   }
@@ -1136,6 +1157,27 @@ function typeNodeToStringCompact(node: TypeNode, dimLabels?: string[]): string {
     'DatetimeIndex', 'Dataset', 'DatasetDict']);
   if (node.class_name && mlClasses.has(node.class_name)) {
     return typeNodeToString(node, 3, dimLabels);
+  }
+
+  // Named classes (dataclasses, NamedTuples, Pydantic models): show key=value when sample available
+  const sampleObj = (sample !== null && sample !== undefined && typeof sample === 'object' && !Array.isArray(sample))
+    ? sample as Record<string, unknown>
+    : null;
+
+  if (node.class_name && sampleObj) {
+    const MAX_SHOW = 4;
+    const shown: string[] = [];
+    let idx = 0;
+    for (const [key] of entries) {
+      if (idx >= MAX_SHOW) break;
+      const val = sampleObj[key];
+      const formatted = formatScalarSample(val);
+      shown.push(formatted !== null ? `${key}=${formatted}` : key);
+      idx++;
+    }
+    const remaining = entries.length - shown.length;
+    const suffix = remaining > 0 ? `, +${remaining}` : '';
+    return `${node.class_name}(${shown.join(', ')}${suffix})`;
   }
 
   // Small objects (≤ 3 keys): show normally with types

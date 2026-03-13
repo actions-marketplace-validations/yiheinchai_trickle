@@ -15,6 +15,7 @@ Strategy:
 from __future__ import annotations
 
 import ast
+import dataclasses
 import json
 import os
 import sys
@@ -204,6 +205,17 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
     return assignments, func_ctx
 
 
+def _simple_scalar(v: Any) -> Any:
+    """Return a JSON-safe scalar for a field value, or None if complex."""
+    if v is None or isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v
+    if isinstance(v, str):
+        return v[:40]
+    return None
+
+
 def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
                module_name: str, func_name: Optional[str] = None) -> None:
     """Trace a single variable assignment."""
@@ -230,10 +242,19 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
             if hasattr(value, "device"):
                 parts.append(f"device={value.device}")
             sample = f"{type(value).__name__}({', '.join(parts)})"
-        elif isinstance(value, (int, float, bool)):
+        elif isinstance(value, bool):
+            sample = value
+        elif isinstance(value, (int, float)):
             sample = value
         elif isinstance(value, str):
             sample = value[:100]
+        elif hasattr(value, '_fields') and isinstance(value, tuple):
+            # NamedTuple — emit field dict for structured display
+            sample = {f: _simple_scalar(getattr(value, f, None)) for f in list(value._fields)[:8]}
+        elif dataclasses.is_dataclass(value) and not isinstance(value, type):
+            # Dataclass — emit field dict for structured display
+            sample = {f.name: _simple_scalar(getattr(value, f.name, None))
+                      for f in list(dataclasses.fields(value))[:8]}
         else:
             sample = str(value)[:100]
 

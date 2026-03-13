@@ -21,6 +21,7 @@ matching the deep observation behavior for imported modules.
 from __future__ import annotations
 
 import ast
+import dataclasses
 import json
 import os
 import sys
@@ -160,6 +161,12 @@ def _sanitize(value: Any, depth: int = 2) -> Any:
         return value
     if isinstance(value, str):
         return value[:100] + "..." if len(value) > 100 else value
+    # NamedTuple check BEFORE generic tuple (NamedTuple is a subclass of tuple)
+    if hasattr(value, '_fields') and isinstance(value, tuple):
+        r = {}
+        for field_name in list(value._fields)[:8]:
+            r[field_name] = _sanitize(getattr(value, field_name, None), depth - 1)
+        return r
     if isinstance(value, (list, tuple)):
         items = [_sanitize(v, depth - 1) for v in value[:3]]
         if len(value) > 3:
@@ -172,6 +179,12 @@ def _sanitize(value: Any, depth: int = 2) -> Any:
                 r["..."] = f"({len(value)} total)"
                 break
             r[str(k)] = _sanitize(v, depth - 1)
+        return r
+    # Dataclass — emit field dict
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        r = {}
+        for field in list(dataclasses.fields(value))[:8]:
+            r[field.name] = _sanitize(getattr(value, field.name, None), depth - 1)
         return r
     return str(value)[:100]
 
@@ -282,12 +295,29 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            _parts = [f'shape={list(_val.shape)}', f'dtype={_val.dtype}']",
             "            if hasattr(_val, 'device'): _parts.append(f'device={_val.device}')",
             "            _s = f'{type(_val).__name__}({\", \".join(_parts)})'",
-            "        elif isinstance(_val, (int, float, bool)):",
+            "        elif isinstance(_val, bool):",
+            "            _s = _val",
+            "        elif isinstance(_val, (int, float)):",
             "            _s = _val",
             "        elif isinstance(_val, str):",
             "            _s = _val[:100]",
+            "        elif hasattr(_val, '_fields') and isinstance(_val, tuple):",
+            "            import dataclasses as _dc",
+            "            def _sv(v):",
+            "                if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v",
+            "                if isinstance(v, str): return v[:40]",
+            "                return None",
+            "            _s = {f: _sv(getattr(_val, f, None)) for f in list(_val._fields)[:8]}",
             "        else:",
-            "            _s = str(_val)[:100]",
+            "            import dataclasses as _dc",
+            "            if _dc.is_dataclass(_val) and not isinstance(_val, type):",
+            "                def _sv2(v):",
+            "                    if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v",
+            "                    if isinstance(v, str): return v[:40]",
+            "                    return None",
+            "                _s = {f.name: _sv2(getattr(_val, f.name, None)) for f in list(_dc.fields(_val))[:8]}",
+            "            else:",
+            "                _s = str(_val)[:100]",
             f"        _r = {{'kind': 'variable', 'varName': _name, 'line': _line, 'module': {module_name!r}, 'file': {filename!r}, 'type': _t, 'typeHash': _th, 'sample': _s}}",
             "        if _func: _r['funcName'] = _func",
             "        with open(_trickle_tv_file, 'a') as _f:",

@@ -176,12 +176,28 @@ def _trickle_tv(_val, _name, _line, _func=None):
             _parts = [f'shape={{list(_val.shape)}}', f'dtype={{_val.dtype}}']
             if hasattr(_val, 'device'): _parts.append(f'device={{_val.device}}')
             _s = f'{{type(_val).__name__}}({{", ".join(_parts)}})'
-        elif isinstance(_val, (int, float, bool)):
+        elif isinstance(_val, bool):
+            _s = _val
+        elif isinstance(_val, (int, float)):
             _s = _val
         elif isinstance(_val, str):
             _s = _val[:100]
+        elif hasattr(_val, '_fields') and isinstance(_val, tuple):
+            def _sv(v):
+                if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v
+                if isinstance(v, str): return v[:40]
+                return None
+            _s = {{f: _sv(getattr(_val, f, None)) for f in list(_val._fields)[:8]}}
         else:
-            _s = str(_val)[:100]
+            import dataclasses as _dc
+            if _dc.is_dataclass(_val) and not isinstance(_val, type):
+                def _sv2(v):
+                    if v is None or isinstance(v, bool) or isinstance(v, (int, float)): return v
+                    if isinstance(v, str): return v[:40]
+                    return None
+                _s = {{f.name: _sv2(getattr(_val, f.name, None)) for f in list(_dc.fields(_val))[:8]}}
+            else:
+                _s = str(_val)[:100]
         _r = {{'kind': 'variable', 'varName': _name, 'line': _line, 'module': {module_name!r}, 'file': {filename!r}, 'type': _t, 'typeHash': _th, 'sample': _s}}
         if _func: _r['funcName'] = _func
         with open(_trickle_tv_file, 'a') as _f:

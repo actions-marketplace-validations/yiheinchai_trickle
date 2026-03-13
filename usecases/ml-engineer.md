@@ -214,7 +214,45 @@ for name, param in model.named_parameters():
 loss.backward()  # gradient info appears automatically on the model variable
 ```
 
-## Use Case 5: Without the CLI
+## Use Case 5: Config and Dataclass Visibility
+
+ML configs defined as dataclasses or NamedTuples now show actual field values inline — not just the class name:
+
+```python
+from dataclasses import dataclass
+from typing import NamedTuple
+
+@dataclass
+class GPTConfig:
+    block_size: int = 1024
+    vocab_size: int = 50257
+    n_layer: int = 12
+    n_head: int = 12
+    n_embd: int = 768
+    dropout: float = 0.0
+    bias: bool = True
+
+class TrainConfig(NamedTuple):
+    lr: float
+    batch_size: int
+    epochs: int
+
+config = GPTConfig(n_layer=6, n_head=6, n_embd=384)
+# → GPTConfig(block_size=1024, vocab_size=50257, n_layer=6, n_head=6, +3)
+
+train_cfg = TrainConfig(lr=3e-4, batch_size=64, epochs=10)
+# → TrainConfig(lr=0.0003, batch_size=64, epochs=10)
+```
+
+You see the actual values at a glance — no more printing the config to remember what you set. Works for:
+- Python `@dataclass` classes
+- `typing.NamedTuple` classes
+- `collections.namedtuple` classes
+- Pydantic models
+
+Hover for full details including all field types and their values.
+
+## Use Case 6: Without the CLI
 
 If you don't want to install Node.js/npm at all:
 

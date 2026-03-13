@@ -9,11 +9,11 @@ Improve on the python developer experience, any arbituary python code (even with
 
 Next priorities for Python DX:
 
-1. **Reduce observation JSONL bloat** — Functions called 100+ times (e.g. `load_recording` called per file) generate 100+ near-identical observation entries. Add deduplication or sampling to cap observations per function, reducing disk I/O and codegen time.
+1. **Improve type hint quality** — Better `List[dataclass]` types instead of `List[Dict[str, Any]]` in .pyi stubs. Use proper import types (e.g. `numpy.ndarray` instead of `Any`) for ndarray/Tensor/DataFrame return types in .pyi stubs.
 
-2. **Improve type hint quality** — Better `List[dataclass]` types instead of `List[Dict[str, Any]]` in .pyi stubs. Use proper import types (e.g. `numpy.ndarray` instead of `Any`) for ndarray/Tensor/DataFrame return types in .pyi stubs.
+2. **Test async code and more edge cases** — Test on async frameworks (asyncio/aiohttp), Django views, SQLAlchemy models. Verify generators-as-iterators (consuming yield values), properties, decorated class methods, and nested unpacking.
 
-3. **Test async code and more edge cases** — Test on async frameworks (asyncio/aiohttp), Django views, SQLAlchemy models. Verify generators-as-iterators (consuming yield values), properties, decorated class methods, and nested unpacking.
+3. **Improve `trickle run python` function observation capture** — When running `trickle run python script.py` on scripts that use `if __name__ == "__main__"`, functions defined in the entry file are not captured as function observations (only variable tracing works). This means .pyi stubs are not generated for the entry file in this path.
 
 </focus point>
 

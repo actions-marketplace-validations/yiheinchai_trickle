@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, and model checkpoint observability are all implemented. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, exception/error observability with local variable capture, automatic training metric detection, gradient flow visualization, multi-file variable tracing, model checkpoint observability, and LR scheduler visualization are all implemented. Next priorities:
 
-1. Learning rate scheduler visualization: after each optimizer step, show the current LR as an inlay hint on the scheduler.step() line, so the user can see LR warmup/decay curves without adding print statements.
+1. Memory profiling inlay hints: show GPU/CPU memory usage (torch.cuda.memory_allocated()) as inlay hints on tensor creation and forward pass lines during training, so users can spot memory leaks and OOM risks without adding explicit profiling calls.
 
-2. Memory profiling inlay hints: show GPU/CPU memory usage (torch.cuda.memory_allocated()) as inlay hints on tensor creation lines during training, so users can spot memory leaks without adding explicit profiling calls.
+2. Dataset shape observability: when iterating over a DataLoader, automatically show the batch tensor shapes as inlay hints on the for loop line — so users immediately see what shape each batch has without adding print statements.
 
 3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-4. Dataset shape observability: when iterating over a DataLoader, automatically show the batch tensor shapes as inlay hints on the for loop line — so users immediately see what shape each batch has without adding print statements.
+4. Optimizer state observability: show gradient norms, weight update magnitudes, and parameter statistics (mean/std) as inlay hints on optimizer.step() lines, helping users detect issues like weight explosion or dead neurons without manual inspection.
 
 </focus point>
 

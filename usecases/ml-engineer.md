@@ -831,3 +831,41 @@ Hover tooltip shows the full checkpoint history:
 ```
 
 **How it works:** `trickle.auto` patches `torch.save()` and `transformers.PreTrainedModel.save_pretrained()`. After each save, it scans the caller's frame locals for training metric variables (`epoch`, `step`, `loss`, `val_loss`, `acc`, `lr`, etc.) and writes a `kind: "checkpoint"` record to `.trickle/variables.jsonl`. The VSCode extension reads these records and shows them as inlay hints at the save line, accumulating a history across the training run.
+
+---
+
+## Use Case 20: Learning Rate Scheduler Visualization
+
+**User:** ML engineer using a cosine annealing or warmup LR schedule, wanting to verify the LR curve is correct without adding logging.
+
+**Before trickle:** Must add `print(f"lr={scheduler.get_last_lr()[0]:.2e}")` after every `scheduler.step()`, or use TensorBoard/W&B to plot the LR curve.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+scheduler = CosineAnnealingLR(optimizer, T_max=1000, eta_min=1e-6)
+
+for epoch in range(100):
+    for step, batch in enumerate(loader):
+        loss = train_step(model, batch)
+        optimizer.step()
+        scheduler.step()  # ← inlay hint appears here automatically:
+                          #   📈 lr=1.04e-04 | epoch=3 | step=450
+```
+
+Hover tooltip shows:
+```
+📈 Learning Rate: `CosineAnnealingLR`
+
+Current LR: `1.04e-04`
+Context: epoch: 3 · step: 450 · loss: 0.342
+Step: 450
+```
+
+**Multi param-group example** (different LRs for backbone vs head):
+```
+scheduler.step()  📈 lr=[1.04e-05, 1.04e-04]
+```
+
+**How it works:** `trickle.auto` patches `torch.optim.lr_scheduler.LRScheduler.step()` (the base class). After each step, it reads the current LR from each optimizer param group, captures training context (epoch/step/loss) from the caller's frame, and writes a `kind: "lr_schedule"` record. Rate-limited to every 10 steps by default (`TRICKLE_LR_EVERY` to tune). Works with all PyTorch schedulers: CosineAnnealingLR, OneCycleLR, LinearWarmup, ReduceLROnPlateau, etc.

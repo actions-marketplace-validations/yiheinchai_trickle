@@ -44,6 +44,12 @@ _queue: queue.Queue[Dict[str, Any]] = queue.Queue(maxsize=10_000)
 _worker_thread: Optional[threading.Thread] = None
 _shutdown_event = threading.Event()
 
+# Per-function observation dedup: track seen typeHashes per function
+# to avoid writing 100+ near-identical observations for hot functions.
+_MAX_OBSERVATIONS_PER_FN = 10
+_obs_counts: Dict[str, int] = {}  # "module::functionName" -> count
+_obs_hashes: Dict[str, set] = {}  # "module::functionName" -> set of typeHashes
+
 
 def configure(
     backend_url: Optional[str] = None,
@@ -84,6 +90,26 @@ def enqueue(payload: Dict[str, Any]) -> None:
     """Add a payload to the send queue.  Starts the worker on first call."""
     if not _enabled:
         return
+
+    # Per-function dedup: skip if we've seen enough unique type patterns
+    fn_name = payload.get("functionName", "")
+    module = payload.get("module", "")
+    if fn_name:
+        fn_key = f"{module}::{fn_name}"
+        type_hash = payload.get("typeHash", "")
+        seen = _obs_hashes.get(fn_key)
+        if seen is None:
+            _obs_hashes[fn_key] = {type_hash}
+            _obs_counts[fn_key] = 1
+        elif type_hash in seen:
+            # Already have this exact type pattern — skip
+            return
+        elif len(seen) >= _MAX_OBSERVATIONS_PER_FN:
+            # Already have enough distinct patterns — skip
+            return
+        else:
+            seen.add(type_hash)
+            _obs_counts[fn_key] = _obs_counts.get(fn_key, 0) + 1
 
     # Local file mode: append directly to JSONL file
     if _local_mode and _local_file_path:

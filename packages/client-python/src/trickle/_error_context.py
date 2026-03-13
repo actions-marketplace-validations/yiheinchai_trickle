@@ -294,6 +294,74 @@ def _print_shape_report(
     print(file=sys.stderr)
 
 
+def _capture_crash_locals(exc: BaseException) -> Tuple[List[Dict[str, Any]], str, int]:
+    """Capture local variables at the innermost user-code frame of the traceback.
+
+    Returns (local_vars_list, file_path, line_no) where local_vars_list is a
+    list of {name, type_str, value} dicts suitable for JSON serialisation.
+    """
+    tb = exc.__traceback__
+    if tb is None:
+        return [], "", 0
+
+    # Walk the full traceback and collect all frames, keeping the last
+    # (deepest/most-recent) one that lives in user code (not stdlib/site-packages).
+    user_frame = None
+    user_lineno = 0
+    user_filename = ""
+
+    tb_iter = tb
+    while tb_iter:
+        f = tb_iter.tb_frame
+        fn = f.f_code.co_filename
+        # Skip Python internals, stdlib, and installed packages
+        skip = (
+            fn.startswith("<")
+            or "site-packages" in fn
+            or "/lib/python" in fn
+            or "\\lib\\python" in fn
+            or "\\Lib\\" in fn
+        )
+        if not skip:
+            user_frame = f
+            user_lineno = tb_iter.tb_lineno
+            user_filename = fn
+        tb_iter = tb_iter.tb_next
+
+    if user_frame is None:
+        return [], "", 0
+
+    try:
+        from trickle.type_inference import infer_type  # local import to avoid circularity
+    except Exception:
+        return [], user_filename, user_lineno
+
+    local_vars: List[Dict[str, Any]] = []
+    for name, val in list(user_frame.f_locals.items())[:20]:
+        if name.startswith("_"):
+            continue
+        try:
+            type_node = infer_type(val, max_depth=2)
+            type_str = _format_type(type_node)
+
+            # Short value for scalars only
+            value_str: Optional[str] = None
+            if isinstance(val, bool):
+                value_str = str(val)
+            elif isinstance(val, int):
+                value_str = str(val)
+            elif isinstance(val, float):
+                value_str = f"{val:.4g}"
+            elif isinstance(val, str) and len(val) <= 40:
+                value_str = f'"{val}"'
+
+            local_vars.append({"name": name, "type_str": type_str, "value": value_str})
+        except Exception:
+            pass
+
+    return local_vars, user_filename, user_lineno
+
+
 def _write_error_jsonl(exc: BaseException) -> None:
     """Write error info to .trickle/errors.jsonl for VSCode diagnostics."""
     local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
@@ -316,6 +384,9 @@ def _write_error_jsonl(exc: BaseException) -> None:
         type_str = _format_type(r.get("type", {}))
         line = r.get("line", 0)
         shape_context.append(f"L{line} {name}: {type_str}")
+
+    # Capture local variables at the user-code crash frame
+    local_vars, local_file, local_line = _capture_crash_locals(exc)
 
     crash_file, crash_line, crash_func = crash_frames[0]
 
@@ -352,6 +423,9 @@ def _write_error_jsonl(exc: BaseException) -> None:
         "line": crash_line_corrected,
         "function": crash_func,
         "shape_context": shape_context,
+        "local_vars": local_vars,
+        "local_vars_file": local_file,
+        "local_vars_line": local_line,
         "frames": [
             {"file": f, "line": l, "function": fn}
             for f, l, fn in mapped_frames

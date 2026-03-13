@@ -268,6 +268,35 @@ if _entry_file or _ipython_mode:
         print(f"[trickle.auto] Entry file profiler installed for: {_entry_file}")
 
 
+# ── Exception hook — capture local variable state on unhandled exceptions ──
+#
+# When the user's script crashes with an unhandled exception, we intercept it
+# via sys.excepthook to capture local variable state at the crash frame and
+# write it to .trickle/errors.jsonl. The VSCode extension then shows the
+# variable values as inlay hints on the crashing line.
+
+_old_excepthook = sys.excepthook
+
+
+def _trickle_excepthook(exc_type, exc_value, exc_tb) -> None:
+    # Always show the original traceback first
+    try:
+        _old_excepthook(exc_type, exc_value, exc_tb)
+    except Exception:
+        import traceback
+        traceback.print_exception(exc_type, exc_value, exc_tb)
+
+    # Then capture context for VSCode
+    try:
+        from trickle._error_context import print_error_context
+        print_error_context(exc_value)
+    except Exception:
+        pass
+
+
+sys.excepthook = _trickle_excepthook
+
+
 # Final generation on exit
 def _exit_handler() -> None:
     # Remove profile hook first (no more observations needed)

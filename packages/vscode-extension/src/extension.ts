@@ -57,6 +57,13 @@ type NotebookCellIndex = Map<string, Map<number, VariableObservation[]>>;
 /** Index: filePath -> Map<varName, DimLabelRecord> (most recent per var per file+func) */
 type DimLabelIndex = Map<string, Map<string, DimLabelRecord>>;
 
+/** A local variable captured at the crash frame */
+interface CrashLocalVar {
+  name: string;
+  type_str: string;
+  value: string | null;
+}
+
 /** A runtime error record from errors.jsonl */
 interface ErrorRecord {
   kind: 'error';
@@ -66,6 +73,9 @@ interface ErrorRecord {
   line: number;
   function: string;
   shape_context: string[];
+  local_vars?: CrashLocalVar[];
+  local_vars_file?: string;
+  local_vars_line?: number;
   frames: { file: string; line: number; function: string }[];
 }
 
@@ -83,6 +93,8 @@ let varIndex: VarIndex = new Map();
 let notebookCellIndex: NotebookCellIndex = new Map();
 let dimLabelIndex: DimLabelIndex = new Map();
 let latestProgress: ProgressRecord | null = null;
+/** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
+let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let errorFileWatcher: vscode.FileSystemWatcher | undefined;
 let statusBarItem: vscode.StatusBarItem;
@@ -193,7 +205,7 @@ export function activate(context: vscode.ExtensionContext) {
     let errorReloadTimer: ReturnType<typeof setTimeout> | undefined;
     const debouncedErrorReload = () => {
       if (errorReloadTimer) clearTimeout(errorReloadTimer);
-      errorReloadTimer = setTimeout(() => loadErrors(), 300);
+      errorReloadTimer = setTimeout(() => { loadErrors(); refreshInlineHints(); }, 300);
     };
 
     errorFileWatcher.onDidChange(debouncedErrorReload);
@@ -201,6 +213,8 @@ export function activate(context: vscode.ExtensionContext) {
     errorFileWatcher.onDidDelete(() => {
       if (errorReloadTimer) clearTimeout(errorReloadTimer);
       diagnosticCollection.clear();
+      crashVarIndex.clear();
+      refreshInlineHints();
     });
     context.subscriptions.push(errorFileWatcher);
   }
@@ -528,6 +542,7 @@ function loadAllVariables() {
 
 function loadErrors() {
   diagnosticCollection.clear();
+  crashVarIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -547,8 +562,28 @@ function loadErrors() {
           const err: ErrorRecord = JSON.parse(line);
           if (err.kind !== 'error') continue;
 
-          // Build diagnostic message with shape context
+          // Store crash-site local vars for inlay hints
+          if (err.local_vars && err.local_vars.length > 0) {
+            const varFile = err.local_vars_file || err.file;
+            const varLine = err.local_vars_line || err.line;
+            if (varFile && varLine) {
+              if (!crashVarIndex.has(varFile)) {
+                crashVarIndex.set(varFile, new Map());
+              }
+              crashVarIndex.get(varFile)!.set(varLine, err.local_vars);
+            }
+          }
+
+          // Build diagnostic message with local vars + shape context
           let message = `${err.error_type}: ${err.message}`;
+          if (err.local_vars && err.local_vars.length > 0) {
+            const varLines = err.local_vars.map(v =>
+              v.value !== null && v.value !== undefined
+                ? `  ${v.name}: ${v.type_str} = ${v.value}`
+                : `  ${v.name}: ${v.type_str}`,
+            );
+            message += '\n\nLocal variables at crash:\n' + varLines.join('\n');
+          }
           if (err.shape_context && err.shape_context.length > 0) {
             message += '\n\nTensor shapes near error:\n' + err.shape_context.join('\n');
           }
@@ -961,6 +996,52 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         }
 
         hints.push(hint);
+      }
+    }
+
+    // Add crash-site inlay hints showing local variable values at the exception line
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const crashLines = crashVarIndex.get(filePath);
+      if (crashLines) {
+        for (const [lineNo, vars] of crashLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+          if (vars.length === 0) continue;
+
+          // Build compact label: "✗ x: Tensor[32,784] | batch_size: 32"
+          const MAX_VARS = 5;
+          const parts = vars.slice(0, MAX_VARS).map(v =>
+            v.value !== null && v.value !== undefined
+              ? `${v.name}: ${v.type_str} = ${v.value}`
+              : `${v.name}: ${v.type_str}`,
+          );
+          const remaining = vars.length - parts.length;
+          const suffix = remaining > 0 ? ` | +${remaining} more` : '';
+          const label = ` ✗ ${parts.join(' | ')}${suffix}`;
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            // Tooltip with full list
+            const tooltipLines = vars.map(v =>
+              v.value !== null && v.value !== undefined
+                ? `**\`${v.name}\`**: \`${v.type_str}\` = \`${v.value}\``
+                : `**\`${v.name}\`**: \`${v.type_str}\``,
+            );
+            const md = new vscode.MarkdownString(
+              `### Trickle: Variables at crash\n\n${tooltipLines.join('\n\n')}`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
       }
     }
 

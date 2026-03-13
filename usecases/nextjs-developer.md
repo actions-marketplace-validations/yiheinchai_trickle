@@ -78,7 +78,10 @@ export function Navbar({ user }) { ... }            // ✓ named export
 const Card: React.FC<Props> = ({ title }) => { ... } // ✓ React.FC typed
 const Card = React.memo(({ data }) => { ... })      // ✓ React.memo wrapped
 const Card = React.forwardRef<Ref, Props>(...)      // ✓ forwardRef
+const Layout = ({ children }: Props) => (<div/>)   // ✓ concise arrow body (=> (...))
 ```
+
+The concise arrow body pattern (`=> (...)`) is very common in Next.js for presentational and layout components. Previously these were invisible to trickle — they are now fully tracked.
 
 ## Customer journey
 

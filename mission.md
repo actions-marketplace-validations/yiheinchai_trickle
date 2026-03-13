@@ -7,6 +7,14 @@ Improve on the python developer experience, any arbituary python code (even with
 
 <focus point>
 
+Next priorities for Python DX:
+
+1. **Zero-config VSCode inline hints for arbitrary Python scripts** — Test on diverse real-world Python repos (Django apps, FastAPI, data processing scripts, Karpathy's GPT-2, etc.). Verify the full loop: `import trickle.auto` → run → open file in VSCode → see inline hints. Fix any gaps (data not flushed, hints not appearing, edge cases with generators/properties/class methods/decorators).
+
+2. **`trickle python setup` CLI command** — Similar to `trickle rn setup` and `trickle next setup`: print step-by-step setup instructions for the Python experience (install, choose approach A/B/C, open VSCode, see hints).
+
+3. **Type hints in terminal output** — For scripts run via `trickle run python script.py`, print a summary of inferred types to stdout after the script finishes (similar to `printObservations()` for Lambda). This makes the experience "instant" without needing VSCode at all.
+
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

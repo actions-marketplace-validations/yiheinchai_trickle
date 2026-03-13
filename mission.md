@@ -14,7 +14,9 @@ Next priorities:
 
 1. ~~AWS Lambda support~~ ✅ DONE — `wrapLambda()`, `printObservations()`, `trickle lambda setup/layer/pull`, Lambda Layer zip, auto-detection of `/tmp/.trickle`, real-time streaming via ngrok.
 
-2. React Native observability: JS/TS code running in React Native (Expo/bare RN) should be observable. Key challenges: Metro bundler (not Vite), no browser DevTools, device/simulator gap. Consider a Metro transform plugin similar to the Vite plugin, and a trickle backend that the device POSTs to over the local network.
+2. ~~React Native observability~~ ✅ DONE — Metro transformer (`trickle-observe/metro-transformer`) instruments RN components at build time. Fixed `export default function` tracking (common RN screen pattern). Tested on real Expo and Ory RN codebases.
+
+3. Next: Arrow function components in React/React Native — `const MyScreen = () => {}` and `const MyScreen = (props) => {}` are not yet tracked for render counts. This is common in RN. Also consider: tracking prop changes that cause re-renders (already partially done for function declarations, extend to arrow functions).
 
 </focus point>
 

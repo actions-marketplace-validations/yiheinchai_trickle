@@ -42,17 +42,20 @@ loss = criterion(output, target) # → Tensor[] float32 = 2.3041
 
 > *"I'm tired of calling `df.shape` and `df.head()` after every operation."*
 
-`%load_ext trickle` in Jupyter. Every DataFrame and Series shows its dimensions, dtypes, memory, and null counts inline.
+`%load_ext trickle` in Jupyter. Every DataFrame, Series, GroupBy, and sklearn model shows its key info inline.
 
 ```python
 %load_ext trickle
 
 df = pd.read_csv("sales.csv")       # → DataFrame(10000 rows x 12 cols, 1.2 MB)
 revenue = df["revenue"]             # → Series(10000, float64, "revenue")
-filtered = df[df["region"] == "US"] # → DataFrame(3200 rows x 12 cols, 389.1 KB)
+grouped = df.groupby("region")      # → DataFrameGroupBy(by=region, 5 groups, size=1800-2200)
+
+model = RandomForestClassifier(n_estimators=100, max_depth=5)
+model.fit(X_train, y_train)         # → RandomForestClassifier(n_estimators=100, max_depth=5) [5 features, 2 classes]
 ```
 
-**What gets traced:** DataFrames (rows, cols, dtypes, memory, nulls), Series (length, dtype, name, stats), NumPy arrays (shape, dtype, memory).
+**What gets traced:** DataFrames, Series, GroupBy, Index/MultiIndex, sklearn models (30+ estimators with fitted status), pipelines, NumPy arrays, tensors.
 
 **[Full Data Scientist Guide →](usecases/data-scientist.md)**
 

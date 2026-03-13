@@ -445,8 +445,10 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                 params_list.append(f"{k}: {py_type} = ...")
             lines.append(f"    {def_keyword} {method_snake}({', '.join(params_list)}){ret_str}: ...")
 
-        elif variants and len(variants) >= 2:
-            # Generate overloaded method signatures
+        elif (variants and len(variants) >= 2
+              and len({_type_to_python(v.get("returnType", return_type), [], base_name, None) for v in variants}) >= 2
+              and len({_type_node_key(v.get("argsType", {})) for v in variants}) >= 2):
+            # Generate overloaded method signatures (only when both args and return types differ)
             for variant in variants:
                 v_args = variant["argsType"]
                 v_ret = variant["returnType"]
@@ -619,10 +621,11 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     else:
         pos_elements = []
 
-    # Input type — only render positional args (kwargs go in signature)
+    # Input type — only emit TypedDict when used as single complex object param
     _SKIP_TD_CLS = {"ndarray", "Tensor", "DataFrame", "Series",
                     "DatasetDict", "Dataset"}
     pos_args_type = {"kind": "tuple", "elements": pos_elements} if pos_elements else args_type
+    _input_td_name: Optional[str] = None  # set if we emit a TypedDict for input
     if pos_args_type.get("kind") == "tuple":
         p_elements = pos_args_type.get("elements", [])
         el_cn = p_elements[0].get("class_name", "") if len(p_elements) == 1 else ""
@@ -630,35 +633,28 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
                 and el_cn not in _SKIP_TD_CLS
                 and (not el_cn or el_cn == "dict")):
             sections.append(_render_typed_dict(f"{base_name}Input", p_elements[0], extracted))
-        else:
-            py_type = _type_to_python(pos_args_type, extracted, base_name, None)
-            sections.append(f"{base_name}Input = {py_type}")
+            _input_td_name = f"{base_name}Input"
+            sections.append("")
+            sections.append("")
     elif pos_args_type.get("kind") == "object":
         a_cn = pos_args_type.get("class_name", "")
         if a_cn not in _SKIP_TD_CLS and (not a_cn or a_cn == "dict"):
             sections.append(_render_typed_dict(f"{base_name}Input", pos_args_type, extracted))
-        else:
-            py_type = _type_to_python(pos_args_type, extracted, base_name, None)
-            sections.append(f"{base_name}Input = {py_type}")
-    else:
-        py_type = _type_to_python(pos_args_type, extracted, base_name, None)
-        sections.append(f"{base_name}Input = {py_type}")
-    sections.append("")
-    sections.append("")
+            _input_td_name = f"{base_name}Input"
+            sections.append("")
+            sections.append("")
 
-    # Output type
+    # Output type — inline simple types, only emit TypedDict for complex objects
     _DISPLAY_CLS = {"ndarray", "Tensor", "DataFrame", "Series",
                     "DatasetDict", "Dataset"}
     rt_cn = return_type.get("class_name", "")
-    # Render as TypedDict only for plain dicts (class_name "" or "dict")
-    # Skip for display types and user-defined classes (dataclass, etc.)
     if (return_type.get("kind") == "object" and return_type.get("properties")
             and rt_cn not in _DISPLAY_CLS
             and (not rt_cn or rt_cn == "dict")):
         sections.append(_render_typed_dict(f"{base_name}Output", return_type, extracted))
+        ret_type_str = f"{base_name}Output"
     else:
-        py_type = _type_to_python(return_type, extracted, base_name, None)
-        sections.append(f"{base_name}Output = {py_type}")
+        ret_type_str = _type_to_python(return_type, extracted, base_name, None)
 
     # Emit extracted TypedDicts
     emitted: Set[str] = set()
@@ -678,13 +674,14 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     func_name = _to_snake_case(name)
     is_async = fn.get("isAsync", False)
     def_keyword = "async def" if is_async else "def"
-    ret_type = f"{base_name}Output"
+    ret_type = ret_type_str
 
     result: List[str] = []
     if extracted_lines:
         result.extend(extracted_lines)
-    result.extend(sections)
-    result.append("")
+    if sections:
+        result.extend(sections)
+        result.append("")
 
     # Build positional params
     def _build_pos_params(elems: List[Dict[str, Any]], names: List[str]) -> List[str]:
@@ -719,18 +716,32 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     variants = fn.get("variants")
     has_kwargs = bool(all_kwargs)
 
+    # Check if overloads are warranted: only when BOTH input args AND return types
+    # differ across variants. If only return types differ (same inputs), overloads
+    # don't help — the merged Union return is sufficient.
+    _use_overloads = False
     if variants and len(variants) >= 2 and not has_kwargs:
-        # Only use overloads when differences are in positional arg types,
-        # not just kwargs presence
+        v_ret_types: Set[str] = set()
+        v_arg_sigs: Set[str] = set()
+        for variant in variants:
+            v_ret = variant.get("returnType", return_type)
+            v_ret_types.add(_type_to_python(v_ret, [], base_name, None))
+            v_args = variant.get("argsType", {})
+            v_arg_sigs.add(_type_node_key(v_args))
+        # Need both different return types AND different arg patterns
+        _use_overloads = len(v_ret_types) >= 2 and len(v_arg_sigs) >= 2
+
+    if _use_overloads:
         seen_sigs: Set[str] = set()
         overload_lines: List[str] = []
         for variant in variants:
             v_args = variant["argsType"]
+            v_ret = variant.get("returnType", return_type)
             v_names = variant.get("paramNames", param_names)
             v_async = variant.get("isAsync", False)
             v_def = "async def" if v_async else "def"
             v_ext: List[Tuple[str, Dict[str, Any]]] = []
-            v_ret_str = f"{base_name}Output"
+            v_ret_str = _type_to_python(v_ret, v_ext, base_name, None)
             v_params: List[str] = []
             if v_args.get("kind") == "tuple":
                 for idx, el in enumerate(v_args.get("elements", [])):
@@ -755,8 +766,8 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
             pos_names = {param_names[i] if i < len(param_names) else f"arg{i}" for i in range(len(pos_elements))}
             params.extend(_build_kwarg_params(all_kwargs, pos_names))
 
-        if not params and pos_args_type.get("kind") == "object" and pos_args_type.get("properties"):
-            sig = f"{def_keyword} {func_name}(input: {base_name}Input) -> {ret_type}: ..."
+        if not params and _input_td_name:
+            sig = f"{def_keyword} {func_name}(input: {_input_td_name}) -> {ret_type}: ..."
         else:
             sig = f"{def_keyword} {func_name}({', '.join(params)}) -> {ret_type}: ..."
 

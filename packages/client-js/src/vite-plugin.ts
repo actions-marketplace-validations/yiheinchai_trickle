@@ -497,7 +497,8 @@ function transformEsmSource(
   const funcRegex = /^[ \t]*(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
   const funcInsertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
   // Body insertions: insert at start of function body (for React render tracking)
-  const bodyInsertions: Array<{ position: number; name: string; lineNo: number }> = [];
+  // propsExpr: JS expression to evaluate as the props object at render time
+  const bodyInsertions: Array<{ position: number; name: string; lineNo: number; propsExpr: string }> = [];
   let match;
 
   while ((match = funcRegex.exec(source)) !== null) {
@@ -525,12 +526,13 @@ function transformEsmSource(
     funcInsertions.push({ position: closeBrace + 1, name, paramNames });
 
     // React component render tracking: uppercase function name in .tsx/.jsx
+    // function declarations have `arguments`, so arguments[0] is the raw props object
     if (isReactFile && /^[A-Z]/.test(name)) {
       let lineNo = 1;
       for (let i = 0; i < match.index; i++) {
         if (source[i] === '\n') lineNo++;
       }
-      bodyInsertions.push({ position: openBrace + 1, name, lineNo });
+      bodyInsertions.push({ position: openBrace + 1, name, lineNo, propsExpr: 'arguments[0]' });
     }
   }
 
@@ -567,7 +569,39 @@ function transformEsmSource(
       for (let i = 0; i < match.index; i++) {
         if (source[i] === '\n') lineNo++;
       }
-      bodyInsertions.push({ position: openBrace + 1, name, lineNo });
+
+      // Determine props expression for arrow functions (no `arguments` object)
+      let propsExpr = 'undefined';
+      if (arrowParamMatch) {
+        const rawParams = (arrowParamMatch[1] || '').trim();
+        if (!rawParams) {
+          // No params: `() => {}`
+          propsExpr = 'undefined';
+        } else if (rawParams.startsWith('{')) {
+          // Destructured: ({ name, age }) => {} — reconstruct object from field names
+          // Strip TS type annotation (e.g. `{a, b}: Props` → `{a, b}`)
+          // Find the matching `}` to isolate just the destructuring pattern
+          let depth2 = 0;
+          let endBrace = -1;
+          for (let i = 0; i < rawParams.length; i++) {
+            if (rawParams[i] === '{') depth2++;
+            else if (rawParams[i] === '}') { depth2--; if (depth2 === 0) { endBrace = i; break; } }
+          }
+          const destructPattern = endBrace !== -1 ? rawParams.slice(0, endBrace + 1) : rawParams;
+          const fields = extractDestructuredNames(destructPattern);
+          if (fields.length > 0) {
+            propsExpr = `{ ${fields.join(', ')} }`;
+          }
+        } else if (arrowParamMatch[2]) {
+          // Single simple param (no parens): `props => {}`
+          propsExpr = arrowParamMatch[2];
+        } else if (paramNames.length === 1) {
+          // Single simple param: `(props) => {}`
+          propsExpr = paramNames[0];
+        }
+      }
+
+      bodyInsertions.push({ position: openBrace + 1, name, lineNo, propsExpr });
     }
   }
 
@@ -691,7 +725,7 @@ function transformEsmSource(
   if (bodyInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_react_renders) { globalThis.__trickle_react_renders = new Map(); }`,
-      `function __trickle_rc(name, line) {`,
+      `function __trickle_rc(name, line, props) {`,
       `  try {`,
       `    const key = ${JSON.stringify(filename)} + ':' + line;`,
       `    const count = (globalThis.__trickle_react_renders.get(key) || 0) + 1;`,
@@ -699,7 +733,26 @@ function transformEsmSource(
       `    const dir = process.env.TRICKLE_LOCAL_DIR || __trickle_join(process.cwd(), '.trickle');`,
       `    try { __trickle_mkdirSync(dir, { recursive: true }); } catch(e) {}`,
       `    const f = __trickle_join(dir, 'variables.jsonl');`,
-      `    __trickle_appendFileSync(f, JSON.stringify({ kind: 'react_render', file: ${JSON.stringify(filename)}, line: line, component: name, renderCount: count, timestamp: Date.now() / 1000 }) + '\\n');`,
+      `    const rec = { kind: 'react_render', file: ${JSON.stringify(filename)}, line: line, component: name, renderCount: count, timestamp: Date.now() / 1000 };`,
+      `    if (props !== undefined && props !== null && typeof props === 'object') {`,
+      `      try {`,
+      `        const propKeys = Object.keys(props).filter(k => k !== 'children');`,
+      `        const propSample = {};`,
+      `        for (const k of propKeys.slice(0, 10)) {`,
+      `          const v = props[k];`,
+      `          const t = typeof v;`,
+      `          if (t === 'string') propSample[k] = v.length > 40 ? v.slice(0, 40) + '...' : v;`,
+      `          else if (t === 'number' || t === 'boolean') propSample[k] = v;`,
+      `          else if (v === null || v === undefined) propSample[k] = v;`,
+      `          else if (Array.isArray(v)) propSample[k] = '[' + t + '[' + v.length + ']]';`,
+      `          else if (t === 'function') propSample[k] = '[fn]';`,
+      `          else propSample[k] = '[object]';`,
+      `        }`,
+      `        rec.props = propSample;`,
+      `        rec.propKeys = propKeys;`,
+      `      } catch(e2) {}`,
+      `    }`,
+      `    __trickle_appendFileSync(f, JSON.stringify(rec) + '\\n');`,
       `  } catch(e) {}`,
       `}`,
     );
@@ -735,10 +788,10 @@ function transformEsmSource(
     });
   }
 
-  for (const { position, name, lineNo } of bodyInsertions) {
+  for (const { position, name, lineNo, propsExpr } of bodyInsertions) {
     allInsertions.push({
       position,
-      code: `\ntry{__trickle_rc(${JSON.stringify(name)},${lineNo})}catch(__e){}\n`,
+      code: `\ntry{__trickle_rc(${JSON.stringify(name)},${lineNo},${propsExpr})}catch(__e){}\n`,
     });
   }
 

@@ -244,6 +244,8 @@ interface ReactRenderRecord {
   line: number;
   component: string;
   renderCount: number;
+  props?: Record<string, unknown>;
+  propKeys?: string[];
   timestamp: number;
 }
 
@@ -1892,7 +1894,21 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         for (const [lineNo, rr] of rrLines) {
           if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
 
-          const label = ` 🔄 ×${rr.renderCount} renders`;
+          // Build compact prop summary for label
+          let propSummary = '';
+          if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
+            const MAX_PROPS = 3;
+            const shown = rr.propKeys.slice(0, MAX_PROPS).map(k => {
+              const v = rr.props![k];
+              if (typeof v === 'string') return `${k}="${v.length > 12 ? v.slice(0, 12) + '…' : v}"`;
+              if (typeof v === 'number' || typeof v === 'boolean') return `${k}=${v}`;
+              if (v === null || v === undefined) return `${k}=${v}`;
+              return `${k}=…`;
+            });
+            propSummary = ` | ${shown.join(' ')}`;
+            if (rr.propKeys.length > MAX_PROPS) propSummary += ` +${rr.propKeys.length - MAX_PROPS}`;
+          }
+          const label = ` 🔄 ×${rr.renderCount}${propSummary}`;
 
           try {
             const line = document.lineAt(lineNo - 1);
@@ -1900,11 +1916,22 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
             hint.paddingLeft = true;
 
+            const tooltipLines = [
+              `**Component:** \`${rr.component}\``,
+              `**Render count:** \`${rr.renderCount}\``,
+            ];
+            if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
+              const propRows = rr.propKeys.map(k => {
+                const v = rr.props![k];
+                const display = typeof v === 'string' ? `"${v}"` : String(v);
+                return `- **\`${k}\`**: \`${display}\``;
+              });
+              tooltipLines.push(`**Props (last render):**\n${propRows.join('\n')}`);
+            }
+            tooltipLines.push('*Tracked by trickle (cumulative since dev server start)*');
+
             const md = new vscode.MarkdownString(
-              `### 🔄 React Component Renders\n\n` +
-              `**Component:** \`${rr.component}\`\n\n` +
-              `**Render count:** \`${rr.renderCount}\`\n\n` +
-              `*Tracked by trickle (cumulative since dev server start)*`,
+              `### 🔄 React Component Renders\n\n` + tooltipLines.join('\n\n'),
             );
             md.isTrusted = true;
             hint.tooltip = md;

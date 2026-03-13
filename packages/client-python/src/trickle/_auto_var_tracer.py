@@ -373,8 +373,64 @@ def _flush_pending(frame: Any) -> None:
             pass
 
 
+# CO_COROUTINE flag: set on async def functions. Use inspect to get the correct
+# value for this Python version (0x80 in Python 3.5-3.11, may differ elsewhere).
+try:
+    import inspect as _inspect
+    _CO_COROUTINE = _inspect.CO_COROUTINE
+except AttributeError:
+    _CO_COROUTINE = 0x100  # fallback
+
+
+def _flush_pending_available(frame: Any) -> None:
+    """Flush pending variables that are already in locals; keep the rest pending.
+
+    Used on coroutine suspension (return event from an async frame): the
+    assigned variable may not be in locals yet because the await hasn't
+    completed. We flush only what's available and leave the rest for the
+    exception event that fires when the coroutine resumes.
+    """
+    fid = id(frame)
+    pending = _pending.get(fid)
+    if pending is None:
+        return
+
+    line_no, var_names, func_name = pending
+    filename = frame.f_code.co_filename
+    locals_dict = frame.f_locals
+    module_name = os.path.basename(filename).rsplit(".", 1)[0]
+
+    unflushed: List[str] = []
+    for name in var_names:
+        try:
+            if "." in name:
+                parts = name.split(".", 1)
+                obj = locals_dict.get(parts[0])
+                if obj is not None:
+                    val = getattr(obj, parts[1], None)
+                    if val is not None:
+                        _trace_var(val, name, line_no, filename, module_name, func_name)
+                    else:
+                        unflushed.append(name)
+                else:
+                    unflushed.append(name)
+            else:
+                val = locals_dict.get(name)
+                if val is not None:
+                    _trace_var(val, name, line_no, filename, module_name, func_name)
+                else:
+                    unflushed.append(name)
+        except Exception:
+            pass
+
+    if unflushed:
+        _pending[fid] = (line_no, unflushed, func_name)
+    else:
+        del _pending[fid]
+
+
 def _local_trace(frame: Any, event: str, arg: Any) -> Any:
-    """Per-frame trace function — fires on line/return events for entry file frames."""
+    """Per-frame trace function — fires on line/return/exception events for traced frames."""
     if event == "line":
         # First, flush any pending assignment from the previous line
         _flush_pending(frame)
@@ -393,13 +449,24 @@ def _local_trace(frame: Any, event: str, arg: Any) -> Any:
         return _local_trace
 
     if event == "return":
-        # Flush pending before the frame goes away
-        _flush_pending(frame)
+        # For coroutine frames (async def), a "return" event fires on suspension
+        # at each `await` point — NOT just on actual function return. At suspension
+        # the awaited variable is not yet assigned, so we only flush vars already
+        # in locals and keep the rest pending for the exception event that follows.
+        is_coro = bool(frame.f_code.co_flags & _CO_COROUTINE)
+        if is_coro:
+            _flush_pending_available(frame)
+        else:
+            _flush_pending(frame)
         return None
 
     if event == "exception":
-        # Clean up pending on exception
-        _pending.pop(id(frame), None)
+        # For coroutines, an "exception" event fires when the frame resumes after
+        # an `await` completes (Python uses StopIteration internally). However,
+        # the awaited variable is assigned AFTER this event and BEFORE the next
+        # `line` event. So we use _flush_pending_available here to only flush vars
+        # already in locals, keeping the rest pending for the upcoming `line` event.
+        _flush_pending_available(frame)
         return _local_trace
 
     return _local_trace

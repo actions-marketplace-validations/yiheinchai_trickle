@@ -284,3 +284,45 @@ Environment variables to control behavior:
 5. **Output** — writes to `.trickle/observations.jsonl` (function types) and `.trickle/variables.jsonl` (variable assignments)
 
 Only your code is instrumented — stdlib, site-packages, and popular libraries (torch, numpy, pandas, etc.) are always skipped.
+
+---
+
+## Use Case: Async Python — Trace `await` Results Inline
+
+Trickle now traces variables assigned via `await` — including `asyncio.gather()` results. Works with any `async def` function automatically.
+
+```python
+import asyncio
+import trickle.auto
+
+async def fetch_user(user_id: int) -> dict:
+    await asyncio.sleep(0)  # simulate I/O
+    data = {"id": user_id, "name": "Alice", "role": "admin"}
+    return data
+
+async def get_permissions(role: str) -> list:
+    await asyncio.sleep(0)
+    perms = ["read", "write", "delete"] if role == "admin" else ["read"]
+    return perms
+
+async def main():
+    user = await fetch_user(42)
+    # → user: {id: integer; name: string; role: string}
+
+    perms = await get_permissions(user["role"])
+    # → perms: string[]
+
+    # asyncio.gather() — all results traced
+    results = await asyncio.gather(
+        fetch_user(1),
+        fetch_user(2),
+    )
+    # → results: {id, name, role}[][]
+
+    combined = results[0]["name"] + " & " + results[1]["name"]
+    # → combined: "Alice & Bob"
+
+asyncio.run(main())
+```
+
+Open the file in VSCode — every `await` assignment gets an inline type hint, just like synchronous code.

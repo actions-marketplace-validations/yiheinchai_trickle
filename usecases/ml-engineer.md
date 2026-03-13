@@ -400,3 +400,33 @@ GPT {
 ```
 
 This works for any model that stores its config as `self.config` — which is the standard pattern in HuggingFace, nanoGPT, and most modern ML frameworks.
+
+---
+
+## Use Case 9: HuggingFace Integration — Config Fields Inline
+
+When you load or instantiate a HuggingFace model or config, trickle automatically surfaces the most important architecture parameters inline — no need to print or inspect the config object.
+
+```python
+import trickle.auto
+from transformers import GPT2Config, BertConfig, AutoModelForCausalLM
+
+# Config objects show priority fields
+gpt2_config = GPT2Config()
+# → gpt2_config: GPT2Config{vocab_size=50257, n_embd=768, n_layer=12, n_head=12, n_positions=1024, model_type=gpt2}
+
+bert_config = BertConfig()
+# → bert_config: BertConfig{vocab_size=30522, hidden_size=768, num_hidden_layers=12, num_attention_heads=12, ...}
+
+# Custom small config
+small_config = GPT2Config(vocab_size=1000, n_embd=128, n_layer=4, n_head=4)
+# → small_config: GPT2Config{vocab_size=1000, n_embd=128, n_layer=4, n_head=4, ...}
+
+# Models with config show constructor-call style hint
+model = AutoModelForCausalLM.from_config(small_config)
+# → model: GPT2LMHeadModel(vocab_size=1000, n_embd=128, n_layer=4, n_head=4, +1)
+```
+
+**Priority fields shown first:** `vocab_size`, `hidden_size`/`n_embd`/`d_model`, `num_hidden_layers`/`n_layer`, `num_attention_heads`/`n_head`, `intermediate_size`, `max_position_embeddings`, `model_type`.
+
+Works for all `PretrainedConfig` subclasses: GPT-2, BERT, T5, LLaMA, Mistral, Falcon, etc.

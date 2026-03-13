@@ -242,6 +242,11 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if _estimator_type is not None and isinstance(value, _estimator_type):
         return _infer_sklearn_estimator(value)
 
+    # --- HuggingFace PretrainedConfig ---
+    # Detected by presence of to_dict() and model_type (not a nn.Module itself)
+    if hasattr(value, "to_dict") and hasattr(value, "model_type") and not callable(value):
+        return _infer_hf_pretrained_config(value)
+
     # --- HuggingFace datasets ---
     _hf_dataset_type = _get_hf_dataset_type()
     if _hf_dataset_type is not None and isinstance(value, _hf_dataset_type):
@@ -446,31 +451,12 @@ def _infer_nn_module(value: Any) -> Dict[str, Any]:
             pass
 
     # If the module has a `config` attribute, surface its primitive fields first.
-    # This is the ML convention (GPT, BERT, T5, etc.) — config holds n_layer, n_head, etc.
+    # This is the ML convention (GPT, BERT, T5, HuggingFace, etc.)
     try:
         config = getattr(value, "config", None)
         if config is not None and not isinstance(config, (int, float, bool, str, type)):
-            config_fields: Dict[str, Any] = {}
-            import dataclasses as _dc
-            if _dc.is_dataclass(config) and not isinstance(config, type):
-                for f in list(_dc.fields(config))[:10]:
-                    val = getattr(config, f.name, None)
-                    if isinstance(val, (int, float, bool)) and not callable(val):
-                        config_fields[f.name] = val
-            elif hasattr(type(config), "model_fields"):
-                for fname in list(type(config).model_fields.keys())[:10]:
-                    val = getattr(config, fname, None)
-                    if isinstance(val, (int, float, bool)) and not callable(val):
-                        config_fields[fname] = val
-            elif hasattr(type(config), "__fields__"):
-                for fname in list(type(config).__fields__.keys())[:10]:
-                    val = getattr(config, fname, None)
-                    if isinstance(val, (int, float, bool)) and not callable(val):
-                        config_fields[fname] = val
-            elif hasattr(config, "__dict__"):
-                for fname, val in list(vars(config).items())[:10]:
-                    if not fname.startswith("_") and isinstance(val, (int, float, bool)) and not callable(val):
-                        config_fields[fname] = val
+            from trickle._auto_var_tracer import _extract_config_fields
+            config_fields = _extract_config_fields(config)
             # Insert config fields at the top of props (they're the most informative)
             new_props: Dict[str, Any] = {}
             for fname, val in list(config_fields.items())[:8]:
@@ -1211,6 +1197,24 @@ def _get_hf_dataset_dict_type() -> Any:
     except ImportError:
         pass
     return _hf_dataset_dict_type
+
+
+def _infer_hf_pretrained_config(value: Any) -> Dict[str, Any]:
+    """Infer type for a HuggingFace PretrainedConfig.
+
+    Surfaces priority fields (vocab_size, hidden_size, n_layer, etc.) first
+    so inline hints show the most architecturally significant parameters.
+    """
+    class_name = type(value).__name__
+    props: Dict[str, Any] = {}
+    try:
+        from trickle._auto_var_tracer import _extract_config_fields
+        fields = _extract_config_fields(value)
+        for fname, val in list(fields.items())[:10]:
+            props[fname] = {"kind": "primitive", "name": str(val)}
+    except Exception:
+        pass
+    return {"kind": "object", "properties": props, "class_name": class_name}
 
 
 def _infer_hf_dataset(value: Any) -> Dict[str, Any]:

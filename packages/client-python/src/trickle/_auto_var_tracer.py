@@ -220,35 +220,82 @@ def _simple_scalar(v: Any) -> Any:
     return None
 
 
+# Priority fields to show first for HuggingFace-style configs.
+# These capture the most architecturally significant parameters.
+_HF_PRIORITY_FIELDS = (
+    "vocab_size", "hidden_size", "n_embd", "d_model",
+    "num_hidden_layers", "n_layer", "num_layers",
+    "num_attention_heads", "n_head", "num_heads",
+    "intermediate_size", "n_positions", "max_position_embeddings",
+    "model_type",
+)
+
+
+def _extract_config_fields(config: Any) -> dict:
+    """Extract primitive (int/float/bool/str) fields from a config object.
+
+    Handles dataclasses, Pydantic v1/v2, HuggingFace PretrainedConfig
+    (via to_dict()), and plain objects with __dict__.
+
+    Returns an ordered dict with priority fields first.
+    """
+    raw: dict = {}
+
+    if dataclasses.is_dataclass(config) and not isinstance(config, type):
+        for f in list(dataclasses.fields(config))[:15]:
+            val = getattr(config, f.name, None)
+            if isinstance(val, (int, float, bool, str)) and not callable(val):
+                raw[f.name] = val
+    elif hasattr(type(config), "model_fields"):
+        # Pydantic v2
+        for fname in list(type(config).model_fields.keys())[:15]:
+            val = getattr(config, fname, None)
+            if isinstance(val, (int, float, bool, str)) and not callable(val):
+                raw[fname] = val
+    elif hasattr(type(config), "__fields__"):
+        # Pydantic v1
+        for fname in list(type(config).__fields__.keys())[:15]:
+            val = getattr(config, fname, None)
+            if isinstance(val, (int, float, bool, str)) and not callable(val):
+                raw[fname] = val
+    elif hasattr(config, "to_dict") and hasattr(config, "model_type"):
+        # HuggingFace PretrainedConfig — use to_dict() for canonical fields
+        try:
+            d = config.to_dict()
+            for k, v in d.items():
+                if not k.startswith("_") and isinstance(v, (int, float, bool, str)) and not callable(v):
+                    raw[k] = v
+        except Exception:
+            pass
+    elif hasattr(config, "__dict__"):
+        for fname, val in list(vars(config).items())[:15]:
+            if not fname.startswith("_") and isinstance(val, (int, float, bool, str)) and not callable(val):
+                raw[fname] = val
+
+    if not raw:
+        return {}
+
+    # Re-order: priority fields first, then the rest
+    ordered: dict = {}
+    for pf in _HF_PRIORITY_FIELDS:
+        if pf in raw:
+            ordered[pf] = raw[pf]
+    for k, v in raw.items():
+        if k not in ordered:
+            ordered[k] = v
+    return ordered
+
+
 def _config_call_sample(value: Any) -> Optional[str]:
     """If value is a class instance with a `config` attribute that has primitive fields,
-    return a constructor-call style string like 'GPT(n_layer=12, n_head=12, n_embd=768)'.
+    return a constructor-call style string like 'GPT2(vocab_size=50257, n_embd=768, n_layer=12)'.
     Returns None if not applicable."""
     try:
         config = getattr(value, "config", None)
         if config is None or isinstance(config, (int, float, bool, str, type)):
             return None
         cls_name = type(value).__name__
-        fields: dict = {}
-        if dataclasses.is_dataclass(config) and not isinstance(config, type):
-            for f in list(dataclasses.fields(config))[:10]:
-                val = getattr(config, f.name, None)
-                if isinstance(val, (int, float, bool)) and not callable(val):
-                    fields[f.name] = val
-        elif hasattr(type(config), "model_fields"):
-            for fname in list(type(config).model_fields.keys())[:10]:
-                val = getattr(config, fname, None)
-                if isinstance(val, (int, float, bool)) and not callable(val):
-                    fields[fname] = val
-        elif hasattr(type(config), "__fields__"):
-            for fname in list(type(config).__fields__.keys())[:10]:
-                val = getattr(config, fname, None)
-                if isinstance(val, (int, float, bool)) and not callable(val):
-                    fields[fname] = val
-        elif hasattr(config, "__dict__"):
-            for fname, val in list(vars(config).items())[:10]:
-                if not fname.startswith("_") and isinstance(val, (int, float, bool)) and not callable(val):
-                    fields[fname] = val
+        fields = _extract_config_fields(config)
         if not fields:
             return None
         # Show up to 5 fields in constructor-call notation
@@ -314,9 +361,16 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
                 sample = {f: _simple_scalar(getattr(value, f, None)) for f in fields}
             except Exception:
                 sample = str(value)[:100]
+        elif hasattr(value, "to_dict") and hasattr(value, "model_type"):
+            # HuggingFace PretrainedConfig — show priority fields as a dict sample
+            try:
+                fields = _extract_config_fields(value)
+                sample = {k: v for k, v in list(fields.items())[:8]}
+            except Exception:
+                sample = str(value)[:100]
         else:
             # For class instances with a `config` attribute, generate a constructor-call
-            # style sample: "GPT(n_layer=12, n_head=12, n_embd=768)" — this is the ML
+            # style sample: "GPT(vocab_size=50257, n_embd=768, n_layer=12)" — this is the ML
             # convention and gives much more useful context than str(value)[:100].
             config_sample = _config_call_sample(value)
             if config_sample is not None:

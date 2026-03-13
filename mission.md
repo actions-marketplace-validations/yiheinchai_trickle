@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, and dict/object inline value display are all implemented. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, training loop progress status bar, dict/object inline value display, and exception/error observability with local variable capture are all implemented. Next priorities:
 
-1. Exception/error observability: when an exception is raised during a traced function, capture the exception type, message, and local variable state at the point of failure — show inline annotations on the failing line so the developer can see what values led to the error without adding print statements.
+1. Automatic training metric detection: when `trickle.auto` is active and the tracer sees variables named `loss`, `epoch`, `step` being written in a loop, automatically emit progress records without requiring the user to add `trickle.progress()` explicitly.
 
-2. Automatic training metric detection: when `trickle.auto` is active and the tracer sees variables named `loss`, `epoch`, `step` being written in a loop, automatically emit progress records without requiring the user to add `trickle.progress()` explicitly.
+2. Gradient flow visualization: for PyTorch training, show per-parameter gradient norms as inlay hints on the model's forward() method lines, so the user can see which layers have vanishing/exploding gradients without adding hooks manually.
 
 3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-4. Gradient flow visualization: for PyTorch training, show per-parameter gradient norms as inlay hints on the model's forward() method lines, so the user can see which layers have vanishing/exploding gradients without adding hooks manually.
+4. Multi-file tracing: when `trickle.auto` is active, also trace variables in imported user modules (not just the entry file), so that helper functions and model definitions in separate files also show inline hints.
 
 </focus point>
 

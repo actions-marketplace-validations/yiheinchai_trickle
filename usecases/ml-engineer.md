@@ -639,3 +639,60 @@ all_metrics = {"loss": 0.42, "acc": 0.91, "lr": 1e-4, "val_loss": 0.55, "val_acc
 - Metrics dicts from training loops — see exact values without opening a terminal
 - Evaluation result dicts — compare val_loss/val_acc at a glance
 - Config summaries — verify hyperparameter values are set correctly
+
+---
+
+## Use Case 15: Exception Observability — See Variable State at the Crash Line
+
+When your training script crashes with a shape mismatch or other error, trickle now shows the local variable values directly on the failing line as inlay hints — no print statements, no debugger needed.
+
+```python
+import trickle.auto
+
+def train_step(model, x, y, optimizer):
+    batch_size = x.shape[0]   # → 32
+    hidden_dim = 512
+    lr = 3e-4
+    
+    logits = model(x)          # ← if x has wrong shape, this line gets annotated
+    loss = criterion(logits, y)
+    loss.backward()
+    optimizer.step()
+```
+
+**When a crash occurs:**
+```
+RuntimeError: mat1 and mat2 shapes cannot be multiplied (32x512 and 784x10)
+```
+
+**VSCode shows on the crashing line:**
+```
+logits = model(x)   ✗ x: Tensor[32, 512] | batch_size: 32 | hidden_dim: 512 | lr: 0.0003
+```
+
+**Hover tooltip shows full variable state:**
+```
+### Trickle: Variables at crash
+
+`x`: `Tensor[32, 512] float32`
+`batch_size`: `integer` = `32`
+`hidden_dim`: `integer` = `512`
+`lr`: `number` = `0.0003`
+`model`: `MLP(512 params)`
+```
+
+**Also visible in the Problems panel:**
+```
+RuntimeError: mat1 and mat2 shapes cannot be multiplied (32x512 and 784x10)
+
+Local variables at crash:
+  x: Tensor[32, 512] float32
+  batch_size: integer = 32
+  hidden_dim: integer = 512
+  lr: number = 0.0003
+
+Tensor shapes near error:
+  L12 x: Tensor[32, 512] float32
+```
+
+**How it works:** `trickle.auto` installs a `sys.excepthook` that fires on any unhandled exception. It walks the traceback to find the innermost user-code frame (skipping PyTorch/NumPy internals), captures all local variables there, and writes them to `.trickle/errors.jsonl`. The VSCode extension picks this up within 300ms and shows crash-site inlay hints + an enhanced diagnostic.

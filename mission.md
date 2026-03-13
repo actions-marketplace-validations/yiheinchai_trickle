@@ -12,8 +12,9 @@ Testing requirements (MUST follow for every feature):
 
 Next priorities:
 
-1. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+1. ~~AWS Lambda support~~ ✅ DONE — `wrapLambda()`, `printObservations()`, `trickle lambda setup/layer/pull`, Lambda Layer zip, auto-detection of `/tmp/.trickle`, real-time streaming via ngrok.
 
+2. React Native observability: JS/TS code running in React Native (Expo/bare RN) should be observable. Key challenges: Metro bundler (not Vite), no browser DevTools, device/simulator gap. Consider a Metro transform plugin similar to the Vite plugin, and a trickle backend that the device POSTs to over the local network.
 
 </focus point>
 

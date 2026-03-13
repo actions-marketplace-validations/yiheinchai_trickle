@@ -696,3 +696,33 @@ Tensor shapes near error:
 ```
 
 **How it works:** `trickle.auto` installs a `sys.excepthook` that fires on any unhandled exception. It walks the traceback to find the innermost user-code frame (skipping PyTorch/NumPy internals), captures all local variables there, and writes them to `.trickle/errors.jsonl`. The VSCode extension picks this up within 300ms and shows crash-site inlay hints + an enhanced diagnostic.
+
+---
+
+## Use Case 16: Automatic Training Metric Detection
+
+**User:** ML engineer training a neural network with `trickle.auto`, without calling `trickle.progress()` explicitly.
+
+**Before trickle:** The status bar shows nothing during training. To see progress you add print statements or a progress library.
+
+**With trickle:**
+```python
+import trickle.auto  # just this one line
+
+for epoch in range(10):
+    for step, (x, y) in enumerate(loader):
+        loss = criterion(model(x), y)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        acc = (predictions == y).float().mean()
+        lr = scheduler.get_last_lr()[0]
+        # No trickle.progress() needed!
+```
+
+The VSCode status bar automatically shows:
+```
+🔄 Training: epoch 3 | step 247 | loss 0.3421 | acc 0.8912 | lr 0.0006
+```
+
+**How it works:** `trickle.auto` uses the AST variable tracer to detect which lines are inside `for`/`while` loop bodies. When a variable with a training-metric name (`loss`, `acc`, `epoch`, `step`, `lr`, `val_loss`, etc.) is assigned in a loop, trickle automatically emits a `kind: "progress"` record to `.trickle/variables.jsonl`. Rate-limited to every 10 iterations by default (configurable via `TRICKLE_AUTO_PROGRESS_EVERY`). No code changes required beyond `import trickle.auto`.

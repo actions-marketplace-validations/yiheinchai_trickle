@@ -32,29 +32,55 @@ _infer_type: Any = None
 _func_context: Dict[str, Dict[int, str]] = {}  # filename -> {line_no -> func_name}
 # Call-site info: filename -> {line_no -> (callee_var_name, [arg_var_names])}
 _call_args_map: Dict[str, Dict[int, Tuple[str, List[str]]]] = {}
+# Lines inside loop bodies: filename -> set of line numbers
+_loop_body_lines: Dict[str, Set[int]] = {}
+# Rate-limit counters for auto-progress: "file:line" -> call count
+_auto_progress_counter: Dict[str, int] = {}
 
 # Per-frame pending state: after seeing an assignment line, we defer reading
 # until the next event. Key = id(frame), value = (line_no, [var_names], func_name)
 _pending: Dict[int, Tuple[int, List[str], Optional[str]]] = {}
 
+# Training metric variable name patterns
+_TRAINING_METRIC_EXACT: Set[str] = {
+    "loss", "train_loss", "val_loss", "valid_loss", "test_loss", "running_loss",
+    "epoch", "epochs", "step", "global_step", "batch_idx", "batch_num", "num_steps",
+    "acc", "accuracy", "train_acc", "val_acc", "valid_acc",
+    "lr", "learning_rate",
+    "f1", "f1_score", "precision", "recall",
+    "mse", "mae", "rmse", "r2",
+    "reward", "score",
+    "perplexity", "ppl",
+    "bleu", "rouge",
+    "iteration", "iter",
+}
 
-def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]], Dict[int, str], Dict[int, Tuple[str, List[str]]]]:
+# Substrings that strongly suggest a training metric when found in a var name
+_TRAINING_METRIC_SUBSTRINGS: Tuple[str, ...] = (
+    "loss", "acc", "accuracy", "epoch", "step",
+    "reward", "score", "perplexity", "bleu", "rouge",
+)
+
+
+def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]], Dict[int, str], Dict[int, Tuple[str, List[str]]], Set[int]]:
     """Parse source AST to find assignment line numbers and variable names.
 
     Returns:
-        (assignments, func_context, call_args) where:
+        (assignments, func_context, call_args, loop_body_lines) where:
         - assignments: {line_no: [var_names]}
         - func_context: {line_no: qualified_func_name}
         - call_args: {line_no: (callee_var_name, [arg_var_names])} for call-site lines
+        - loop_body_lines: set of line numbers that are inside for/while loop bodies
     """
     try:
         tree = ast.parse(source, filename)
     except SyntaxError:
-        return {}, {}, {}
+        return {}, {}, {}, set()
 
     assignments: Dict[int, List[str]] = {}
     func_ctx: Dict[int, str] = {}
     call_args: Dict[int, Tuple[str, List[str]]] = {}
+    loop_lines: Set[int] = set()
 
     def _extract_names(target: ast.AST) -> List[str]:
         if isinstance(target, ast.Name):
@@ -101,13 +127,13 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
             return func.value.id
         return None
 
-    def _visit_body(body: list, func_name: Optional[str] = None) -> None:
+    def _visit_body(body: list, func_name: Optional[str] = None, in_loop: bool = False) -> None:
         for node in body:
             if isinstance(node, ast.ClassDef):
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
                         qname = f"{node.name}.{item.name}"
-                        _visit_body(item.body, func_name=qname)
+                        _visit_body(item.body, func_name=qname, in_loop=in_loop)
                         # Trace function parameters
                         param_names: List[str] = []
                         for arg in item.args.args + item.args.posonlyargs + item.args.kwonlyargs:
@@ -118,12 +144,12 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                             assignments.setdefault(line, []).extend(param_names)
                             func_ctx[line] = qname
                     else:
-                        _visit_body([item], func_name=None)
+                        _visit_body([item], func_name=None, in_loop=in_loop)
                 continue
 
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 qname = func_name or node.name
-                _visit_body(node.body, func_name=qname)
+                _visit_body(node.body, func_name=qname, in_loop=in_loop)
                 # Trace function parameters
                 param_names = []
                 for arg in node.args.args + node.args.posonlyargs + node.args.kwonlyargs:
@@ -170,9 +196,11 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                     assignments.setdefault(line, []).extend(for_names)
                     if func_name:
                         func_ctx[line] = func_name
-                _visit_body(node.body, func_name)
+                    # The loop variable line itself is a loop trigger
+                    loop_lines.add(line)
+                _visit_body(node.body, func_name, in_loop=True)
                 if node.orelse:
-                    _visit_body(node.orelse, func_name)
+                    _visit_body(node.orelse, func_name, in_loop=in_loop)
                 continue
 
             # Detect mutating method calls: rf.fit(...), model.train(), etc.
@@ -187,12 +215,14 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                 assignments.setdefault(line, []).extend(names)
                 if func_name:
                     func_ctx[line] = func_name
+                if in_loop:
+                    loop_lines.add(line)
 
             # Recurse into compound statements
             if isinstance(node, (ast.If, ast.While)):
-                _visit_body(node.body, func_name)
+                _visit_body(node.body, func_name, in_loop=in_loop or isinstance(node, ast.While))
                 if node.orelse:
-                    _visit_body(node.orelse, func_name)
+                    _visit_body(node.orelse, func_name, in_loop=in_loop)
             elif isinstance(node, (ast.With, ast.AsyncWith)):
                 for item in node.items:
                     if item.optional_vars:
@@ -202,9 +232,11 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                             assignments.setdefault(line, []).extend(as_names)
                             if func_name:
                                 func_ctx[line] = func_name
-                _visit_body(node.body, func_name)
+                            if in_loop:
+                                loop_lines.add(line)
+                _visit_body(node.body, func_name, in_loop=in_loop)
             elif isinstance(node, ast.Try):
-                _visit_body(node.body, func_name)
+                _visit_body(node.body, func_name, in_loop=in_loop)
                 for handler in node.handlers:
                     if handler.name and not handler.name.startswith("_"):
                         hline = getattr(handler, "lineno", 0)
@@ -212,14 +244,14 @@ def _parse_assignments(source: str, filename: str) -> Tuple[Dict[int, List[str]]
                             assignments.setdefault(hline, []).append(handler.name)
                             if func_name:
                                 func_ctx[hline] = func_name
-                    _visit_body(handler.body, func_name)
+                    _visit_body(handler.body, func_name, in_loop=in_loop)
                 if node.orelse:
-                    _visit_body(node.orelse, func_name)
+                    _visit_body(node.orelse, func_name, in_loop=in_loop)
                 if node.finalbody:
-                    _visit_body(node.finalbody, func_name)
+                    _visit_body(node.finalbody, func_name, in_loop=in_loop)
 
     _visit_body(tree.body)
-    return assignments, func_ctx, call_args
+    return assignments, func_ctx, call_args, loop_lines
 
 
 def _simple_scalar(v: Any) -> Any:
@@ -235,6 +267,91 @@ def _simple_scalar(v: Any) -> Any:
     if cls_name not in ('list', 'dict', 'tuple', 'set'):
         return f"{cls_name}(...)"
     return None
+
+
+def _is_training_metric(name: str) -> bool:
+    """Return True if the variable name looks like a training metric."""
+    lower = name.lower()
+    if lower in _TRAINING_METRIC_EXACT:
+        return True
+    for sub in _TRAINING_METRIC_SUBSTRINGS:
+        if sub in lower:
+            return True
+    return False
+
+
+def _scalar_metric_value(v: Any) -> Any:
+    """Extract a JSON-safe numeric scalar for a metric value, or None if not scalar."""
+    try:
+        # Unwrap PyTorch/NumPy scalar tensors
+        if hasattr(v, "item"):
+            v = v.item()
+        if isinstance(v, bool):
+            return None  # bools are rarely useful metrics
+        if isinstance(v, int):
+            return v
+        if isinstance(v, float):
+            return round(v, 6)
+    except Exception:
+        pass
+    return None
+
+
+def _auto_emit_progress(frame: Any, trigger_line: int, filename: str) -> None:
+    """Scan frame locals for training metrics and emit a progress record.
+
+    Called when a training metric variable is assigned inside a loop.
+    Rate-limited: emits at most once every TRICKLE_AUTO_PROGRESS_EVERY calls
+    from the same line (default: every 10).
+    """
+    global _vars_file
+
+    try:
+        every = int(os.environ.get("TRICKLE_AUTO_PROGRESS_EVERY", "10"))
+    except ValueError:
+        every = 10
+
+    key = f"{filename}:{trigger_line}"
+    count = _auto_progress_counter.get(key, 0) + 1
+    _auto_progress_counter[key] = count
+    if count % every != 0:
+        return
+
+    try:
+        locals_dict = frame.f_locals
+        metrics: dict = {}
+        for name, val in locals_dict.items():
+            if name.startswith("_"):
+                continue
+            if not _is_training_metric(name):
+                continue
+            sv = _scalar_metric_value(val)
+            if sv is not None:
+                metrics[name] = sv
+
+        if not metrics:
+            return
+
+        if _vars_file is None:
+            local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
+            os.makedirs(local_dir, exist_ok=True)
+            _vars_file = os.path.join(local_dir, "variables.jsonl")
+
+        import time
+        record = {
+            "kind": "progress",
+            "file": filename,
+            "line": trigger_line,
+            "metrics": metrics,
+            "timestamp": time.time(),
+            "call_count": count,
+            "auto": True,
+        }
+        with open(_vars_file, "a") as f:
+            f.write(json.dumps(record) + "\n")
+
+    except Exception:
+        pass
 
 
 # Priority fields to show first for HuggingFace-style configs.
@@ -492,6 +609,16 @@ def _flush_pending(frame: Any) -> None:
         except Exception:
             pass
 
+    # Auto-progress: if this line is inside a loop and any assigned var looks like
+    # a training metric, collect all metric locals and emit a progress record.
+    try:
+        loop_set = _loop_body_lines.get(filename)
+        if loop_set and line_no in loop_set:
+            if any(_is_training_metric(n.split(".")[-1]) for n in var_names):
+                _auto_emit_progress(frame, line_no, filename)
+    except Exception:
+        pass
+
 
 # CO_COROUTINE flag: set on async def functions. Use inspect to get the correct
 # value for this Python version (0x80 in Python 3.5-3.11, may differ elsewhere).
@@ -643,7 +770,7 @@ def install() -> None:
     except Exception:
         return
 
-    assignments, func_ctx, call_args = _parse_assignments(source, _entry_file)
+    assignments, func_ctx, call_args, loop_lines = _parse_assignments(source, _entry_file)
     if not assignments:
         return
 
@@ -651,6 +778,8 @@ def install() -> None:
     _func_context[_entry_file] = func_ctx
     if call_args:
         _call_args_map[_entry_file] = call_args
+    if loop_lines:
+        _loop_body_lines[_entry_file] = loop_lines
 
     # Import type inference lazily
     from trickle.type_inference import infer_type
@@ -706,12 +835,14 @@ def install_files(file_paths: List[str]) -> None:
         except Exception:
             continue
 
-        assignments, func_ctx, call_args = _parse_assignments(source, fpath)
+        assignments, func_ctx, call_args, loop_lines = _parse_assignments(source, fpath)
         if assignments:
             _assignment_map[fpath] = assignments
             _func_context[fpath] = func_ctx
             if call_args:
                 _call_args_map[fpath] = call_args
+            if loop_lines:
+                _loop_body_lines[fpath] = loop_lines
 
     if file_paths:
         _activate()

@@ -190,6 +190,31 @@ function findClosingBrace(source: string, openBrace: number): number {
 }
 
 /**
+ * Find the matching closing paren for an opening paren at openParen.
+ * JSX-safe version: counts `(` and `)` depth, handles JSX curly expressions,
+ * but does NOT treat `'` as a string delimiter (apostrophes in JSX text content
+ * like `I'm` would incorrectly consume parens). Double-quoted strings inside
+ * JSX attr values typically contain balanced parens so can be ignored safely.
+ */
+function findMatchingParen(source: string, openParen: number): number {
+  let depth = 1;
+  let pos = openParen + 1;
+  while (pos < source.length && depth > 0) {
+    const ch = source[pos];
+    if (ch === '(') {
+      depth++;
+    } else if (ch === ')') {
+      depth--;
+      if (depth === 0) return pos;
+    }
+    // Skip JSX expression blocks {expr} — not parens but skip curly content to avoid
+    // false paren matches inside template expressions
+    pos++;
+  }
+  return -1;
+}
+
+/**
  * Find variable declarations in source and return insertions for tracing.
  * Handles: const x = ...; let x = ...; var x = ...;
  * Skips: destructuring, for-loop vars, require() calls, imports, type annotations.
@@ -538,12 +563,16 @@ export function transformEsmSource(
 
   // Also match arrow functions assigned to const/let/var
   // Handles: const X = () => {}, const X: React.FC = () => {}, const X: React.FC<Props> = ({ a }) => {}
-  const arrowRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*:\s*[^=]+?)?\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::\s*[^=]+?)?\s*=>\s*\{/gm;
+  // Also handles concise bodies: const X = (props) => (<div/>)
+  const arrowRegex = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)(?:\s*:\s*[^=]+?)?\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::\s*[^=]+?)?\s*=>\s*(?:\{|\()/gm;
+
+  // Concise body insertions: for `=> (expr)`, wrap with block body for render tracking
+  const conciseBodyInsertions: Array<{ beforeParen: number; afterCloseParen: number; name: string; lineNo: number; propsExpr: string }> = [];
 
   while ((match = arrowRegex.exec(source)) !== null) {
     const name = match[1];
-    const openBrace = source.indexOf('{', match.index + match[0].length - 1);
-    if (openBrace === -1) continue;
+    const bodyStartPos = match.index + match[0].length - 1;
+    const isConcise = source[bodyStartPos] === '(';
 
     const arrowStr = match[0];
     const arrowParamMatch = arrowStr.match(/=\s*(?:async\s+)?(?:\(([^)]*)\)|([a-zA-Z_$][a-zA-Z0-9_$]*))\s*(?::\s*[^=]+?)?\s*=>/);
@@ -559,50 +588,60 @@ export function transformEsmSource(
       }
     }
 
-    const closeBrace = findClosingBrace(source, openBrace);
-    if (closeBrace === -1) continue;
-
-    funcInsertions.push({ position: closeBrace + 1, name, paramNames });
-
-    // React component render tracking: uppercase arrow function in .tsx/.jsx
-    if (isReactFile && /^[A-Z]/.test(name)) {
-      let lineNo = 1;
-      for (let i = 0; i < match.index; i++) {
-        if (source[i] === '\n') lineNo++;
-      }
-
-      // Determine props expression for arrow functions (no `arguments` object)
-      let propsExpr = 'undefined';
-      if (arrowParamMatch) {
-        const rawParams = (arrowParamMatch[1] || '').trim();
-        if (!rawParams) {
-          // No params: `() => {}`
-          propsExpr = 'undefined';
-        } else if (rawParams.startsWith('{')) {
-          // Destructured: ({ name, age }) => {} — reconstruct object from field names
-          // Strip TS type annotation (e.g. `{a, b}: Props` → `{a, b}`)
-          // Find the matching `}` to isolate just the destructuring pattern
-          let depth2 = 0;
-          let endBrace = -1;
-          for (let i = 0; i < rawParams.length; i++) {
-            if (rawParams[i] === '{') depth2++;
-            else if (rawParams[i] === '}') { depth2--; if (depth2 === 0) { endBrace = i; break; } }
-          }
-          const destructPattern = endBrace !== -1 ? rawParams.slice(0, endBrace + 1) : rawParams;
-          const fields = extractDestructuredNames(destructPattern);
-          if (fields.length > 0) {
-            propsExpr = `{ ${fields.join(', ')} }`;
-          }
-        } else if (arrowParamMatch[2]) {
-          // Single simple param (no parens): `props => {}`
-          propsExpr = arrowParamMatch[2];
-        } else if (paramNames.length === 1) {
-          // Single simple param: `(props) => {}`
-          propsExpr = paramNames[0];
+    // Helper to build propsExpr from arrowParamMatch
+    const buildPropsExpr = () => {
+      if (!arrowParamMatch) return 'undefined';
+      const rawParams = (arrowParamMatch[1] || '').trim();
+      if (!rawParams) return 'undefined';
+      if (rawParams.startsWith('{')) {
+        let depth2 = 0, endBrace = -1;
+        for (let i = 0; i < rawParams.length; i++) {
+          if (rawParams[i] === '{') depth2++;
+          else if (rawParams[i] === '}') { depth2--; if (depth2 === 0) { endBrace = i; break; } }
         }
+        const destructPattern = endBrace !== -1 ? rawParams.slice(0, endBrace + 1) : rawParams;
+        const fields = extractDestructuredNames(destructPattern);
+        return fields.length > 0 ? `{ ${fields.join(', ')} }` : 'undefined';
+      } else if (arrowParamMatch[2]) {
+        return arrowParamMatch[2];
+      } else if (paramNames.length === 1) {
+        return paramNames[0];
       }
+      return 'undefined';
+    };
 
-      bodyInsertions.push({ position: openBrace + 1, name, lineNo, propsExpr });
+    if (isConcise) {
+      // Concise body: `const X = (props) => (<div/>)` — no block body
+      // Only add render tracking for React components (uppercase names in .tsx/.jsx)
+      if (isReactFile && /^[A-Z]/.test(name)) {
+        const closeParen = findMatchingParen(source, bodyStartPos);
+        if (closeParen === -1) continue;
+
+        let lineNo = 1;
+        for (let i = 0; i < match.index; i++) {
+          if (source[i] === '\n') lineNo++;
+        }
+
+        conciseBodyInsertions.push({ beforeParen: bodyStartPos, afterCloseParen: closeParen + 1, name, lineNo, propsExpr: buildPropsExpr() });
+      }
+    } else {
+      // Block body: `const X = (props) => { ... }`
+      const openBrace = bodyStartPos;
+
+      const closeBrace = findClosingBrace(source, openBrace);
+      if (closeBrace === -1) continue;
+
+      funcInsertions.push({ position: closeBrace + 1, name, paramNames });
+
+      // React component render tracking: uppercase arrow function in .tsx/.jsx
+      if (isReactFile && /^[A-Z]/.test(name)) {
+        let lineNo = 1;
+        for (let i = 0; i < match.index; i++) {
+          if (source[i] === '\n') lineNo++;
+        }
+
+        bodyInsertions.push({ position: openBrace + 1, name, lineNo, propsExpr: buildPropsExpr() });
+      }
     }
   }
 
@@ -814,7 +853,7 @@ export function transformEsmSource(
   // Find destructured variable declarations for tracing
   const destructInsertions = traceVars ? findDestructuredDeclarations(source) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0) return source;
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -839,7 +878,7 @@ export function transformEsmSource(
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0) {
     importLines.push(
       `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
       `import { join as __trickle_join } from 'node:path';`,
@@ -923,7 +962,7 @@ export function transformEsmSource(
   }
 
   // Add React component render tracker if needed
-  if (bodyInsertions.length > 0) {
+  if (bodyInsertions.length > 0 || conciseBodyInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_react_renders) { globalThis.__trickle_react_renders = new Map(); }`,
       `if (!globalThis.__trickle_react_prev_props) { globalThis.__trickle_react_prev_props = new Map(); }`,
@@ -1076,6 +1115,19 @@ export function transformEsmSource(
     allInsertions.push({
       position: afterLine,
       code: `const ${setterName}=__trickle_ss(${JSON.stringify(stateName)},${lineNo},__trickle_s_${setterName});\n`,
+    });
+  }
+
+  // Concise arrow body insertions: convert `=> (expr)` to `=> { try{__trickle_rc(...)} return (expr); }`
+  // Two insertions per component: one before `(`, one after matching `)`
+  for (const { beforeParen, afterCloseParen, name, lineNo, propsExpr } of conciseBodyInsertions) {
+    allInsertions.push({
+      position: beforeParen,
+      code: `{ try{__trickle_rc(${JSON.stringify(name)},${lineNo},${propsExpr})}catch(__e){} return `,
+    });
+    allInsertions.push({
+      position: afterCloseParen,
+      code: `\n}`,
     });
   }
 

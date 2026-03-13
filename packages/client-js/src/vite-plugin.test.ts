@@ -404,3 +404,59 @@ describe('React hook observability', () => {
     assert.ok(out!.includes('__trickle_hw'), 'should inject hook wrapper for function() {} form');
   });
 });
+
+describe('Concise arrow body tracking (=> (...))', () => {
+  it('tracks a simple concise arrow component', () => {
+    const code = `const Layout = ({ children }) => (\n  <div>{children}</div>\n);`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'should inject render tracker for concise arrow body');
+  });
+
+  it('tracks a typed concise arrow component (React.FC)', () => {
+    const code = `const Header: React.FC<{ title: string }> = ({ title }) => (\n  <header>{title}</header>\n);`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'should inject render tracker for React.FC concise arrow');
+  });
+
+  it('wraps concise body with block body containing return statement', () => {
+    const code = `const Card = (props) => (<div>{props.name}</div>);`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'should inject render tracker');
+    assert.ok(out!.includes('return '), 'converted block body should have return statement');
+  });
+
+  it('does NOT track lowercase concise arrow (non-component)', () => {
+    const code = `const renderItem = (item) => (<span>{item}</span>);`;
+    const out = transformTsx(code);
+    // lowercase name - should not be tracked as component
+    if (out) {
+      assert.ok(!out.includes('__trickle_rc'), 'should NOT inject render tracker for lowercase concise arrow');
+    }
+  });
+
+  it('tracks Next.js Layout component with concise arrow body (real-world pattern)', () => {
+    const code = [
+      `const Layout = ({ children, title = "Default title" }: Props) => (`,
+      `  <div>`,
+      `    <Head><title>{title}</title></Head>`,
+      `    <main>{children}</main>`,
+      `  </div>`,
+      `);`,
+    ].join('\n');
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('__trickle_rc'), 'should track Layout component (real Next.js pattern)');
+  });
+
+  it('does NOT track concise arrow in .ts files', () => {
+    const plugin = tricklePlugin({ debug: false, traceVars: false });
+    const code = `const Layout = ({ children }) => (<div>{children}</div>);`;
+    const result = plugin.transform(code, '/test/layout.ts');
+    if (result) {
+      assert.ok(!result.code.includes('__trickle_rc'), 'should NOT inject render tracker in .ts file');
+    }
+  });
+});

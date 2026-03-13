@@ -156,3 +156,30 @@ describe('Next.js: does not instrument non-React files', () => {
     assert.ok(!out.includes('__trickle_ss'), 'should not track useState in .ts files');
   });
 });
+
+describe('Next.js: concise arrow body (=> (...)) tracking', () => {
+  it('tracks a concise arrow component (common in Next.js layouts)', () => {
+    const code = [
+      `const Layout = ({ children, title = "Default" }: Props) => (`,
+      `  <div>`,
+      `    <main>{children}</main>`,
+      `  </div>`,
+      `);`,
+    ].join('\n');
+    const out = transformNextTsx(code);
+    assert.ok(out.includes('__trickle_rc'), 'should track concise arrow component in Next.js');
+  });
+
+  it('tracks a simple presentational component with concise body', () => {
+    const code = `const Badge = ({ label }: { label: string }) => (<span className="badge">{label}</span>);`;
+    const out = transformNextTsx(code);
+    assert.ok(out.includes('__trickle_rc'), 'should track concise arrow Badge component');
+  });
+
+  it('converted concise body includes return statement', () => {
+    const code = `const Hero = (props) => (<section>{props.title}</section>);`;
+    const out = transformNextTsx(code);
+    assert.ok(out.includes('return '), 'converted block body should have return statement');
+    assert.ok(out.includes('__trickle_rc'), 'should inject render tracker');
+  });
+});

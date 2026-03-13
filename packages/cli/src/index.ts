@@ -38,6 +38,7 @@ import { stubsCommand } from "./commands/stubs";
 import { varsCommand } from "./commands/vars";
 import { lambdaCommand } from "./commands/lambda";
 import { rnCommand } from "./commands/rn";
+import { nextCommand } from "./commands/next";
 
 const program = new Command();
 
@@ -438,6 +439,9 @@ lambdaCommand(program);
 
 // trickle rn [setup|ip]
 rnCommand(program);
+
+// trickle next [setup]
+nextCommand(program);
 
 // trickle annotate <file>
 program

@@ -365,3 +365,38 @@ def test_generate(small_config):
 - Model objects showing their class and key attributes
 
 **Opt out** if needed: `TRICKLE_TRACE_VARS=0 pytest` or add `-p no:trickle` to your pytest invocation.
+
+---
+
+## Use Case 8: Model Config Visibility — See Constructor Params Inline
+
+When you instantiate a model like `model = GPT(config)`, the inline hint now shows the actual configuration parameters from the config object — not just the class name.
+
+```python
+# train.py
+import trickle.auto
+
+config = GPTConfig(block_size=1024, vocab_size=50257, n_layer=12, n_head=12, n_embd=768)
+# → config: GPTConfig{block_size=1024, vocab_size=50257, n_layer=12, n_head=12, n_embd=768, ...}
+
+model = GPT(config)
+# → model: GPT(block_size=1024, vocab_size=50257, n_layer=12, n_head=12, n_embd=768, +2)
+```
+
+Hovering over `model` shows the full structured type with all config fields plus `params`, `memory`, `training` status:
+```typescript
+GPT {
+  block_size: 1024
+  vocab_size: 50257
+  n_layer: 12
+  n_head: 12
+  n_embd: 768
+  dropout: 0.0
+  bias: true
+  training: True
+  params: 85336064
+  memory: 325.5 MB
+}
+```
+
+This works for any model that stores its config as `self.config` — which is the standard pattern in HuggingFace, nanoGPT, and most modern ML frameworks.

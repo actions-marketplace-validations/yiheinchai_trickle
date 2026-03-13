@@ -445,6 +445,41 @@ def _infer_nn_module(value: Any) -> Dict[str, Any]:
         except Exception:
             pass
 
+    # If the module has a `config` attribute, surface its primitive fields first.
+    # This is the ML convention (GPT, BERT, T5, etc.) — config holds n_layer, n_head, etc.
+    try:
+        config = getattr(value, "config", None)
+        if config is not None and not isinstance(config, (int, float, bool, str, type)):
+            config_fields: Dict[str, Any] = {}
+            import dataclasses as _dc
+            if _dc.is_dataclass(config) and not isinstance(config, type):
+                for f in list(_dc.fields(config))[:10]:
+                    val = getattr(config, f.name, None)
+                    if isinstance(val, (int, float, bool)) and not callable(val):
+                        config_fields[f.name] = val
+            elif hasattr(type(config), "model_fields"):
+                for fname in list(type(config).model_fields.keys())[:10]:
+                    val = getattr(config, fname, None)
+                    if isinstance(val, (int, float, bool)) and not callable(val):
+                        config_fields[fname] = val
+            elif hasattr(type(config), "__fields__"):
+                for fname in list(type(config).__fields__.keys())[:10]:
+                    val = getattr(config, fname, None)
+                    if isinstance(val, (int, float, bool)) and not callable(val):
+                        config_fields[fname] = val
+            elif hasattr(config, "__dict__"):
+                for fname, val in list(vars(config).items())[:10]:
+                    if not fname.startswith("_") and isinstance(val, (int, float, bool)) and not callable(val):
+                        config_fields[fname] = val
+            # Insert config fields at the top of props (they're the most informative)
+            new_props: Dict[str, Any] = {}
+            for fname, val in list(config_fields.items())[:8]:
+                new_props[fname] = {"kind": "primitive", "name": str(val)}
+            new_props.update(props)
+            props = new_props
+    except Exception:
+        pass
+
     # Capture training/eval mode
     try:
         props["training"] = {"kind": "primitive", "name": str(value.training)}

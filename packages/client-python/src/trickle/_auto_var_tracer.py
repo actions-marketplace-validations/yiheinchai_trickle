@@ -220,6 +220,47 @@ def _simple_scalar(v: Any) -> Any:
     return None
 
 
+def _config_call_sample(value: Any) -> Optional[str]:
+    """If value is a class instance with a `config` attribute that has primitive fields,
+    return a constructor-call style string like 'GPT(n_layer=12, n_head=12, n_embd=768)'.
+    Returns None if not applicable."""
+    try:
+        config = getattr(value, "config", None)
+        if config is None or isinstance(config, (int, float, bool, str, type)):
+            return None
+        cls_name = type(value).__name__
+        fields: dict = {}
+        if dataclasses.is_dataclass(config) and not isinstance(config, type):
+            for f in list(dataclasses.fields(config))[:10]:
+                val = getattr(config, f.name, None)
+                if isinstance(val, (int, float, bool)) and not callable(val):
+                    fields[f.name] = val
+        elif hasattr(type(config), "model_fields"):
+            for fname in list(type(config).model_fields.keys())[:10]:
+                val = getattr(config, fname, None)
+                if isinstance(val, (int, float, bool)) and not callable(val):
+                    fields[fname] = val
+        elif hasattr(type(config), "__fields__"):
+            for fname in list(type(config).__fields__.keys())[:10]:
+                val = getattr(config, fname, None)
+                if isinstance(val, (int, float, bool)) and not callable(val):
+                    fields[fname] = val
+        elif hasattr(config, "__dict__"):
+            for fname, val in list(vars(config).items())[:10]:
+                if not fname.startswith("_") and isinstance(val, (int, float, bool)) and not callable(val):
+                    fields[fname] = val
+        if not fields:
+            return None
+        # Show up to 5 fields in constructor-call notation
+        items = list(fields.items())[:5]
+        args = ", ".join(f"{k}={v}" for k, v in items)
+        if len(fields) > 5:
+            args += f", +{len(fields) - 5}"
+        return f"{cls_name}({args})"
+    except Exception:
+        return None
+
+
 def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
                module_name: str, func_name: Optional[str] = None) -> None:
     """Trace a single variable assignment."""
@@ -274,7 +315,14 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
             except Exception:
                 sample = str(value)[:100]
         else:
-            sample = str(value)[:100]
+            # For class instances with a `config` attribute, generate a constructor-call
+            # style sample: "GPT(n_layer=12, n_head=12, n_embd=768)" — this is the ML
+            # convention and gives much more useful context than str(value)[:100].
+            config_sample = _config_call_sample(value)
+            if config_sample is not None:
+                sample = config_sample
+            else:
+                sample = str(value)[:100]
 
         record: dict = {
             "kind": "variable",

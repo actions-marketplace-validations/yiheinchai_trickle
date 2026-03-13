@@ -593,3 +593,49 @@ for iter_num in range(max_iters):
 **Status bar ordering:** `epoch` → `step`/`iter`/`batch` → `loss` → `val_loss` → `acc` → `lr` → custom metrics.
 
 **Auto-hides** after 120 seconds of no new progress records (switches back to var count display).
+
+---
+
+## Use Case 14: Dict/Object Inline Value Display — See Metric Values at a Glance
+
+When you collect training metrics or evaluation results in a dict, trickle now shows the actual values inline instead of the generic `{key: type}` display.
+
+```python
+import trickle.auto
+
+# Metrics dict — shows values inline, not just types
+train_metrics = {
+    "loss": 0.42,
+    "acc": 0.91,
+    "lr": 1e-4,
+    "tokens_per_sec": 45000,
+}
+# → {loss: 0.42, acc: 0.91, lr: 0.0001, tokens_per_sec: 45000}
+
+eval_results = {
+    "val_loss": 0.55,
+    "val_acc": 0.88,
+    "perplexity": 1.73,
+}
+# → {val_loss: 0.55, val_acc: 0.88, perplexity: 1.73}
+
+# Mixed-type dicts also work
+config_summary = {
+    "model": "gpt2",
+    "layers": 12,
+    "accuracy": 0.9512,
+    "trained": True,
+}
+# → {model: "gpt2", layers: 12, accuracy: 0.9512, trained: True}
+
+# Large dicts show the first 5 keys + count of remaining
+all_metrics = {"loss": 0.42, "acc": 0.91, "lr": 1e-4, "val_loss": 0.55, "val_acc": 0.88, "f1": 0.90, "auc": 0.95}
+# → {loss: 0.42, acc: 0.91, lr: 0.0001, val_loss: 0.55, val_acc: 0.88, +2}
+```
+
+**How it works:** For dicts with string keys and up to 20 entries, trickle stores the actual values in the observation's sample field. The VSCode renderer detects `class_name: "dict"` and shows `{key: value}` format. Hover shows the full dict with all key-type pairs.
+
+**When useful:**
+- Metrics dicts from training loops — see exact values without opening a terminal
+- Evaluation result dicts — compare val_loss/val_acc at a glance
+- Config summaries — verify hyperparameter values are set correctly

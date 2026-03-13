@@ -244,11 +244,25 @@ train_cfg = TrainConfig(lr=3e-4, batch_size=64, epochs=10)
 # → TrainConfig(lr=0.0003, batch_size=64, epochs=10)
 ```
 
+**Nested configs** work too — sub-fields show their class name compactly:
+
+```python
+@dataclass
+class TrainArgs:
+    model: GPTConfig = field(default_factory=GPTConfig)
+    batch_size: int = 12
+    learning_rate: float = 6e-4
+    max_iters: int = 600000
+
+args = TrainArgs()
+# → TrainArgs(model=GPTConfig(...), batch_size=12, learning_rate=0.0006, max_iters=600000)
+```
+
 You see the actual values at a glance — no more printing the config to remember what you set. Works for:
-- Python `@dataclass` classes
+- Python `@dataclass` classes (including nested dataclasses/Pydantic models as sub-fields)
 - `typing.NamedTuple` classes
 - `collections.namedtuple` classes
-- Pydantic models
+- Pydantic v1 and v2 models (including nested models)
 
 Hover for full details including all field types and their values.
 

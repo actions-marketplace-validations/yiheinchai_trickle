@@ -2,7 +2,7 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. Pydantic v1/v2, dataclasses, and NamedTuples all show actual field values inline: `AppConfig(host="localhost", port=9000, debug=False, workers=8)`. Next priorities:
+JS/TS and Python inline type hints are fully working. Pydantic v1/v2, dataclasses, NamedTuples, and nested structured types all show actual field values inline: `ExperimentConfig(model=ModelConfig(...), training=TrainingConfig(...), name="exp1", seed=42)`. Next priorities:
 
 1. React component support: inline type hints for state, props, and hooks (useState, useEffect return values). JSX/TSX files aren't yet transformed by the ESM hooks. Approach: detect JSX syntax and strip it before regex-based variable finding, or integrate with a TSX/Babel transform.
 
@@ -10,9 +10,9 @@ JS/TS and Python inline type hints are fully working. Pydantic v1/v2, dataclasse
 
 3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer.
 
-4. Python: for nested structured types (e.g., `ExperimentConfig` with a `ModelConfig` sub-field), nested model fields currently show as `null` in the inline hint. Improve to show one level of nested compact values, e.g., `ExperimentConfig(model=ModelConfig(...), training=TrainingConfig(...), name="exp1", seed=42)`.
+4. Nested type compaction: when a compact type like `{id, name, +N}[]` is shown, hovering should show the full expanded object shape. Currently the hover tooltip shows the full TypeNode string but may be hard to read for deeply nested types — consider a structured hover card with collapsible sections.
 
-5. Nested type compaction: when a compact type like `{id, name, +N}[]` is shown, hovering should show the full expanded object shape. Currently the hover tooltip shows the full TypeNode string but may be hard to read for deeply nested types — consider a structured hover card with collapsible sections.
+5. Multi-file project tracing: when a training script imports from local modules (e.g., `from model import GPT`), variables inside those imported modules are traced individually but not linked to the call site in the entry script. Improve by correlating variable traces across files — e.g., when `model = GPT(config)` is executed, the inline hint at the call site should show `GPT(n_layer=12, n_head=12, ...)` populated from the `__init__` trace in model.py.
 
 </focus point>
 

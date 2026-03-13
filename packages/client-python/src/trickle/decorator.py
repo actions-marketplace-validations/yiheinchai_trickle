@@ -140,6 +140,12 @@ def _prepare_tracked(args: tuple, kwargs: dict, fn: Callable):
     tracked_args = []
     for i, arg in enumerate(args):
         pname = param_names[i] if i < len(param_names) else f"arg{i}"
+        # Skip wrapping self/cls — they're not data arguments, and wrapping
+        # them breaks methods that mutate their own state (e.g. __dict__.update)
+        if i == 0 and pname in ("self", "cls"):
+            all_paths_fns.append((pname, lambda: set()))
+            tracked_args.append(arg)
+            continue
         tracked, get_paths = create_tracker(arg)
         all_paths_fns.append((pname, get_paths))
         tracked_args.append(tracked)

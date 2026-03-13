@@ -407,6 +407,18 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
         all_kwargs = _collect_all_kwargs(fn)
         has_kwargs = bool(all_kwargs)
 
+        # Detect method kind from param names
+        first_param = param_names[0] if param_names else ""
+        if first_param == "self":
+            method_kind = "method"
+            self_param = "self"
+        elif first_param == "cls":
+            method_kind = "classmethod"
+            self_param = "cls"
+        else:
+            method_kind = "staticmethod"
+            self_param = ""
+
         # Return type
         is_async = fn.get("isAsync", False)
         def_keyword = "async def" if is_async else "def"
@@ -416,25 +428,36 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
         else:
             ret_str = f" -> {m_ret_type}"
 
+        # Method decorator prefix
+        if method_kind == "staticmethod":
+            lines.append("    @staticmethod")
+        elif method_kind == "classmethod":
+            lines.append("    @classmethod")
+
+        # Build method params — helper to create the initial params list
+        def _method_start_params() -> List[str]:
+            if method_kind == "staticmethod":
+                return []
+            return [self_param]
+
+        skip_params = {"self", "cls"}
+
         if has_kwargs:
-            # Flatten kwargs into the method signature
-            params_list: List[str] = ["self"]
+            params_list: List[str] = _method_start_params()
             if args_type.get("kind") == "tuple":
                 elements = args_type.get("elements", [])
                 pos_elems, _ = _extract_kwargs_bundle(elements, param_names)
-                # Force-strip if kwargs found from variants but not merged type
                 if len(pos_elems) == len(elements) and len(elements) > 0:
                     pos_elems = elements[:-1]
                 for i, el in enumerate(pos_elems):
                     pname = param_names[i] if i < len(param_names) else f"arg{i}"
-                    if pname == "self":
+                    if pname in skip_params:
                         continue
                     py_type = _type_to_python(el, extracted, base_name, pname)
                     params_list.append(f"{pname}: {py_type}")
-            # Add kwargs as keyword params (skip duplicates of positional names)
             cls_pos_names = {param_names[i] if i < len(param_names) else f"arg{i}"
                            for i in range(len(pos_elems) if args_type.get("kind") == "tuple" else 0)}
-            cls_pos_names.add("self")
+            cls_pos_names.update(skip_params)
             sorted_kw = sorted(all_kwargs.keys(),
                              key=lambda k: param_names.index(k) if k in param_names else 999)
             for k in sorted_kw:
@@ -448,7 +471,6 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
         elif (variants and len(variants) >= 2
               and len({_type_to_python(v.get("returnType", return_type), [], base_name, None) for v in variants}) >= 2
               and len({_type_node_key(v.get("argsType", {})) for v in variants}) >= 2):
-            # Generate overloaded method signatures (only when both args and return types differ)
             for variant in variants:
                 v_args = variant["argsType"]
                 v_ret = variant["returnType"]
@@ -458,23 +480,22 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                 v_ext: List[Tuple[str, Dict[str, Any]]] = []
                 v_ret_type = _type_to_python(v_ret, v_ext, base_name, None)
                 v_ret_str = f" -> {v_ret_type}"
-                v_params: List[str] = ["self"]
+                v_params: List[str] = _method_start_params()
                 if v_args.get("kind") == "tuple":
                     for i, el in enumerate(v_args.get("elements", [])):
                         pname = v_names[i] if i < len(v_names) else f"arg{i}"
-                        if pname == "self":
+                        if pname in skip_params:
                             continue
                         py_type = _type_to_python(el, extracted, base_name, pname)
                         v_params.append(f"{pname}: {py_type}")
                 lines.append("    @overload")
                 lines.append(f"    {v_def} {method_snake}({', '.join(v_params)}){v_ret_str}: ...")
 
-            # Implementation signature (merged types)
-            params: List[str] = ["self"]
+            params: List[str] = _method_start_params()
             if args_type.get("kind") == "tuple":
                 for i, el in enumerate(args_type.get("elements", [])):
                     pname = param_names[i] if i < len(param_names) else f"arg{i}"
-                    if pname == "self":
+                    if pname in skip_params:
                         continue
                     is_opt, inner = _extract_optional(el)
                     if is_opt:
@@ -485,13 +506,12 @@ def _generate_py_class_stub(cls_name: str, methods: List[Dict[str, Any]]) -> str
                         params.append(f"{pname}: {py_type}")
             lines.append(f"    {def_keyword} {method_snake}({', '.join(params)}){ret_str}: ...")
         else:
-            # Build params (skip 'self' from observed param names)
-            params_list2: List[str] = ["self"]
+            params_list2: List[str] = _method_start_params()
             if args_type.get("kind") == "tuple":
                 elements = args_type.get("elements", [])
                 for i, el in enumerate(elements):
                     pname = param_names[i] if i < len(param_names) else f"arg{i}"
-                    if pname == "self":
+                    if pname in skip_params:
                         continue
                     is_opt, inner = _extract_optional(el)
                     if is_opt:

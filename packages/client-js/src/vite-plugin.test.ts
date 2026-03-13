@@ -202,6 +202,43 @@ describe('Correct function body brace detection', () => {
   });
 });
 
+// ── Re-render cause detection ─────────────────────────────────────────────────
+
+describe('Re-render cause detection', () => {
+  it('emits changedProps tracking code in transformed output', () => {
+    const code = `function Card({ count, label }) { return null; }`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    // Should include the prev_props map and comparison logic
+    assert.ok(out!.includes('__trickle_react_prev_props'), 'should initialize prev_props map');
+    assert.ok(out!.includes('changedProps'), 'should include changedProps detection');
+  });
+
+  it('includes prev props comparison logic in __trickle_rc', () => {
+    const code = `function UserCard({ name, age }) { return null; }`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    assert.ok(out!.includes('prevProps'), 'should reference prevProps');
+    assert.ok(out!.includes('globalThis.__trickle_react_prev_props.set'), 'should store current props as prev');
+  });
+
+  it('stores previous props keyed by component file+line', () => {
+    const code = `function Button({ disabled, onClick }) { return null; }`;
+    const out = transformTsx(code);
+    assert.ok(out, 'should transform');
+    // The key used for prev_props storage should be the same as the render key
+    assert.ok(out!.includes('globalThis.__trickle_react_prev_props.get(key)'), 'should retrieve prev props by key');
+  });
+
+  it('does not emit prev_props tracking in .ts files', () => {
+    const code = `function helper({ x, y }) { return x + y; }`;
+    const out = transformTs(code);
+    if (out) {
+      assert.ok(!out.includes('__trickle_react_prev_props'), 'should NOT track prev props in .ts files');
+    }
+  });
+});
+
 // ── React hook observability ──────────────────────────────────────────────────
 
 describe('React hook observability', () => {

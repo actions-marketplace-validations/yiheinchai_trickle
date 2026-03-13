@@ -1612,9 +1612,24 @@ class TrickleInlayHintsProvider {
                 for (const [lineNo, rr] of rrLines) {
                     if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line)
                         continue;
-                    // Build compact prop summary for label
+                    // Build compact prop summary for label: prefer showing changed props
                     let propSummary = '';
-                    if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
+                    if (rr.changedProps && rr.changedProps.length > 0) {
+                        // Show which props caused re-render with old→new for primitives
+                        const MAX_CHANGED = 3;
+                        const shown = rr.changedProps.slice(0, MAX_CHANGED).map(cp => {
+                            const { key: k, from, to } = cp;
+                            const isPrim = (v) => typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string';
+                            if (isPrim(from) && isPrim(to) && String(from).length + String(to).length < 20) {
+                                return `${k}: ${from}→${to}`;
+                            }
+                            return `↑${k}`;
+                        });
+                        propSummary = ` | ${shown.join(' ')}`;
+                        if (rr.changedProps.length > MAX_CHANGED)
+                            propSummary += ` +${rr.changedProps.length - MAX_CHANGED}`;
+                    }
+                    else if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
                         const MAX_PROPS = 3;
                         const shown = rr.propKeys.slice(0, MAX_PROPS).map(k => {
                             const v = rr.props[k];
@@ -1640,13 +1655,21 @@ class TrickleInlayHintsProvider {
                             `**Component:** \`${rr.component}\``,
                             `**Render count:** \`${rr.renderCount}\``,
                         ];
+                        if (rr.changedProps && rr.changedProps.length > 0) {
+                            const changedRows = rr.changedProps.map(cp => {
+                                const fromStr = typeof cp.from === 'string' ? `"${cp.from}"` : String(cp.from);
+                                const toStr = typeof cp.to === 'string' ? `"${cp.to}"` : String(cp.to);
+                                return `- **\`${cp.key}\`**: \`${fromStr}\` → \`${toStr}\``;
+                            });
+                            tooltipLines.push(`**Changed props (last re-render):**\n${changedRows.join('\n')}`);
+                        }
                         if (rr.props && rr.propKeys && rr.propKeys.length > 0) {
                             const propRows = rr.propKeys.map(k => {
                                 const v = rr.props[k];
                                 const display = typeof v === 'string' ? `"${v}"` : String(v);
                                 return `- **\`${k}\`**: \`${display}\``;
                             });
-                            tooltipLines.push(`**Props (last render):**\n${propRows.join('\n')}`);
+                            tooltipLines.push(`**Props (current):**\n${propRows.join('\n')}`);
                         }
                         tooltipLines.push('*Tracked by trickle (cumulative since dev server start)*');
                         const md = new vscode.MarkdownString(`### 🔄 React Component Renders\n\n` + tooltipLines.join('\n\n'));

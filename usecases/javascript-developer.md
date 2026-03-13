@@ -159,6 +159,25 @@ const Dashboard = () => {  // 🔄 ×3 renders
 
 Hover over the hint to see the component name and cumulative render count since the dev server started. Useful for spotting unnecessary re-renders without adding any `console.log` or profiler setup.
 
+**Re-render cause detection:**
+
+When a component re-renders, trickle shows *which prop changed* directly in the inlay hint — the most actionable performance insight for React developers:
+
+```tsx
+function UserCard({ userId, name, theme }) {  // 🔄 ×5 | userId: 1→2
+  ...
+}
+
+const ProductRow = ({ price, inStock }) => {  // 🔄 ×3 | ↑inStock
+  ...
+};
+```
+
+- Primitives (number, string, boolean): shows `prop: old→new` (e.g. `count: 0→1`)
+- Objects/arrays/functions: shows `↑propName` (changed but complex value)
+
+Hover tooltip shows a full table of all changed props with before/after values. Instantly know why a component re-rendered — no React DevTools Profiler setup needed.
+
 **React hook invocation tracking:**
 
 Trickle also tracks how many times each hook's callback fires and shows it as an inlay hint on the hook call line — zero instrumentation required:

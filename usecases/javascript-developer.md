@@ -161,14 +161,46 @@ Open any file in VSCode — every variable and function return gets a type hint 
 
 ---
 
+## Use Case 6: Modern ESM / .mjs Files
+
+For modern JavaScript using ES modules (`.mjs`, `import`/`export` syntax):
+
+```bash
+trickle run node app.mjs
+```
+
+```javascript
+// app.mjs
+import { fetchUsers } from './api.mjs';
+
+const users = await fetchUsers();
+// → users: Array<{id: number; name: string; email: string}>
+
+const active = users.filter(u => u.active);
+// → active: Array<{id: number; name: string; email: string}>
+
+const byDept = active.reduce((acc, u) => {
+  acc[u.dept] = (acc[u.dept] || []).concat(u);
+  return acc;
+}, {});
+// → byDept: {eng: Array<...>; sales: Array<...>}
+```
+
+ESM modules (including files using `import`/`export`) are now fully traced — both exported functions and all variable declarations.
+
+---
+
 ## Quick Start
 
 ```bash
 # Install
 npm install -g trickle-cli
 
-# Run any JS file
+# Run any JS file (CJS)
 trickle run node app.js
+
+# Run modern ESM file
+trickle run node app.mjs
 
 # Run TypeScript
 trickle run ts-node --transpile-only app.ts

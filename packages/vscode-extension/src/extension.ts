@@ -1010,7 +1010,8 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
 
     case 'tuple':
       if (node.elements) {
-        return `[${node.elements.map(e => typeNodeToString(e, depth - 1)).join(', ')}]`;
+        const tuplePrefix = node.class_name === 'list' ? 'list' : '';
+        return `${tuplePrefix}[${node.elements.map(e => typeNodeToString(e, depth - 1)).join(', ')}]`;
       }
       return '[]';
 
@@ -1471,7 +1472,8 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
 
     case 'tuple':
       if (node.elements) {
-        return `[${node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(', ')}]`;
+        const prettyPrefix = node.class_name === 'list' ? 'list' : '';
+        return `${prettyPrefix}[${node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(', ')}]`;
       }
       return '[]';
 

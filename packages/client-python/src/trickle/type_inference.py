@@ -265,7 +265,14 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
 
     # --- list ---
     if isinstance(value, list):
-        element_type = _unify_element_types(value[:20], max_depth - 1, _seen)
+        sample = value[:20]
+        element_type = _unify_element_types(sample, max_depth - 1, _seen)
+        # For small heterogeneous lists (like asyncio.gather() results), show per-element
+        # types as a positional tuple rather than array[union(...)]. This converts
+        # `array[union(int, str, list[int])]` → `list[int, str, list[int]]`.
+        if element_type.get("kind") == "union" and len(sample) <= 12:
+            elements = [infer_type(el, max_depth - 1, _seen) for el in sample]
+            return {"kind": "tuple", "elements": elements, "class_name": "list"}
         return {"kind": "array", "element": element_type}
 
     # --- tuple ---

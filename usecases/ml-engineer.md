@@ -546,3 +546,50 @@ out = model(x)  # → Tensor[32, 10] float32 ⚠  ← detected even after restar
 - Team workflows where one engineer's type history catches a regression introduced by another's merge
 
 Commit `.trickle/type_history.json` to share drift baselines with your team, or add it to `.gitignore` to keep history local.
+
+---
+
+## Use Case 13: Training Loop Progress — Real-Time Status Bar Display
+
+For long GPU training runs, you want to monitor loss and metrics without leaving VSCode. Add one line to your training loop and the status bar updates in real time.
+
+```python
+import trickle
+import torch
+import torch.nn as nn
+
+model = nn.TransformerEncoder(...)
+optimizer = torch.optim.AdamW(model.parameters(), lr=6e-4)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_iters)
+
+for iter_num in range(max_iters):
+    x, y = get_batch('train')
+    logits, loss = model(x, y)
+    optimizer.zero_grad()
+    loss.backward()
+    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+    optimizer.step()
+    scheduler.step()
+
+    # Emit progress — VSCode status bar shows this in real time
+    trickle.progress(
+        iter=iter_num,
+        loss=loss,           # tensors are automatically unwrapped with .item()
+        lr=scheduler.get_last_lr()[0],
+        every=10,            # write every 10 iterations to avoid file I/O overhead
+    )
+```
+
+**VSCode status bar shows:**
+```
+🔄 Training: iter 245 | loss 2.3401 | lr 0.0006
+```
+
+**Arguments:**
+- `every=N` — only write every N calls (default 1). Use `every=10` or `every=100` for tight loops.
+- Any keyword argument becomes a metric: `loss=`, `epoch=`, `step=`, `acc=`, `lr=`, `val_loss=`, etc.
+- PyTorch/NumPy scalars are unwrapped automatically (`.item()` is called for you).
+
+**Status bar ordering:** `epoch` → `step`/`iter`/`batch` → `loss` → `val_loss` → `acc` → `lr` → custom metrics.
+
+**Auto-hides** after 120 seconds of no new progress records (switches back to var count display).

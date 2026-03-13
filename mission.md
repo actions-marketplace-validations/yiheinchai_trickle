@@ -2,15 +2,15 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <focus point>
-JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, and cross-run type history are all implemented. Next priorities:
+JS/TS and Python inline type hints are fully working. pytest, async/await, HuggingFace configs, type drift alerts, call flow, asyncio.gather() per-element typing, cross-run type history, and training loop progress status bar are all implemented. Next priorities:
 
-1. Training loop progress: for long-running training loops, emit a summary record every N iterations showing loss, epoch, step — and display a real-time summary in the VSCode status bar or as an inlay hint on the loop line.
+1. Better dict/object display: when a variable is a dict with string keys and mixed values (e.g. a metrics dict like `{"loss": 0.42, "acc": 0.91, "lr": 1e-4}`), show it as `{loss: 0.42, acc: 0.91, lr: 0.0001}` inline rather than the generic object display.
 
-2. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
+2. Exception/error observability: when an exception is raised during a traced function, capture the exception type, message, and local variable state at the point of failure — show inline annotations on the failing line so the developer can see what values led to the error without adding print statements.
 
-3. Better dict/object display: when a variable is a dict with string keys and mixed values (e.g. a metrics dict like `{"loss": 0.42, "acc": 0.91, "lr": 1e-4}`), show it as `{loss: 0.42, acc: 0.91, lr: 0.0001}` inline rather than the generic object display.
+3. AWS Lambda support: JS/TS code running in Lambda functions should be observable with minimal setup — possibly via a Lambda layer that injects the ESM hooks or CJS register hook automatically.
 
-4. Exception/error observability: when an exception is raised during a traced function, capture the exception type, message, and local variable state at the point of failure — show inline annotations on the failing line so the developer can see what values led to the error without adding print statements.
+4. Automatic training metric detection: when `trickle.auto` is active and the tracer sees variables named `loss`, `epoch`, `step` being written in a loop, automatically emit progress records without requiring the user to add `trickle.progress()` explicitly.
 
 </focus point>
 

@@ -171,6 +171,20 @@ interface DataloaderBatchRecord {
   timestamp: number;
 }
 
+/** Training throughput record emitted by the DataLoader hook */
+interface TrainingThroughputRecord {
+  kind: 'training_throughput';
+  file: string;
+  line: number;
+  samples_per_sec: number;
+  batches_per_sec: number;
+  batch_size: number;
+  batch_count: number;
+  total_batches?: number;
+  eta_seconds?: number;
+  timestamp: number;
+}
+
 /** A training progress record emitted by trickle.progress() */
 interface ProgressRecord {
   kind: 'progress';
@@ -195,6 +209,8 @@ let lrScheduleIndex: Map<string, Map<number, LrScheduleRecord>> = new Map();
 let optimizerIndex: Map<string, Map<number, OptimizerStepRecord>> = new Map();
 /** DataLoader batch shapes: filePath -> lineNo -> DataloaderBatchRecord (latest) */
 let dataloaderIndex: Map<string, Map<number, DataloaderBatchRecord>> = new Map();
+/** Training throughput: filePath -> lineNo -> TrainingThroughputRecord (latest) */
+let throughputIndex: Map<string, Map<number, TrainingThroughputRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
 let fileWatcher: vscode.FileSystemWatcher | undefined;
@@ -535,6 +551,7 @@ function loadAllVariables() {
   lrScheduleIndex.clear();
   dataloaderIndex.clear();
   optimizerIndex.clear();
+  throughputIndex.clear();
 
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (!workspaceFolders) return;
@@ -626,6 +643,20 @@ function loadAllVariables() {
             const existing = lineMap.get(dl.line);
             if (!existing || dl.timestamp > existing.timestamp) {
               lineMap.set(dl.line, dl);
+            }
+            continue;
+          }
+
+          // Handle training throughput records
+          if (record.kind === 'training_throughput') {
+            const tp = record as TrainingThroughputRecord;
+            if (!throughputIndex.has(tp.file)) {
+              throughputIndex.set(tp.file, new Map());
+            }
+            const lineMap = throughputIndex.get(tp.file)!;
+            const existing = lineMap.get(tp.line);
+            if (!existing || tp.timestamp > existing.timestamp) {
+              lineMap.set(tp.line, tp);
             }
             continue;
           }
@@ -1465,6 +1496,67 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
               `### ⬛ DataLoader Batch Shapes\n\n` +
               shapeRows.join('\n\n') +
               `\n\n*Batch #${dl.batch_num} captured by trickle*`,
+            );
+            md.isTrusted = true;
+            hint.tooltip = md;
+
+            hints.push(hint);
+          } catch {
+            // Skip if line is out of range
+          }
+        }
+      }
+    }
+
+    // Add training throughput inlay hints at DataLoader for-loop lines
+    if (document.uri.scheme === 'file') {
+      const filePath = document.uri.fsPath;
+      const tpLines = throughputIndex.get(filePath);
+      if (tpLines) {
+        for (const [lineNo, tp] of tpLines) {
+          if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+          // Format samples/sec compactly: 1234 → "1.23k", 45678 → "45.7k"
+          const fmtRate = (n: number): string => {
+            if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 1 : 2)}k`;
+            return n.toFixed(1);
+          };
+
+          const fmtEta = (s: number): string => {
+            const h = Math.floor(s / 3600);
+            const m = Math.floor((s % 3600) / 60);
+            const sec = Math.floor(s % 60);
+            if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+            return `${m}:${String(sec).padStart(2, '0')}`;
+          };
+
+          let label = ` ⚡ ${fmtRate(tp.samples_per_sec)} smp/s`;
+          if (tp.eta_seconds !== undefined) {
+            label += ` | ETA ${fmtEta(tp.eta_seconds)}`;
+          }
+          if (tp.total_batches !== undefined) {
+            const pct = Math.round((tp.batch_count / tp.total_batches) * 100);
+            label += ` (${pct}%)`;
+          }
+
+          try {
+            const line = document.lineAt(lineNo - 1);
+            const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+            const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+            hint.paddingLeft = true;
+
+            const tooltipLines = [
+              `**Samples/sec:** \`${tp.samples_per_sec.toFixed(1)}\``,
+              `**Batches/sec:** \`${tp.batches_per_sec.toFixed(3)}\``,
+              `**Batch size:** \`${tp.batch_size}\``,
+              `**Batches done:** \`${tp.batch_count}${tp.total_batches ? ' / ' + tp.total_batches : ''}\``,
+            ];
+            if (tp.eta_seconds !== undefined) {
+              tooltipLines.push(`**ETA:** \`${fmtEta(tp.eta_seconds)}\``);
+            }
+            const md = new vscode.MarkdownString(
+              `### ⚡ Training Throughput\n\n` + tooltipLines.join('\n\n') +
+              `\n\n*Tracked by trickle (rolling avg)*`,
             );
             md.isTrusted = true;
             hint.tooltip = md;

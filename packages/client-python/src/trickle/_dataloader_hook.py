@@ -1,4 +1,4 @@
-"""Patch DataLoader iterators to emit batch shape records.
+"""Patch DataLoader iterators to emit batch shape and throughput records.
 
 When `trickle.auto` is active, this module patches
 torch.utils.data.DataLoader's internal iterator classes so that each
@@ -8,13 +8,18 @@ line, e.g.:
 
     for batch in train_loader:   ⬛ [32,3,224,224] float32, [32] int64
 
+Throughput metrics are also tracked and shown as a separate inlay hint:
+
+    for batch in train_loader:   ⚡ 1.23k smp/s | 38.5 bat/s | ETA 0:12
+
 Handles:
   - Tuple/list batches  → (inputs[B,C,H,W], labels[B])
   - Dict batches        → {input_ids[B,T], attention_mask[B,T]}  (HuggingFace)
   - Single-tensor batch → [B,C,H,W]
 
-Emits at most ``TRICKLE_DL_BATCHES`` (default 3) records per for-loop
+Emits at most ``TRICKLE_DL_BATCHES`` (default 3) shape records per for-loop
 line so the file doesn't grow unbounded during long training runs.
+Throughput is emitted every ``TRICKLE_THROUGHPUT_EVERY`` (default 10) batches.
 """
 from __future__ import annotations
 
@@ -22,14 +27,22 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 _installed = False
 # key: "file:line" → number of batches emitted
 _batch_counter: Dict[str, int] = {}
 
-# How many batches to emit per loop location before rate-limiting
+# How many batches to emit per loop location before rate-limiting shape records
 _MAX_BATCHES = int(os.environ.get("TRICKLE_DL_BATCHES", "3"))
+# How often to emit throughput records (every N batches at a given call site)
+_THROUGHPUT_EVERY = int(os.environ.get("TRICKLE_THROUGHPUT_EVERY", "10"))
+# Rolling window size for throughput averaging
+_THROUGHPUT_WINDOW = 20
+
+# Per call-site throughput state:
+# key: "file:line" → dict with batch timing info
+_throughput_state: Dict[str, Dict[str, Any]] = {}
 
 
 # ── Shape helpers ──────────────────────────────────────────────────────────
@@ -82,6 +95,43 @@ def _extract_shapes(batch: Any) -> List[Dict[str, Any]]:
     return shapes
 
 
+def _infer_batch_size(batch: Any) -> Optional[int]:
+    """Infer the number of samples in a batch."""
+    try:
+        if isinstance(batch, dict):
+            for v in batch.values():
+                if hasattr(v, "shape") and len(v.shape) > 0:
+                    return int(v.shape[0])
+        elif isinstance(batch, (tuple, list)):
+            for item in batch:
+                if hasattr(item, "shape") and len(item.shape) > 0:
+                    return int(item.shape[0])
+        elif hasattr(batch, "shape") and len(batch.shape) > 0:
+            return int(batch.shape[0])
+    except Exception:
+        pass
+    return None
+
+
+def _get_total_batches(iterator: Any) -> Optional[int]:
+    """Try to get total number of batches from the DataLoader iterator."""
+    try:
+        # The batch sampler knows the total number of batches for this epoch
+        sampler = getattr(iterator, "_index_sampler", None)
+        if sampler is not None:
+            return len(sampler)
+    except Exception:
+        pass
+    try:
+        # Fallback: _loader attribute (some custom iterators)
+        loader = getattr(iterator, "_loader", None)
+        if loader is not None:
+            return len(loader)
+    except Exception:
+        pass
+    return None
+
+
 # ── Frame helpers ──────────────────────────────────────────────────────────
 
 def _find_user_frame() -> Optional[Any]:
@@ -108,9 +158,20 @@ def _get_vars_file() -> str:
     return os.path.join(local_dir, "variables.jsonl")
 
 
-def _maybe_emit(batch: Any) -> None:
-    """Emit a dataloader_batch record if we're in a user for loop."""
+def _format_eta(seconds: float) -> str:
+    """Format seconds as H:MM:SS or M:SS."""
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h > 0:
+        return f"{h}:{m:02d}:{sec:02d}"
+    return f"{m}:{sec:02d}"
+
+
+def _maybe_emit(iterator: Any, batch: Any) -> None:
+    """Emit dataloader_batch and training_throughput records if we're in a user for loop."""
     try:
+        now = time.time()
         frame = _find_user_frame()
         if frame is None:
             return
@@ -119,27 +180,84 @@ def _maybe_emit(batch: Any) -> None:
         line = frame.f_lineno
         key = f"{filename}:{line}"
 
+        vars_file = _get_vars_file()
+
+        # ── Shape record (rate-limited to _MAX_BATCHES per call site) ──
         count = _batch_counter.get(key, 0)
-        if count >= _MAX_BATCHES:
-            return
-        _batch_counter[key] = count + 1
+        if count < _MAX_BATCHES:
+            _batch_counter[key] = count + 1
+            shapes = _extract_shapes(batch)
+            if shapes:
+                record: Dict[str, Any] = {
+                    "kind": "dataloader_batch",
+                    "file": filename,
+                    "line": line,
+                    "shapes": shapes,
+                    "batch_num": count + 1,
+                    "timestamp": now,
+                }
+                with open(vars_file, "a") as f:
+                    f.write(json.dumps(record) + "\n")
 
-        shapes = _extract_shapes(batch)
-        if not shapes:
+        # ── Throughput tracking ──
+        state = _throughput_state.get(key)
+        if state is None:
+            # First batch — initialise state
+            batch_size = _infer_batch_size(batch)
+            total_batches = _get_total_batches(iterator)
+            _throughput_state[key] = {
+                "batch_count": 1,
+                "last_yield_time": now,
+                "durations": [],          # rolling window of inter-batch durations
+                "batch_size": batch_size,
+                "total_batches": total_batches,
+            }
+            return  # Need ≥ 2 batches for timing
+
+        # Update timing
+        elapsed = now - state["last_yield_time"]
+        state["last_yield_time"] = now
+        state["batch_count"] += 1
+
+        durations: List[float] = state["durations"]
+        durations.append(elapsed)
+        if len(durations) > _THROUGHPUT_WINDOW:
+            durations.pop(0)
+
+        # Refresh total_batches lazily (only on first few calls, cheap)
+        if state["total_batches"] is None and state["batch_count"] <= 5:
+            state["total_batches"] = _get_total_batches(iterator)
+
+        # Emit throughput record every _THROUGHPUT_EVERY batches
+        if state["batch_count"] % _THROUGHPUT_EVERY != 0:
             return
 
-        record: Dict[str, Any] = {
-            "kind": "dataloader_batch",
+        avg_duration = sum(durations) / len(durations)
+        batches_per_sec = 1.0 / avg_duration if avg_duration > 0 else 0.0
+        batch_size = state["batch_size"] or 1
+        samples_per_sec = batches_per_sec * batch_size
+
+        throughput: Dict[str, Any] = {
+            "kind": "training_throughput",
             "file": filename,
             "line": line,
-            "shapes": shapes,
-            "batch_num": count + 1,
-            "timestamp": time.time(),
+            "samples_per_sec": round(samples_per_sec, 2),
+            "batches_per_sec": round(batches_per_sec, 4),
+            "batch_size": batch_size,
+            "batch_count": state["batch_count"],
+            "timestamp": now,
         }
 
-        vars_file = _get_vars_file()
+        total = state["total_batches"]
+        if total is not None and total > 0:
+            remaining = total - state["batch_count"]
+            throughput["total_batches"] = total
+            if remaining > 0 and batches_per_sec > 0:
+                throughput["eta_seconds"] = round(remaining / batches_per_sec, 1)
+
         with open(vars_file, "a") as f:
-            f.write(json.dumps(record) + "\n")
+            f.write(json.dumps(throughput) + "\n")
+
     except Exception:
         pass
 
@@ -153,7 +271,7 @@ def _patch_iter_class(cls: Any) -> None:
     def patched_next(self: Any) -> Any:  # type: ignore[misc]
         batch = orig_next(self)
         try:
-            _maybe_emit(batch)
+            _maybe_emit(self, batch)
         except Exception:
             pass
         return batch

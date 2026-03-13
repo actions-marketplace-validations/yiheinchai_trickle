@@ -85,6 +85,39 @@ let prevTypeHashes: Map<string, string> = new Map();
 /** Variables whose type changed since the last run: "file:line:varName" */
 let changedVarKeys: Set<string> = new Set();
 
+/** Load persisted type hashes from .trickle/type_history.json for cross-session drift detection. */
+function loadTypeHistory(): void {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) return;
+  const historyPath = path.join(workspaceFolders[0].uri.fsPath, '.trickle', 'type_history.json');
+  try {
+    if (fs.existsSync(historyPath)) {
+      const data = JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+      if (data && typeof data === 'object') {
+        prevTypeHashes = new Map(Object.entries(data));
+      }
+    }
+  } catch {
+    // Ignore — corrupt or missing history is non-fatal
+  }
+}
+
+/** Persist current type hashes to .trickle/type_history.json for next session. */
+function saveTypeHistory(hashes: Map<string, string>): void {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) return;
+  const trickleDir = path.join(workspaceFolders[0].uri.fsPath, '.trickle');
+  const historyPath = path.join(trickleDir, 'type_history.json');
+  try {
+    if (!fs.existsSync(trickleDir)) fs.mkdirSync(trickleDir, { recursive: true });
+    const obj: Record<string, string> = {};
+    hashes.forEach((v, k) => { obj[k] = v; });
+    fs.writeFileSync(historyPath, JSON.stringify(obj), 'utf8');
+  } catch {
+    // Non-fatal — persistence is best-effort
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   statusBarItem.command = 'trickle.refreshVariables';
@@ -93,6 +126,9 @@ export function activate(context: vscode.ExtensionContext) {
   // Create diagnostic collection for error reporting
   diagnosticCollection = vscode.languages.createDiagnosticCollection('trickle');
   context.subscriptions.push(diagnosticCollection);
+
+  // Load persisted type hashes before first variable load (enables cross-session drift detection)
+  loadTypeHistory();
 
   // Load variable data
   loadAllVariables();
@@ -321,17 +357,6 @@ function loadAllVariables() {
     return;
   }
 
-  // Snapshot current hashes before clearing, for drift detection
-  const currentHashes: Map<string, string> = new Map();
-  for (const [filePath, lineMap] of varIndex) {
-    for (const [lineNo, obsArr] of lineMap) {
-      for (const obs of obsArr) {
-        const key = `${filePath}:${lineNo}:${obs.varName}`;
-        currentHashes.set(key, obs.typeHash);
-      }
-    }
-  }
-
   varIndex.clear();
   notebookCellIndex.clear();
   dimLabelIndex.clear();
@@ -408,23 +433,31 @@ function loadAllVariables() {
     }
   }
 
-  // Detect type drift: compare new hashes against previous run's hashes
-  changedVarKeys.clear();
-  if (prevTypeHashes.size > 0) {
-    for (const [filePath, lineMap] of varIndex) {
-      for (const [lineNo, obsArr] of lineMap) {
-        for (const obs of obsArr) {
-          const key = `${filePath}:${lineNo}:${obs.varName}`;
-          const prev = prevTypeHashes.get(key);
-          if (prev !== undefined && prev !== obs.typeHash) {
-            changedVarKeys.add(key);
-          }
-        }
+  // Build hashes from freshly-loaded data
+  const newHashes: Map<string, string> = new Map();
+  for (const [filePath, lineMap] of varIndex) {
+    for (const [lineNo, obsArr] of lineMap) {
+      for (const obs of obsArr) {
+        const key = `${filePath}:${lineNo}:${obs.varName}`;
+        newHashes.set(key, obs.typeHash);
       }
     }
   }
-  // Update prevTypeHashes with the current run's data
-  prevTypeHashes = currentHashes;
+
+  // Detect type drift: compare new hashes against previous run's hashes
+  changedVarKeys.clear();
+  if (prevTypeHashes.size > 0) {
+    for (const [key, newHash] of newHashes) {
+      const prev = prevTypeHashes.get(key);
+      if (prev !== undefined && prev !== newHash) {
+        changedVarKeys.add(key);
+      }
+    }
+  }
+
+  // Update baseline and persist for cross-session drift detection
+  prevTypeHashes = newHashes;
+  saveTypeHistory(newHashes);
 
   updateStatusBar();
   refreshInlineHints();

@@ -42,6 +42,8 @@ interface TypeNode {
   elements?: TypeNode[];
   properties?: Record<string, TypeNode>;
   resolved?: TypeNode;
+  key?: TypeNode;
+  value?: TypeNode;
 }
 
 /** A dimension label record from variables.jsonl */
@@ -2486,6 +2488,12 @@ function typeNodeToString(node: TypeNode, depth: number = 3, dimLabels?: string[
       return `{ ${first4.join('; ')}; ... }`;
     }
 
+    case 'map': {
+      const keyType = node.key ? typeNodeToString(node.key, depth - 1) : 'string';
+      const valType = node.value ? typeNodeToString(node.value, depth - 1) : 'Any';
+      return `dict[${keyType}, ${valType}]`;
+    }
+
     case 'function':
       if (node.name && node.name !== 'anonymous') {
         return `${node.name}(...)`;
@@ -2538,6 +2546,10 @@ function typeNodeToStringCompact(node: TypeNode, dimLabels?: string[], sample?: 
     const needsWrapper = inner.includes('|') || inner.includes('(') ||
       (inner.includes('<') && !inner.endsWith('>'));
     return needsWrapper ? `Array<${inner}>` : `${inner}[]`;
+  }
+
+  if (node.kind === 'map') {
+    return typeNodeToString(node, 3, dimLabels);
   }
 
   if (node.kind !== 'object' || !node.properties) {
@@ -2819,6 +2831,17 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
         return node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
       }
       return 'unknown';
+
+    case 'map': {
+      const keyType = node.key ? typeNodeToString(node.key, 3, dimLabels) : 'string';
+      const valNode = node.value;
+      if (valNode && valNode.kind === 'object' && valNode.properties && Object.keys(valNode.properties).length > 2) {
+        const valStr = typeNodeToPretty(valNode, indent + 1, dimLabels);
+        return `dict[${keyType}, ${valStr}]`;
+      }
+      const valType = valNode ? typeNodeToString(valNode, 3, dimLabels) : 'Any';
+      return `dict[${keyType}, ${valType}]`;
+    }
 
     case 'promise':
       return node.resolved ? `Promise<${typeNodeToString(node.resolved, 3, dimLabels)}>` : 'Promise<unknown>';

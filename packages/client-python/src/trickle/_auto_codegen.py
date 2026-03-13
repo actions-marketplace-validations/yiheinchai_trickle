@@ -33,6 +33,8 @@ def _type_node_key(node: Dict[str, Any]) -> str:
     if kind == "union":
         members = sorted(_type_node_key(m) for m in node.get("members", []))
         return f"u:({'|'.join(members)})"
+    if kind == "map":
+        return f"m:{_type_node_key(node.get('key', {}))}=>{_type_node_key(node.get('value', {}))}"
     return json.dumps(node, sort_keys=True)
 
 
@@ -76,6 +78,16 @@ def _merge_type_nodes(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
 
     # Both objects: merge properties
     if a.get("kind") == "object" and b.get("kind") == "object":
+        a_cn = a.get("class_name")
+        b_cn = b.get("class_name")
+        # Display-only types (ndarray, Tensor, DataFrame, etc.) have metadata
+        # properties (shape, dtype, stats) that vary per call.  Merging them
+        # creates huge Union[Any, Any, ...] bloat.  Keep *a*'s value instead.
+        _DISPLAY_CLASSES = {"ndarray", "Tensor", "DataFrame", "Series",
+                            "DatasetDict", "Dataset"}
+        if a_cn and a_cn == b_cn and a_cn in _DISPLAY_CLASSES:
+            return a
+
         a_props = a.get("properties", {})
         b_props = b.get("properties", {})
         all_keys = set(a_props) | set(b_props)
@@ -89,7 +101,16 @@ def _merge_type_nodes(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
                 merged[key] = _make_optional(a_props[key])
             else:
                 merged[key] = _make_optional(b_props[key])
-        return {"kind": "object", "properties": merged}
+        result: Dict[str, Any] = {"kind": "object", "properties": merged}
+        if a_cn:
+            result["class_name"] = a_cn
+        return result
+
+    # Both maps: merge value types
+    if a.get("kind") == "map" and b.get("kind") == "map":
+        return {"kind": "map",
+                "key": _merge_type_nodes(a.get("key", {}), b.get("key", {})),
+                "value": _merge_type_nodes(a.get("value", {}), b.get("value", {}))}
 
     # Both arrays: merge element types
     if a.get("kind") == "array" and b.get("kind") == "array":
@@ -216,8 +237,19 @@ def _type_to_python(
     if kind == "function":
         return "Callable[..., Any]"
 
+    if kind == "map":
+        key_type = _type_to_python(node.get("key", {}), extracted, parent_name, prop_name)
+        val_type = _type_to_python(node.get("value", {}), extracted, parent_name, prop_name)
+        return f"Dict[{key_type}, {val_type}]"
+
     if kind == "object":
         props = node.get("properties", {})
+        cn = node.get("class_name", "")
+        # Display-only types: their properties are metadata (shape, dtype,
+        # stats) not structural fields.  Render as just the class name.
+        if cn in ("ndarray", "Tensor", "DataFrame", "Series",
+                  "DatasetDict", "Dataset"):
+            return "Any"
         if not props:
             return "Dict[str, Any]"
         if prop_name:
@@ -290,7 +322,7 @@ def _format_sample_value(val: Any, depth: int = 0) -> str:
     if isinstance(val, (int, float)):
         return str(val)
     if isinstance(val, str):
-        if depth == 0 and len(val) > 60:
+        if len(val) > 60:
             return repr(val[:57] + "...")
         return repr(val)
     if isinstance(val, list):
@@ -472,14 +504,17 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     return_type = fn["returnType"]
 
     # Input type
+    _DISPLAY_CLS_IN = {"ndarray", "Tensor", "DataFrame", "Series",
+                       "DatasetDict", "Dataset"}
     if args_type.get("kind") == "tuple":
         elements = args_type.get("elements", [])
-        if len(elements) == 1 and elements[0].get("kind") == "object":
+        if (len(elements) == 1 and elements[0].get("kind") == "object"
+                and elements[0].get("class_name", "") not in _DISPLAY_CLS_IN):
             sections.append(_render_typed_dict(f"{base_name}Input", elements[0], extracted))
         else:
             py_type = _type_to_python(args_type, extracted, base_name, None)
             sections.append(f"{base_name}Input = {py_type}")
-    elif args_type.get("kind") == "object":
+    elif args_type.get("kind") == "object" and args_type.get("class_name", "") not in _DISPLAY_CLS_IN:
         sections.append(_render_typed_dict(f"{base_name}Input", args_type, extracted))
     else:
         py_type = _type_to_python(args_type, extracted, base_name, None)
@@ -488,7 +523,11 @@ def _generate_py_for_function(fn: Dict[str, Any]) -> str:
     sections.append("")
 
     # Output type
-    if return_type.get("kind") == "object" and return_type.get("properties"):
+    _DISPLAY_CLS = {"ndarray", "Tensor", "DataFrame", "Series",
+                    "DatasetDict", "Dataset"}
+    rt_cn = return_type.get("class_name", "")
+    if (return_type.get("kind") == "object" and return_type.get("properties")
+            and rt_cn not in _DISPLAY_CLS):
         sections.append(_render_typed_dict(f"{base_name}Output", return_type, extracted))
     else:
         py_type = _type_to_python(return_type, extracted, base_name, None)

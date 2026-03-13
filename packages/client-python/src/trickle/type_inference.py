@@ -9,6 +9,48 @@ import inspect
 from typing import Any, Dict, Set
 
 
+def _type_nodes_equal(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    """Check if two TypeNode dicts are structurally equivalent."""
+    if a.get("kind") != b.get("kind"):
+        return False
+    kind = a.get("kind")
+    if kind == "primitive":
+        return a.get("name") == b.get("name")
+    if kind == "object":
+        # Display-only types: metadata varies per instance but the
+        # structural type is the same (e.g. all ndarrays are "ndarray").
+        a_cn = a.get("class_name")
+        b_cn = b.get("class_name")
+        _DISPLAY_CLASSES = {"ndarray", "Tensor", "DataFrame", "Series",
+                            "DatasetDict", "Dataset"}
+        if a_cn and a_cn == b_cn and a_cn in _DISPLAY_CLASSES:
+            return True
+        a_props = a.get("properties", {})
+        b_props = b.get("properties", {})
+        if set(a_props) != set(b_props):
+            return False
+        return all(_type_nodes_equal(a_props[k], b_props[k]) for k in a_props)
+    if kind in ("array", "set"):
+        return _type_nodes_equal(a.get("element", {}), b.get("element", {}))
+    if kind == "tuple":
+        a_els = a.get("elements", [])
+        b_els = b.get("elements", [])
+        if len(a_els) != len(b_els):
+            return False
+        return all(_type_nodes_equal(x, y) for x, y in zip(a_els, b_els))
+    if kind == "union":
+        a_m = a.get("members", [])
+        b_m = b.get("members", [])
+        if len(a_m) != len(b_m):
+            return False
+        return all(_type_nodes_equal(x, y) for x, y in zip(a_m, b_m))
+    if kind == "map":
+        return (_type_nodes_equal(a.get("key", {}), b.get("key", {}))
+                and _type_nodes_equal(a.get("value", {}), b.get("value", {})))
+    # For unknown kinds, fall back to dict equality
+    return a == b
+
+
 def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) -> Dict[str, Any]:
     """Infer a TypeNode dictionary for *value*.
 
@@ -297,6 +339,21 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         props = {}
         for k, v in value.items():
             props[str(k)] = infer_type(v, max_depth - 1, _seen)
+
+        # Large dicts with uniform value types → Dict[str, V] (map)
+        # instead of a named-property object that would generate hundreds
+        # of identical TypedDict classes.
+        _MAP_THRESHOLD = 8
+        if (
+            len(props) > _MAP_THRESHOLD
+            and all(isinstance(k, str) for k in value)
+        ):
+            val_types = list(props.values())
+            # Structural equality: compare the canonical JSON-like dict
+            first = val_types[0]
+            if all(_type_nodes_equal(v, first) for v in val_types[1:]):
+                return {"kind": "map", "key": {"kind": "primitive", "name": "string"}, "value": first}
+
         result: Dict[str, Any] = {"kind": "object", "properties": props}
         # For small dicts with string keys, set class_name so the renderer
         # can display inline values as {key: value} instead of {key: type}

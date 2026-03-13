@@ -2108,6 +2108,11 @@ function typeNodeToString(node, depth = 3, dimLabels) {
             const first4 = entries.slice(0, 4).map(([k, v]) => `${k}: ${typeNodeToString(v, depth - 1)}`);
             return `{ ${first4.join('; ')}; ... }`;
         }
+        case 'map': {
+            const keyType = node.key ? typeNodeToString(node.key, depth - 1) : 'string';
+            const valType = node.value ? typeNodeToString(node.value, depth - 1) : 'Any';
+            return `dict[${keyType}, ${valType}]`;
+        }
         case 'function':
             if (node.name && node.name !== 'anonymous') {
                 return `${node.name}(...)`;
@@ -2160,6 +2165,9 @@ function typeNodeToStringCompact(node, dimLabels, sample) {
         const needsWrapper = inner.includes('|') || inner.includes('(') ||
             (inner.includes('<') && !inner.endsWith('>'));
         return needsWrapper ? `Array<${inner}>` : `${inner}[]`;
+    }
+    if (node.kind === 'map') {
+        return typeNodeToString(node, 3, dimLabels);
     }
     if (node.kind !== 'object' || !node.properties) {
         return typeNodeToString(node, 3, dimLabels);
@@ -2432,6 +2440,16 @@ function typeNodeToPretty(node, indent = 0, dimLabels) {
                 return node.elements.map(e => typeNodeToString(e, 3, dimLabels)).join(' | ');
             }
             return 'unknown';
+        case 'map': {
+            const keyType = node.key ? typeNodeToString(node.key, 3, dimLabels) : 'string';
+            const valNode = node.value;
+            if (valNode && valNode.kind === 'object' && valNode.properties && Object.keys(valNode.properties).length > 2) {
+                const valStr = typeNodeToPretty(valNode, indent + 1, dimLabels);
+                return `dict[${keyType}, ${valStr}]`;
+            }
+            const valType = valNode ? typeNodeToString(valNode, 3, dimLabels) : 'Any';
+            return `dict[${keyType}, ${valType}]`;
+        }
         case 'promise':
             return node.resolved ? `Promise<${typeNodeToString(node.resolved, 3, dimLabels)}>` : 'Promise<unknown>';
         default:

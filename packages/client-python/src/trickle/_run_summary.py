@@ -298,6 +298,11 @@ def _compact_type(node: Dict[str, Any], depth: int = 0) -> str:
             return f"{non_none[0]} | None"
         return " | ".join(dict.fromkeys(members))  # deduplicate, preserve order
 
+    if kind == "map":
+        key_t = _compact_type(node.get("key", {}), depth + 1)
+        val_t = _compact_type(node.get("value", {}), depth + 1)
+        return f"dict[{key_t}, {val_t}]"
+
     if kind == "set":
         inner = _compact_type(node.get("element", {}), depth + 1)
         return f"set[{inner}]"

@@ -326,3 +326,47 @@ asyncio.run(main())
 ```
 
 Open the file in VSCode — every `await` assignment gets an inline type hint, just like synchronous code.
+
+---
+
+## Use Case: asyncio.gather() Result Typing
+
+When using `asyncio.gather()` to run multiple coroutines concurrently, each coroutine may return a different type. Trickle now shows per-element types for heterogeneous gather results instead of a vague union type.
+
+```python
+import trickle.auto
+import asyncio
+
+async def fetch_embeddings(text: str) -> list[float]:
+    ...
+    return [0.1, 0.2, 0.3, 0.4]
+
+async def classify(text: str) -> str:
+    ...
+    return "positive"
+
+async def get_confidence(text: str) -> float:
+    ...
+    return 0.92
+
+async def main():
+    # Before: results shown as Array<number[] | string | number>
+    # After:  results shown as list[number[], string, number]
+    results = await asyncio.gather(
+        fetch_embeddings("hello"),
+        classify("hello"),
+        get_confidence("hello"),
+    )
+
+    # Tuple unpacking also works — each variable gets its specific type
+    embeddings, label, score = await asyncio.gather(
+        fetch_embeddings("world"),
+        classify("world"),
+        get_confidence("world"),
+    )
+    # embeddings: number[]
+    # label: "positive"
+    # score: 0.92
+```
+
+**How it works:** Trickle detects when a list's elements have heterogeneous types and fewer than 12 elements (typical for gather calls). Instead of showing `Array<union(...)>`, it shows a positional `list[T1, T2, ...]` type that matches Python's type stub for `asyncio.gather()`.

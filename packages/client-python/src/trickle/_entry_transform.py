@@ -44,7 +44,7 @@ def run_entry_with_observation(
     """
     import tempfile
 
-    abs_path = os.path.abspath(filepath)
+    abs_path = os.path.realpath(filepath)
 
     if module_name is None:
         module_name = os.path.basename(filepath).rsplit(".", 1)[0]

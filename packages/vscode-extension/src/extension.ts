@@ -865,7 +865,9 @@ function loadAllVariables() {
           const obs = record as VariableObservation;
           if (obs.kind !== 'variable') continue;
 
-          const filePath = obs.file;
+          // Resolve symlinks so paths match VSCode's document.uri.fsPath
+          let filePath = obs.file;
+          try { filePath = fs.realpathSync(filePath); } catch { /* keep original if file doesn't exist */ }
 
           // Check if this is a notebook cell observation
           // Format: "/path/to/notebook.ipynb#cell_N" or "__notebook__cell_N.py"

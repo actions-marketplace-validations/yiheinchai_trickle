@@ -698,7 +698,7 @@ class _TrickleTraceLoader:
 
         _traced_modules.add(fullname)
 
-        filepath = self.spec.origin
+        filepath = os.path.realpath(self.spec.origin)
         module_name = fullname.rsplit(".", 1)[-1]
 
         try:

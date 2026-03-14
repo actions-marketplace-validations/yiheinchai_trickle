@@ -68,6 +68,14 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if max_depth <= 0:
         return {"kind": "primitive", "name": "unknown"}
 
+    # Unwrap TrackedObject to get the actual object for type inference
+    try:
+        from trickle.attr_tracker import TrackedObject
+        if isinstance(value, TrackedObject):
+            value = object.__getattribute__(value, "_inner")
+    except Exception:
+        pass
+
     if _seen is None:
         _seen = set()
 

@@ -514,6 +514,8 @@ function generateTsForFunction(fn: FunctionTypeData): string {
 
   // Function declaration
   const funcIdent = baseName.charAt(0).toLowerCase() + baseName.slice(1);
+  // Wrap return type in Promise<> for async functions
+  const returnTypeStr = fn.isAsync ? `Promise<${outputName}>` : outputName;
 
   const result: string[] = [];
   if (extractedLines.length > 0) result.push(...extractedLines);
@@ -524,6 +526,7 @@ function generateTsForFunction(fn: FunctionTypeData): string {
     for (const variant of fn.variants) {
       const vExt: ExtractedInterface[] = [];
       const vRet = typeNodeToTS(variant.returnType, vExt, baseName, undefined, 0);
+      const vRetStr = fn.isAsync ? `Promise<${vRet}>` : vRet;
       const vNames = variant.paramNames || fn.paramNames || [];
       let vArgEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
       if (variant.argsType.kind === "tuple") {
@@ -535,12 +538,12 @@ function generateTsForFunction(fn: FunctionTypeData): string {
       const vParams = vArgEntries.map(e =>
         `${e.paramName}: ${typeNodeToTS(e.typeNode, vExt, baseName, e.paramName, 0)}`
       );
-      result.push(`export declare function ${funcIdent}(${vParams.join(", ")}): ${vRet};`);
+      result.push(`export declare function ${funcIdent}(${vParams.join(", ")}): ${vRetStr};`);
     }
   } else {
     let funcDecl: string;
     if (singleObjectArg) {
-      funcDecl = `export declare function ${funcIdent}(input: ${baseName}Input): ${outputName};`;
+      funcDecl = `export declare function ${funcIdent}(input: ${baseName}Input): ${returnTypeStr};`;
     } else {
       const params = argEntries.map((entry) => {
         if (entry.typeNode.kind === "object" && Object.keys(entry.typeNode.properties || {}).length > 0) {
@@ -553,7 +556,7 @@ function generateTsForFunction(fn: FunctionTypeData): string {
         }
         return `${entry.paramName}: ${typeNodeToTS(entry.typeNode, extracted, baseName, entry.paramName, 0)}`;
       });
-      funcDecl = `export declare function ${funcIdent}(${params.join(", ")}): ${outputName};`;
+      funcDecl = `export declare function ${funcIdent}(${params.join(", ")}): ${returnTypeStr};`;
     }
     result.push(funcDecl);
   }

@@ -89,15 +89,26 @@ function mergeConfigWithOpts(opts: RunOptions, config: TrickleConfig | null): Ru
 
 function detectSingleFile(command: string): string | null {
   const trimmed = command.trim();
-  // Must be a single token (no spaces unless quoted)
-  if (/\s/.test(trimmed)) return null;
 
-  const ext = path.extname(trimmed).toLowerCase();
+  let candidate = trimmed;
+  // For commands like "node app.js" or "python script.py", extract the file
+  if (/\s/.test(trimmed)) {
+    const match = trimmed.match(/^(?:node|ts-node|tsx|bun|deno|python3?|python3?\.\d+)\s+(.+)$/);
+    if (match) {
+      candidate = match[1].trim();
+      // Don't match if there are additional flags/args after the file
+      if (/\s/.test(candidate)) return null;
+    } else {
+      return null;
+    }
+  }
+
+  const ext = path.extname(candidate).toLowerCase();
   if (![".js", ".ts", ".tsx", ".jsx", ".mjs", ".cjs", ".mts", ".py"].includes(ext)) {
     return null;
   }
 
-  const resolved = path.resolve(trimmed);
+  const resolved = path.resolve(candidate);
   if (!fs.existsSync(resolved)) return null;
 
   return resolved;

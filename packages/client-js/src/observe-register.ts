@@ -389,6 +389,46 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     insertions.push({ position: closeBrace + 1, name, paramNames });
   }
 
+  // Find class declarations and wrap their methods
+  const classRegex = /^[ \t]*class\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?:extends\s+[a-zA-Z_$.]+\s*)?\{/gm;
+  const classInsertions: Array<{ position: number; code: string }> = [];
+  let classMatch;
+  while ((classMatch = classRegex.exec(source)) !== null) {
+    const className = classMatch[1];
+    const classOpenBrace = source.indexOf('{', classMatch.index + classMatch[0].length - 1);
+    if (classOpenBrace === -1) continue;
+    const classCloseBrace = findClosingBrace(source, classOpenBrace);
+    if (classCloseBrace === -1) continue;
+
+    // Extract methods from the class body
+    const classBody = source.slice(classOpenBrace + 1, classCloseBrace);
+    // Match: methodName(params) { or async methodName(params) { or static methodName(params) {
+    const methodRegex = /^[ \t]*(static\s+)?(?:async\s+)?([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(([^)]*)\)\s*\{/gm;
+    let methodMatch;
+    while ((methodMatch = methodRegex.exec(classBody)) !== null) {
+      const isStatic = !!methodMatch[1];
+      const methodName = methodMatch[2];
+      // Skip constructor and private methods
+      if (methodName === 'constructor' || methodName.startsWith('_')) continue;
+      // Extract param names
+      const mParamStr = methodMatch[3].trim();
+      const mParamNames = mParamStr
+        ? mParamStr.split(',').map((p: string) => {
+            const trimmed = p.trim().split('=')[0].trim().split(':')[0].trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('...')) return '';
+            return trimmed;
+          }).filter(Boolean)
+        : [];
+      const target = isStatic ? className : `${className}.prototype`;
+      const obsName = `${className}.${methodName}`;
+      const paramNamesArg = mParamNames.length > 0 ? JSON.stringify(mParamNames) : 'null';
+      classInsertions.push({
+        position: classCloseBrace + 1,
+        code: `\ntry{${target}.${methodName}=__trickle_wrap(${target}.${methodName},'${obsName}',${paramNamesArg})}catch(__e){}\n`,
+      });
+    }
+  }
+
   // Also find variable declarations for tracing
   const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0';
 
@@ -468,7 +508,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     }
   }
 
-  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0) return source;
+  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && classInsertions.length === 0) return source;
 
   // Resolve the path to the wrap helper (compiled JS)
   const wrapHelperPath = path.join(__dirname, 'wrap.js');
@@ -529,6 +569,11 @@ function transformCjsSource(source: string, filename: string, moduleName: string
       position: lineEnd,
       code: `\n;try{${calls}}catch(__e){}\n`,
     });
+  }
+
+  // Add class method wrappings
+  for (const ci of classInsertions) {
+    allInsertions.push(ci);
   }
 
   // Sort by position descending (insert from end to preserve earlier positions)

@@ -160,6 +160,11 @@ _trickle_tv_file = None
 def _trickle_tv(_val, _name, _line, _func=None):
     global _trickle_tv_file
     try:
+        # Fast-path: check cache with type name only (avoids expensive infer_type for repeated types)
+        _tn = type(_val).__name__
+        _fast_ck = {filename!r} + ':' + str(_line) + ':' + _name + ':' + _tn
+        if _fast_ck in _trickle_tv_cache:
+            return
         if _trickle_tv_file is None:
             _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')
             _trickle_os.makedirs(_d, exist_ok=True)
@@ -169,8 +174,10 @@ def _trickle_tv(_val, _name, _line, _func=None):
         _th = _trickle_json.dumps(_t, sort_keys=True)[:32]
         _ck = {filename!r} + ':' + str(_line) + ':' + _name + ':' + _th
         if _ck in _trickle_tv_cache:
+            _trickle_tv_cache.add(_fast_ck)
             return
         _trickle_tv_cache.add(_ck)
+        _trickle_tv_cache.add(_fast_ck)
         _s = None
         if hasattr(_val, 'shape') and hasattr(_val, 'dtype'):
             _parts = [f'shape={{list(_val.shape)}}', f'dtype={{_val.dtype}}']

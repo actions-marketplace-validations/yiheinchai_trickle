@@ -328,8 +328,14 @@ function typeNodeToTS(
 ): string {
   if (!node || !node.kind) return "unknown";
   switch (node.kind) {
-    case "primitive":
-      return node.name || "unknown";
+    case "primitive": {
+      const n = node.name || "unknown";
+      // Map Python-style type names to TypeScript
+      if (n === "integer") return "number";
+      if (n === "null") return "null";
+      if (n === "undefined") return "undefined";
+      return n;
+    }
     case "unknown":
       return "unknown";
     case "array": {
@@ -577,10 +583,16 @@ function typeNodeToPython(
       switch (node.name) {
         case "string": return "str";
         case "number": return "float";
+        case "integer": return "int";
         case "boolean": return "bool";
         case "null":
         case "undefined": return "None";
         case "bigint": return "int";
+        case "bytes": return "bytes";
+        case "datetime": return "datetime";
+        case "date": return "date";
+        case "time": return "time";
+        case "Generator": return "Iterator";
         default: return "Any";
       }
     case "unknown": return "Any";
@@ -721,32 +733,43 @@ function generatePyForFunction(fn: FunctionTypeData): string {
   const baseName = toPascalCase(fn.name);
   const extracted: Array<{ name: string; node: TypeNode }> = [];
   const sections: string[] = [];
+  const paramNames = fn.paramNames || [];
 
-  // Input type
-  const _hasValidObjKeys = (n: TypeNode) => {
-    const ks = Object.keys(n.properties || {});
-    return ks.length > 0 && ks.every((k) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k));
-  };
-  if (fn.argsType.kind === "tuple" && fn.argsType.elements?.length === 1 && fn.argsType.elements[0].kind === "object" && _hasValidObjKeys(fn.argsType.elements[0])) {
-    sections.push(renderPythonTypedDict(`${baseName}Input`, fn.argsType.elements[0], extracted));
-  } else if (fn.argsType.kind === "object" && _hasValidObjKeys(fn.argsType)) {
-    sections.push(renderPythonTypedDict(`${baseName}Input`, fn.argsType, extracted));
-  } else {
-    const pyType = typeNodeToPython(fn.argsType, extracted, baseName, undefined);
-    sections.push(`${baseName}Input = ${pyType}`);
+  // Build parameter list for def signature
+  const params: string[] = [];
+  if (fn.argsType.kind === "tuple") {
+    for (let i = 0; i < (fn.argsType.elements || []).length; i++) {
+      const pname = paramNames[i] || `arg${i}`;
+      const el = fn.argsType.elements![i];
+      if (pname === "self" || pname === "cls") {
+        params.push(pname);
+      } else {
+        const pyType = typeNodeToPython(el, extracted, baseName, pname);
+        params.push(`${toSnakeCase(pname)}: ${pyType}`);
+      }
+    }
   }
-  sections.push("");
-  sections.push("");
 
-  // Output type
-  const retKeys = Object.keys(fn.returnType.properties || {});
-  const retKeysValid = retKeys.every((k) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(k));
-  if (fn.returnType.kind === "object" && retKeys.length > 0 && retKeysValid) {
-    sections.push(renderPythonTypedDict(`${baseName}Output`, fn.returnType, extracted));
-  } else {
-    const pyType = typeNodeToPython(fn.returnType, extracted, baseName, undefined);
-    sections.push(`${baseName}Output = ${pyType}`);
+  // Return type
+  const retType = typeNodeToPython(fn.returnType, extracted, baseName, undefined);
+
+  // Emit extracted TypedDicts before the function
+  const emitted = new Set<string>();
+  let cursor = 0;
+  while (cursor < extracted.length) {
+    const { name, node } = extracted[cursor];
+    cursor++;
+    if (emitted.has(name)) continue;
+    emitted.add(name);
+    sections.push(renderPythonTypedDict(name, node, extracted));
+    sections.push("");
+    sections.push("");
   }
+
+  // Generate def signature
+  const asyncPrefix = fn.isAsync ? "async " : "";
+  const funcName = toSnakeCase(fn.name);
+  sections.push(`${asyncPrefix}def ${funcName}(${params.join(", ")}) -> ${retType}: ...`);
 
   return sections.join("\n");
 }

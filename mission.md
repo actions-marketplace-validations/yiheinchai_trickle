@@ -4,21 +4,25 @@ For now, i want you to specifically focus on:
 <general directive>
 test trickle on more real world codebases, key is to have diversity of codebases, find painpoints and fix them, maximise value to user
 
-my vision to have every single variable to be able to have inline type hints for any repo / codebase. the current usecases for js/ts does not follow this vision. you must realise this vision for python/ts/js
+my vision to have every single variable to be able to have inline type hints for any repo / codebase. the current usecases for js/ts does not follow this vision. you must realise this vision for python/ts/js.
+
+this includes all files that are part of the codebase including imported modules etc.
 </general directive>
 
 <focus point>
 
 Current status of "every variable gets inline hints":
+
 - **Python**: Full coverage — entry file + imported modules, all assignments traced
 - **JS CJS**: Full coverage — entry file + imported modules, const/let/var + class methods
 - **JS ESM**: Now working — entry module transformed via wrapper + dynamic import approach
 - **TypeScript**: Works via NODE_OPTIONS for ts-node/tsx
 
 Remaining gaps:
+
 1. **ESM function-level observations** — variable tracing works, but function signatures aren't written to observations.jsonl (transport config issue in wrapper process)
 2. **Flask/decorator route handlers** — function signatures not captured for framework-called handlers
-3. **.pyi missing def statements** — CLI generates type aliases but not function signatures for the local codegen path
+3. **Multifile .pyi generation** — CLI only generates .pyi for the entry file. Imported modules' function observations need to also produce .pyi stubs.
 
 </focus point>
 

@@ -1,12 +1,16 @@
 import * as crypto from "crypto";
+import * as fs from "fs";
+import * as path from "path";
 import chalk from "chalk";
 import { getBackendUrl } from "../config";
+import { isLocalMode } from "../local-data";
 
 export interface CaptureOptions {
   header?: string[];
   body?: string;
   env?: string;
   module?: string;
+  local?: boolean;
 }
 
 interface TypeNode {
@@ -77,14 +81,16 @@ export async function captureCommand(
     }
   }
 
-  // Check backend connectivity
-  try {
-    const res = await fetch(`${backendUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) throw new Error("not ok");
-  } catch {
-    console.error(chalk.red(`\n  Cannot reach trickle backend at ${chalk.bold(backendUrl)}`));
-    console.error(chalk.gray("  Start the backend first: npx trickle-backend\n"));
-    process.exit(1);
+  // Check backend connectivity (skip in local mode)
+  if (!isLocalMode(opts)) {
+    try {
+      const res = await fetch(`${backendUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) throw new Error("not ok");
+    } catch {
+      console.error(chalk.red(`\n  Cannot reach trickle backend at ${chalk.bold(backendUrl)}`));
+      console.error(chalk.gray("  Start the backend first: npx trickle-backend\n"));
+      process.exit(1);
+    }
   }
 
   console.log("");
@@ -167,19 +173,28 @@ export async function captureCommand(
     sampleOutput: resJson,
   };
 
-  // Send to backend
-  try {
-    const res = await fetch(`${backendUrl}/api/ingest`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    console.error(chalk.red(`\n  Failed to send types to backend: ${msg}\n`));
-    process.exit(1);
+  // Send to backend or write locally
+  if (isLocalMode(opts)) {
+    const trickleDir = path.join(process.cwd(), ".trickle");
+    if (!fs.existsSync(trickleDir)) {
+      fs.mkdirSync(trickleDir, { recursive: true });
+    }
+    const jsonlPath = path.join(trickleDir, "observations.jsonl");
+    fs.appendFileSync(jsonlPath, JSON.stringify(payload) + "\n", "utf-8");
+  } else {
+    try {
+      const res = await fetch(`${backendUrl}/api/ingest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      console.error(chalk.red(`\n  Failed to send types to backend: ${msg}\n`));
+      process.exit(1);
+    }
   }
 
   console.log(chalk.gray(`  Route:    `) + chalk.white(functionName));

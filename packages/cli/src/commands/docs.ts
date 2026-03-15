@@ -2,12 +2,15 @@ import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
 import { fetchMockConfig, fetchCodegen, listFunctions, MockRoute } from "../api-client";
+import { isLocalMode, getLocalMockRoutes, getLocalFunctions } from "../local-data";
+import { generateFromJsonl } from "../local-codegen";
 
 export interface DocsOptions {
   out?: string;
   html?: boolean;
   env?: string;
   title?: string;
+  local?: boolean;
 }
 
 /**
@@ -23,19 +26,33 @@ export async function docsCommand(opts: DocsOptions): Promise<void> {
   let routes: MockRoute[];
   let typesContent: string;
   let totalFunctions: number;
-  try {
-    const [mockConfig, codegen, funcList] = await Promise.all([
-      fetchMockConfig(),
-      fetchCodegen({ env: opts.env }),
-      listFunctions({ env: opts.env, limit: 500 }),
-    ]);
-    routes = mockConfig.routes;
-    typesContent = codegen.types;
-    totalFunctions = funcList.total;
-  } catch {
-    console.error(chalk.red("\n  Cannot connect to trickle backend."));
-    console.error(chalk.gray("  Is the backend running?\n"));
-    process.exit(1);
+
+  if (isLocalMode(opts)) {
+    const jsonlPath = path.join(process.cwd(), ".trickle", "observations.jsonl");
+    const mockResult = getLocalMockRoutes();
+    routes = mockResult.routes;
+    const stubs = generateFromJsonl(jsonlPath);
+    const sections: string[] = [];
+    for (const [_mod, content] of Object.entries(stubs)) {
+      sections.push(content.ts);
+    }
+    typesContent = sections.join("\n");
+    totalFunctions = getLocalFunctions({ env: opts.env }).total;
+  } else {
+    try {
+      const [mockConfig, codegen, funcList] = await Promise.all([
+        fetchMockConfig(),
+        fetchCodegen({ env: opts.env }),
+        listFunctions({ env: opts.env, limit: 500 }),
+      ]);
+      routes = mockConfig.routes;
+      typesContent = codegen.types;
+      totalFunctions = funcList.total;
+    } catch {
+      console.error(chalk.red("\n  Cannot connect to trickle backend."));
+      console.error(chalk.gray("  Is the backend running?\n"));
+      process.exit(1);
+    }
   }
 
   if (routes.length === 0) {

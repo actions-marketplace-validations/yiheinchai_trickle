@@ -1,11 +1,13 @@
 import chalk from "chalk";
 import { getBackendUrl } from "../config";
+import { isLocalMode, getLocalFunctions } from "../local-data";
 
 export interface CoverageOptions {
   env?: string;
   json?: boolean;
   failUnder?: string;
   staleHours?: string;
+  local?: boolean;
 }
 
 interface CoverageEntry {
@@ -47,29 +49,65 @@ interface CoverageResponse {
  * error counts, and an overall health score. Useful for CI gates.
  */
 export async function coverageCommand(opts: CoverageOptions): Promise<void> {
-  const backendUrl = getBackendUrl();
-
-  // Fetch coverage data
-  const url = new URL("/api/coverage", backendUrl);
-  if (opts.env) url.searchParams.set("env", opts.env);
-  if (opts.staleHours) url.searchParams.set("stale_hours", opts.staleHours);
-
   let data: CoverageResponse;
-  try {
-    const res = await fetch(url.toString());
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`HTTP ${res.status}: ${body}`);
+
+  if (isLocalMode(opts)) {
+    // Build coverage data from local observations
+    const staleThresholdHours = opts.staleHours ? parseInt(opts.staleHours, 10) : 24;
+    const { functions } = getLocalFunctions({ env: opts.env });
+    const entries: CoverageEntry[] = functions.map((f) => ({
+      functionName: f.function_name,
+      module: f.module,
+      language: f.language,
+      environment: f.environment,
+      firstSeen: f.first_seen_at,
+      lastObserved: f.last_seen_at,
+      snapshots: 1,
+      variants: 1,
+      errors: 0,
+      isStale: false,
+      hasTypes: true,
+      health: 100,
+    }));
+    const total = entries.length;
+    data = {
+      summary: {
+        total,
+        withTypes: total,
+        withoutTypes: 0,
+        fresh: total,
+        stale: 0,
+        withErrors: 0,
+        withMultipleVariants: 0,
+        health: total > 0 ? 100 : 0,
+        staleThresholdHours,
+      },
+      entries,
+    };
+  } else {
+    const backendUrl = getBackendUrl();
+
+    // Fetch coverage data
+    const url = new URL("/api/coverage", backendUrl);
+    if (opts.env) url.searchParams.set("env", opts.env);
+    if (opts.staleHours) url.searchParams.set("stale_hours", opts.staleHours);
+
+    try {
+      const res = await fetch(url.toString());
+      if (!res.ok) {
+        const body = await res.text();
+        throw new Error(`HTTP ${res.status}: ${body}`);
+      }
+      data = (await res.json()) as CoverageResponse;
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.startsWith("HTTP ")) {
+        console.error(chalk.red(`\n  Error: ${err.message}\n`));
+      } else {
+        console.error(chalk.red(`\n  Cannot connect to trickle backend at ${chalk.bold(backendUrl)}.`));
+        console.error(chalk.red("  Is the backend running?\n"));
+      }
+      process.exit(1);
     }
-    data = (await res.json()) as CoverageResponse;
-  } catch (err: unknown) {
-    if (err instanceof Error && err.message.startsWith("HTTP ")) {
-      console.error(chalk.red(`\n  Error: ${err.message}\n`));
-    } else {
-      console.error(chalk.red(`\n  Cannot connect to trickle backend at ${chalk.bold(backendUrl)}.`));
-      console.error(chalk.red("  Is the backend running?\n"));
-    }
-    process.exit(1);
   }
 
   // JSON output mode

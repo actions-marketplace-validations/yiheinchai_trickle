@@ -2,11 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
 import { fetchSnapshot, CheckSnapshot, SnapshotFunction } from "../api-client";
+import { isLocalMode, getLocalFunctions, getLocalTypes } from "../local-data";
 
 export interface CheckOptions {
   save?: string;
   against?: string;
   env?: string;
+  local?: boolean;
 }
 
 interface BreakingChange {
@@ -214,10 +216,31 @@ function classifyChanges(
 }
 
 export async function checkCommand(opts: CheckOptions): Promise<void> {
+  async function getSnapshot(env?: string): Promise<CheckSnapshot> {
+    if (isLocalMode(opts)) {
+      const { functions } = getLocalFunctions({ env });
+      const snapshotFunctions: SnapshotFunction[] = functions.map((f) => {
+        const types = getLocalTypes(f.function_name, { env });
+        const latest = types.snapshots[types.snapshots.length - 1];
+        return {
+          name: f.function_name,
+          module: f.module,
+          argsType: latest?.args_type || {},
+          returnType: latest?.return_type || {},
+        };
+      });
+      return {
+        version: 1,
+        createdAt: new Date().toISOString(),
+        functions: snapshotFunctions,
+      };
+    }
+    return fetchSnapshot({ env });
+  }
   try {
     // Mode 1: Save current snapshot
     if (opts.save) {
-      const snapshot = await fetchSnapshot({ env: opts.env });
+      const snapshot = await getSnapshot(opts.env);
 
       if (snapshot.functions.length === 0) {
         console.error(chalk.yellow("\n  No functions observed yet. Run your app first to populate types.\n"));
@@ -255,7 +278,7 @@ export async function checkCommand(opts: CheckOptions): Promise<void> {
         return; // unreachable but satisfies TS
       }
 
-      const current = await fetchSnapshot({ env: opts.env });
+      const current = await getSnapshot(opts.env);
 
       if (current.functions.length === 0) {
         console.error(chalk.yellow("\n  No functions observed yet. Run your app first to populate types.\n"));

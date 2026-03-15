@@ -158,6 +158,7 @@ program
   .option("--trpc", "Generate typed tRPC router from observed routes")
   .option("--axios", "Generate typed Axios client from observed routes")
   .option("--watch", "Watch mode: re-generate when new types are observed")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);
   });
@@ -202,6 +203,7 @@ program
   .option("--env <env>", "Filter by environment")
   .option("--env1 <env>", "First environment for cross-env comparison")
   .option("--env2 <env>", "Second environment for cross-env comparison")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await diffCommand(opts);
   });
@@ -227,6 +229,7 @@ program
   .option("--save <file>", "Save current types as a baseline snapshot")
   .option("--against <file>", "Check current types against a baseline (exit 1 on breaking changes)")
   .option("--env <env>", "Filter by environment")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await checkCommand(opts);
   });
@@ -308,6 +311,7 @@ program
   .option("--json", "Output raw JSON (for CI integration)")
   .option("--fail-under <score>", "Exit 1 if health score is below this threshold (0-100)")
   .option("--stale-hours <hours>", "Hours before a function is considered stale (default: 24)")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await coverageCommand(opts);
   });
@@ -320,6 +324,7 @@ program
   .option("--strict", "Compare exact values instead of just shapes")
   .option("--json", "Output JSON results (for CI)")
   .option("--fail-fast", "Stop on first failure")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await replayCommand(opts);
   });
@@ -332,6 +337,7 @@ program
   .option("--html", "Generate self-contained HTML instead of Markdown")
   .option("--env <env>", "Filter by environment")
   .option("--title <title>", "Documentation title", "API Documentation")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await docsCommand(opts);
   });
@@ -342,6 +348,7 @@ program
   .description("Generate test fixtures and factory functions from observed runtime data")
   .option("-f, --format <format>", "Output format: json, ts, or factory (default: json)")
   .option("-o, --out <path>", "Write fixtures to a file")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (route: string | undefined, opts) => {
     await sampleCommand(route, opts);
   });
@@ -354,6 +361,7 @@ program
   .option("--json", "Output raw JSON (for CI integration)")
   .option("--fail-on-error", "Exit 1 if any errors are found")
   .option("--fail-on-warning", "Exit 1 if any errors or warnings are found")
+  .option("--local", "Read from local .trickle/observations.jsonl instead of backend")
   .action(async (opts) => {
     await auditCommand(opts);
   });
@@ -366,6 +374,7 @@ program
   .option("-d, --body <body>", "Request body (JSON string)")
   .option("--env <env>", "Environment label (default: development)")
   .option("--module <module>", "Module label (default: capture)")
+  .option("--local", "Write to local .trickle/observations.jsonl instead of backend")
   .action(async (method: string, url: string, opts) => {
     await captureCommand(method, url, opts);
   });
@@ -499,6 +508,7 @@ program
   .option("-f, --file <file>", "Filter by source file path")
   .option("-w, --watch", "Watch mode: refresh on file changes")
   .option("--json", "Output structured JSON for agent consumption")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async (opts) => {
     await layersCommand(opts);
   });
@@ -525,6 +535,7 @@ program
   .option("--webhook <url>", "Send alerts to a webhook URL (Slack-compatible)")
   .option("--watch", "Continuously watch for data changes and re-analyze")
   .option("--rules <file>", "Path to custom rules file (default: .trickle/rules.json)")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async (opts) => {
     const { runMonitor } = await import("./commands/monitor");
     runMonitor({
@@ -587,6 +598,7 @@ program
   .command("doctor")
   .description("Comprehensive health check — one command to understand your app's state (for agents and humans)")
   .option("--json", "Structured JSON output for agent consumption")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async (opts) => {
     const { runDoctor } = await import("./commands/doctor");
     runDoctor({ json: opts.json });
@@ -597,6 +609,7 @@ program
   .command("summary")
   .description("Comprehensive post-run summary — everything captured in one JSON (agent-optimized)")
   .option("--json", "Output as JSON (default)")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async () => {
     const { generateRunSummary } = await import("./commands/summary");
     const summary = generateRunSummary({});
@@ -608,6 +621,7 @@ program
   .command("explain <file>")
   .description("Understand a file via runtime data — functions, call graph, queries, errors (agent-optimized)")
   .option("--json", "Structured JSON output for agent consumption")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async (file: string, opts) => {
     const { runExplain } = await import("./commands/explain");
     runExplain({ file, json: opts.json });
@@ -722,6 +736,7 @@ program
   .command("fix")
   .description("Generate code fix suggestions for detected issues (N+1 queries, null refs, slow functions)")
   .option("--json", "Structured JSON output for agents")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async (opts) => {
     const { runFix } = await import("./commands/fix");
     runFix({ json: opts.json });
@@ -733,6 +748,7 @@ program
   .description("Generate an interactive flamegraph from call traces — shows where time is spent")
   .option("--json", "Output structured JSON (hotspots, tree, folded stacks)")
   .option("-o, --out <path>", "Output HTML file path")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async (opts) => {
     const { runFlamegraph } = await import("./commands/flamegraph");
     runFlamegraph({ json: opts.json, out: opts.out });
@@ -854,6 +870,7 @@ program
   .command("heal")
   .description("Agent auto-remediation — detects issues, gathers context, generates fix plans with recommendations")
   .option("--json", "Output structured JSON for agent consumption")
+  .option("--local", "Already reads local data by default (flag accepted for consistency)")
   .action(async (opts) => {
     const { runHeal } = await import("./commands/heal");
     runHeal({ json: opts.json });

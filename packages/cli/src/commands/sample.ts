@@ -2,11 +2,13 @@ import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
 import { fetchMockConfig, MockRoute } from "../api-client";
+import { isLocalMode, getLocalMockRoutes } from "../local-data";
 
 export interface SampleOptions {
   format?: string;
   out?: string;
   route?: string;
+  local?: boolean;
 }
 
 /**
@@ -18,13 +20,17 @@ export interface SampleOptions {
  */
 export async function sampleCommand(routeFilter: string | undefined, opts: SampleOptions): Promise<void> {
   let routes: MockRoute[];
-  try {
-    const config = await fetchMockConfig();
-    routes = config.routes;
-  } catch {
-    console.error(chalk.red("\n  Cannot connect to trickle backend."));
-    console.error(chalk.gray("  Is the backend running?\n"));
-    process.exit(1);
+  if (isLocalMode(opts)) {
+    routes = getLocalMockRoutes().routes;
+  } else {
+    try {
+      const config = await fetchMockConfig();
+      routes = config.routes;
+    } catch {
+      console.error(chalk.red("\n  Cannot connect to trickle backend."));
+      console.error(chalk.gray("  Is the backend running?\n"));
+      process.exit(1);
+    }
   }
 
   // Filter routes

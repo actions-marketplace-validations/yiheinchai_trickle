@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import chalk from "chalk";
 import { fetchCodegen } from "../api-client";
+import { isLocalMode } from "../local-data";
+import { generateFromJsonl } from "../local-codegen";
 
 export interface CodegenOptions {
   out?: string;
@@ -22,6 +24,7 @@ export interface CodegenOptions {
   trpc?: boolean;
   axios?: boolean;
   watch?: boolean;
+  local?: boolean;
 }
 
 export async function codegenCommand(
@@ -32,6 +35,17 @@ export async function codegenCommand(
   const format = opts.axios ? "axios" : opts.trpc ? "trpc" : opts.graphql ? "graphql" : opts.classValidator ? "class-validator" : opts.pydantic ? "pydantic" : opts.swr ? "swr" : opts.jsonSchema ? "json-schema" : opts.msw ? "msw" : opts.middleware ? "middleware" : opts.guards ? "guards" : opts.reactQuery ? "react-query" : opts.zod ? "zod" : opts.handlers ? "handlers" : opts.client ? "client" : undefined;
 
   async function generate(): Promise<string> {
+    if (isLocalMode(opts)) {
+      const jsonlPath = path.join(process.cwd(), ".trickle", "observations.jsonl");
+      const stubs = generateFromJsonl(jsonlPath);
+      const sections: string[] = [];
+      for (const [_mod, content] of Object.entries(stubs)) {
+        sections.push(opts.python ? content.python : content.ts);
+      }
+      return sections.join("\n") || (opts.python
+        ? "# No observations found in .trickle/observations.jsonl\n"
+        : "// No observations found in .trickle/observations.jsonl\n");
+    }
     const result = await fetchCodegen({
       functionName,
       env: opts.env,

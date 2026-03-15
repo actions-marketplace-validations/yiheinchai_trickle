@@ -1,11 +1,13 @@
 import chalk from "chalk";
 import { fetchMockConfig, MockRoute } from "../api-client";
+import { isLocalMode, getLocalMockRoutes } from "../local-data";
 
 export interface ReplayOptions {
   target?: string;
   strict?: boolean;
   json?: boolean;
   failFast?: boolean;
+  local?: boolean;
 }
 
 interface ReplayResult {
@@ -31,13 +33,17 @@ export async function replayCommand(opts: ReplayOptions): Promise<void> {
 
   // Fetch observed routes
   let routes: MockRoute[];
-  try {
-    const config = await fetchMockConfig();
-    routes = config.routes;
-  } catch {
-    console.error(chalk.red("\n  Cannot connect to trickle backend."));
-    console.error(chalk.gray("  Is the backend running?\n"));
-    process.exit(1);
+  if (isLocalMode(opts)) {
+    routes = getLocalMockRoutes().routes;
+  } else {
+    try {
+      const config = await fetchMockConfig();
+      routes = config.routes;
+    } catch {
+      console.error(chalk.red("\n  Cannot connect to trickle backend."));
+      console.error(chalk.gray("  Is the backend running?\n"));
+      process.exit(1);
+    }
   }
 
   if (routes.length === 0) {

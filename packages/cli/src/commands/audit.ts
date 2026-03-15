@@ -1,5 +1,7 @@
 import chalk from "chalk";
 import { getBackendUrl } from "../config";
+import { isLocalMode, getLocalFunctions } from "../local-data";
+import { readObservations } from "../local-codegen";
 
 interface AuditIssue {
   severity: "error" | "warning" | "info";
@@ -25,22 +27,67 @@ export interface AuditOptions {
   json?: boolean;
   failOnError?: boolean;
   failOnWarning?: boolean;
+  local?: boolean;
 }
 
 export async function auditCommand(opts: AuditOptions): Promise<void> {
-  const base = getBackendUrl();
-  const url = new URL("/api/audit", base);
-  if (opts.env) url.searchParams.set("env", opts.env);
-
   let data: AuditResponse;
-  try {
-    const res = await fetch(url.toString());
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    data = (await res.json()) as AuditResponse;
-  } catch {
-    console.error(chalk.red(`\n  Cannot connect to trickle backend at ${chalk.bold(base)}.`));
-    console.error(chalk.red("  Is the backend running?\n"));
-    process.exit(1);
+
+  if (isLocalMode(opts)) {
+    // Run audit locally from observations
+    const path = require("path");
+    const jsonlPath = path.join(process.cwd(), ".trickle", "observations.jsonl");
+    const observations = readObservations(jsonlPath);
+    const issues: AuditIssue[] = [];
+
+    // Check for sensitive field names in responses
+    const sensitivePatterns = /^(password|secret|token|api_key|apiKey|authorization|ssn|credit_card|creditCard)$/i;
+    let routesAnalyzed = 0;
+
+    for (const fn of observations) {
+      const isRoute = /^(GET|POST|PUT|DELETE|PATCH)\s/.test(fn.name);
+      if (isRoute) routesAnalyzed++;
+
+      // Check return type for sensitive fields
+      if (fn.returnType?.kind === "object" && fn.returnType.properties) {
+        for (const key of Object.keys(fn.returnType.properties)) {
+          if (sensitivePatterns.test(key)) {
+            issues.push({
+              severity: "error",
+              rule: "sensitive-field-in-response",
+              message: `Sensitive field "${key}" exposed in response`,
+              route: fn.name,
+              field: key,
+            });
+          }
+        }
+      }
+    }
+
+    data = {
+      summary: {
+        total: issues.length,
+        errors: issues.filter(i => i.severity === "error").length,
+        warnings: issues.filter(i => i.severity === "warning").length,
+        info: issues.filter(i => i.severity === "info").length,
+        routesAnalyzed,
+      },
+      issues,
+    };
+  } else {
+    const base = getBackendUrl();
+    const url = new URL("/api/audit", base);
+    if (opts.env) url.searchParams.set("env", opts.env);
+
+    try {
+      const res = await fetch(url.toString());
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = (await res.json()) as AuditResponse;
+    } catch {
+      console.error(chalk.red(`\n  Cannot connect to trickle backend at ${chalk.bold(base)}.`));
+      console.error(chalk.red("  Is the backend running?\n"));
+      process.exit(1);
+    }
   }
 
   if (opts.json) {

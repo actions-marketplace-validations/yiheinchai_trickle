@@ -3,16 +3,27 @@ import { fetchDiffReport, DiffReportEntry } from "../api-client";
 import { formatDiffs } from "../formatters/diff-formatter";
 import { envBadge, timeBadge } from "../ui/badges";
 import { parseSince } from "../ui/helpers";
+import { isLocalMode } from "../local-data";
 
 export interface DiffOptions {
   since?: string;
   env?: string;
   env1?: string;
   env2?: string;
+  local?: boolean;
 }
 
 export async function diffCommand(opts: DiffOptions): Promise<void> {
   try {
+    if (isLocalMode(opts)) {
+      // Local mode: diff is not meaningful without historical data from backend
+      console.log("");
+      console.log(chalk.yellow("  Type drift analysis requires the backend for historical snapshots."));
+      console.log(chalk.gray("  Local .trickle/observations.jsonl only contains the latest run."));
+      console.log(chalk.gray("  Use `trickle diff-runs` to compare two local runs instead.\n"));
+      return;
+    }
+
     // Parse --since into a datetime string for the backend
     let sinceStr: string | undefined;
     if (opts.since) {

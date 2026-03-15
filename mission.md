@@ -23,8 +23,10 @@ Recent fixes:
 - Fixed lazy type resolvers caching negative results — torch tensors now show
   shapes (Tensor[1, 16, 64]) instead of Any. Validated on nanoGPT.
 - Codegen: variant overloads now reference named Output interfaces
+- Flask/FastAPI decorated route handlers now observed (innermost decorator injection)
+- Reduced verbose Express stubs (699→12 lines) via opaque framework type detection
 
-All validated on real codebases: nanoGPT (ML), Express (JS), multifile Python APIs.
+All validated on real codebases: nanoGPT (ML), Express (JS), Flask (Python), multifile APIs.
 
 Next priorities:
 1. Build cloud.trickle.dev backend service (team sharing, hosted dashboards)

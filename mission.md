@@ -6,8 +6,8 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-CLI 0.1.145. Added Django/unittest + Node.js test runner output parsing. Fixed spurious
-failure on passing tests. Fixed glob expansion. All found by testing on real projects.
+CLI 0.1.146. Added curated help output (Quick Start / Analyze / Fix sections at top of
+--help). Django/unittest + Node.js test parsing. All bugs from real-world testing fixed.
 
 26 MCP tools, all docs complete. Tested on 11+ real projects. Platform is stable and mature.
 </focus point>

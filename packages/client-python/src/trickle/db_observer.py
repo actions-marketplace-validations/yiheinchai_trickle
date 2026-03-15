@@ -50,6 +50,14 @@ def _write_query(record: Dict[str, Any]) -> None:
     if _query_count >= _MAX_QUERIES:
         return
     _query_count += 1
+    # Add request ID from context
+    try:
+        from trickle.request_context import get_request_id
+        rid = get_request_id()
+        if rid:
+            record["requestId"] = rid
+    except Exception:
+        pass
     try:
         with open(_get_queries_file(), "a") as f:
             f.write(json.dumps(record) + "\n")

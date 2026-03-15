@@ -118,6 +118,13 @@ def main() -> None:
     except Exception:
         pass
 
+    # Install per-request context for Flask/FastAPI/Django
+    try:
+        from trickle.request_context import install_request_context
+        install_request_context()
+    except Exception:
+        pass
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _production = _os2.environ.get("TRICKLE_PRODUCTION", "").lower() in ("1", "true", "yes")

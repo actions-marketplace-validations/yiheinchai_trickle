@@ -6,17 +6,17 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.168. 31 MCP tools. Shipped Microsoft Teams webhook (MessageCard format).
+CLI 0.1.169. 31 MCP tools. 16 platform integrations.
 
-Complete integration ecosystem (15 platforms):
+Complete integration ecosystem:
 - CI/CD: GitHub Actions, GitLab CI
-- Chat: Slack (Block Kit), Discord, Microsoft Teams (MessageCard)
+- Chat: Slack (Block Kit), Discord, Microsoft Teams
 - Tickets: Jira, Linear, GitHub Issues
-- Alerting: PagerDuty, generic webhooks
+- Alerting: PagerDuty, OpsGenie, generic webhooks
 - Observability: Grafana (OTLP), Prometheus, SigNoz, Jaeger
 - MCP: 31 tools for AI agents
 
-All webhook types auto-detected from URL. Next: OpsGenie, Bitbucket Pipelines, Datadog export.
+All webhooks auto-detected from URL. Next: Datadog export, Bitbucket Pipelines, email alerts.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

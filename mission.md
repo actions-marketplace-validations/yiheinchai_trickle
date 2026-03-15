@@ -6,11 +6,12 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.173. Dashboard now has column sorting (click headers for asc/desc with ▲/▼ indicators).
-Search, tabs, facets, expandable rows, auto-refresh all working.
+CLI 0.1.174. Dashboard overview now has chart visualizations:
+- Function timing bar chart (gradient bars, sorted by duration)
+- Query latency histogram (5 buckets: <1ms to >50ms, color-coded)
+Plus column sorting, search, tabs, facets, expandable rows, auto-refresh.
 
-31 MCP tools, 16 integrations. Next: chart visualizations (query latency histogram, function
-timing sparklines), time range filtering, export to CSV.
+31 MCP tools, 16 integrations. Next: export to CSV, live streaming mode, pagination.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -10,14 +10,14 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-25 MCP tools. Fixed Python decorated functions not being captured — Flask/FastAPI route
-handlers now fully observable. Tested on Flask blog app with pytest: 10 functions, 69 queries,
-N+1 patterns detected. Also shipped flamegraph generation.
+26 MCP tools. Shipped get_recommended_actions — guided agent workflows that analyze state
+and tell agents exactly which tools to call and in what order. Also fixed Python decorated
+function capture, shipped flamegraph generation.
 
 Next priorities:
 1. Test on a real open-source Django project from GitHub
 2. Distributed tracing improvements (cross-service flamegraphs)
-3. Improve MCP tool descriptions and add guided agent workflows
+3. Improve error context — show variable values at the point where errors occurred
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

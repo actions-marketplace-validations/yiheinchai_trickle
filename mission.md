@@ -6,32 +6,24 @@ Make a big push of increasing the feature set of trickle to expand the target au
 
 Particularly, build a complete observability platform, it will replace datadog, with the ability for agents to automatically fix issues in production. this will be critical for the business as we will sell cloud computing and agent credits, esp now that we have the runtime cache infrastructure in place.
 
+the goal is to make it production ready, where real companies can start deploying trickle to production
 </higher directive>
 
 <focus point>
-Complete Datadog-replacement observability platform shipped.
+Cloud backend v1 shipped: multi-tenant API with auth, push/pull, shared dashboards.
 
-Stats: 12 data types, 18 MCP tools, 15+ auto-patched drivers, full JS + Python parity.
-CLI commands: run, monitor, heal, verify, doctor, agent, ci, cloud, dashboard-local, status.
-Usecases updated: ai-agent.md, observability-platform.md, devops-ci.md, README.
+API: /api/v1/keys, /push, /pull, /projects, /share, /shared/:id, /dashboard/:id
+CLI: cloud login, push, pull, share, projects, status — all working end-to-end.
+Auth: API keys (sha256 hashed), Bearer token middleware.
+Dashboard: dark-themed HTML with alerts, errors, performance, queries.
 
-Recent fixes:
-- Fixed calltrace recording for JS (initCallTrace) and Python (entry transform)
-- Fixed codegen duplicate overloads and type name mismatches in .d.ts output
-- Fixed massive Python startup overhead: type inference no longer cold-imports
-  torch/sklearn/pandas/datasets (2000x improvement, 550x→3.5x total overhead)
-- Fixed lazy type resolvers caching negative results — torch tensors now show
-  shapes (Tensor[1, 16, 64]) instead of Any. Validated on nanoGPT.
-- Codegen: variant overloads now reference named Output interfaces
-- Flask/FastAPI decorated route handlers now observed (innermost decorator injection)
-- Reduced verbose Express stubs (699→12 lines) via opaque framework type detection
-
-All validated on real codebases: nanoGPT (ML), Express (JS), Flask (Python), multifile APIs.
+Tested: login → push 10 files → list projects → share → pull on different machine.
 
 Next priorities:
-1. Build cloud.trickle.dev backend service (team sharing, hosted dashboards)
-2. Go language support (expand TAM to Go backend developers)
-3. Rust language support
+1. Deploy cloud.trickle.dev to a real server (Docker/fly.io/railway)
+2. Add real-time streaming (push observations while app runs, not just after)
+3. Team management (invite members, RBAC, org-level projects)
+4. Production hardening (rate limiting, data retention, PostgreSQL migration)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -606,6 +606,16 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle fix
+program
+  .command("fix")
+  .description("Generate code fix suggestions for detected issues (N+1 queries, null refs, slow functions)")
+  .option("--json", "Structured JSON output for agents")
+  .action(async (opts) => {
+    const { runFix } = await import("./commands/fix");
+    runFix({ json: opts.json });
+  });
+
 // trickle flamegraph
 program
   .command("flamegraph")

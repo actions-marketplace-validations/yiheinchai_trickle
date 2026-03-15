@@ -700,6 +700,11 @@ const TOOLS = [
     },
   },
   {
+    name: "get_fix_suggestions",
+    description: "Generate actual code fix suggestions for detected issues. Returns suggested SQL rewrites for N+1 queries, null check code for null reference errors, and optimization hints for slow functions. More actionable than get_heal_plans — gives you the actual code to write.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_recommended_actions",
     description: "Analyzes the current state of trickle data and recommends the next actions to take. Returns a prioritized list of what to do — which tools to call, what to investigate, and what to fix. Call this FIRST when you're unsure what to do.",
     inputSchema: { type: "object", properties: {} },
@@ -841,6 +846,19 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "get_fix_suggestions": {
+            try {
+              const { runFix } = require('./fix');
+              const origLog = console.log;
+              console.log = () => {};
+              const fixes = runFix({ json: false, dir: findTrickleDir() });
+              console.log = origLog;
+              result = { fixes, count: fixes.length };
+            } catch (e: any) {
+              result = { error: `Failed to generate fixes: ${e.message}` };
             }
             break;
           }

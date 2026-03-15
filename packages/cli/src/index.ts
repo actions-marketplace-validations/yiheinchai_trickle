@@ -606,6 +606,18 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle cost
+program
+  .command("cost")
+  .description("Estimate cloud cost per function and query (Lambda pricing model)")
+  .option("--json", "Structured JSON output")
+  .option("--memory <mb>", "Lambda memory in MB (default: 128)")
+  .option("--requests-per-day <n>", "Estimated daily requests for monthly cost (default: 1000)")
+  .action(async (opts) => {
+    const { estimateCost } = await import("./commands/cost");
+    estimateCost({ json: opts.json, memoryMb: opts.memory ? parseInt(opts.memory) : undefined, requestsPerDay: opts.requestsPerDay ? parseInt(opts.requestsPerDay) : undefined });
+  });
+
 // trickle waterfall
 program
   .command("waterfall")

@@ -11,15 +11,16 @@ As a key point for the agent first approach, i want you to use trickle when deve
 
 <focus point>
 Shipped recently:
-- Post-run auto-summary (summary.json + get_last_run_summary MCP tool) — agents get everything in one call
-- Smart test runner (`trickle test` + `run_tests` MCP tool) — structured pass/fail with runtime context at failure points
+- Post-run auto-summary (summary.json + get_last_run_summary MCP tool)
+- Smart test runner (`trickle test` + `run_tests` MCP tool) — structured pass/fail with runtime context
+- Codebase understanding (`trickle explain <file>` + `explain_file` MCP tool) — functions, call graph, queries, variables, errors
 - Fixed Python observe_runner `-m module` flag for pytest/uvicorn/gunicorn
-- 20 MCP tools total
+- 21 MCP tools total
 
 Use trickle when developing trickle (dogfooding). Next priorities:
-1. Agent action tools — MCP tools that let agents apply fixes, run before/after comparisons
-2. Codebase understanding — `trickle explain <file>` showing data flow, callers, callees, queries triggered by a code path
-3. Production incident workflow — automated detect → diagnose → fix → verify loop for on-call agents
+1. Agent action tools — MCP tools that let agents run before/after comparisons to verify fixes
+2. Production incident workflow — automated detect → diagnose → fix → verify loop for on-call agents
+3. Improve explain with cross-file data flow tracing (follow data across modules)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

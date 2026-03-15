@@ -271,23 +271,26 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 
 | Command | What it does |
 |---|---|
+| **Observability** | |
 | `trickle run <cmd>` | Run any command with auto-instrumentation |
-| `trickle dev` | Start app + watch for type changes |
-| `trickle proxy -t <url>` | Capture types from any API (no code changes) |
-| `trickle stubs src/` | Generate `.pyi` type stubs (Python) |
-| `trickle annotate src/file.py` | Inject types into source (Python) |
-| `trickle codegen --client` | Generate typed API client (TypeScript) |
-| `trickle codegen --react-query` | Generate React Query hooks |
-| `trickle openapi` | Generate OpenAPI 3.0 spec |
-| `trickle check --against base.json` | CI: detect breaking type changes |
+| `trickle monitor` | Detect anomalies: N+1 queries, slow functions, errors, memory |
+| `trickle monitor --watch --webhook <url>` | Continuous monitoring with Slack/webhook alerts |
+| `trickle heal` | Generate fix plans with context for agent auto-remediation |
+| `trickle verify --baseline` / `trickle verify` | Before/after metric comparison to verify fixes |
+| `trickle dashboard-local` | Self-contained HTML dashboard (no backend needed) |
+| **Debugging** | |
 | `trickle context <file>` | Runtime context for AI agent debugging |
-| `trickle context --annotated` | Source code with inline runtime values |
-| `trickle tool-schema` | Generate LLM tool calling schemas |
-| `trickle mcp-server` | MCP server for direct AI agent integration |
-| `trickle functions` | List all observed functions |
-| `trickle overview` | Compact view of all routes and types |
+| `trickle context --errors` | Error context with nearby variable values |
+| `trickle functions` | List all observed functions with timing |
 | `trickle vars` | Show traced variables with types |
-| `trickle mock` | Start mock API server from captured data |
+| **Code Generation** | |
+| `trickle stubs src/` | Generate `.pyi`/`.d.ts` type stubs |
+| `trickle codegen --client` | Generate typed API client (TypeScript) |
+| `trickle openapi` | Generate OpenAPI 3.0 spec |
+| **Agent Integration** | |
+| `trickle mcp-server` | MCP server (15 tools) for AI agent access |
+| `trickle init` | Setup project + create CLAUDE.md for agents |
+| `trickle heal --json` | Structured fix plans for agent consumption |
 
 ## Environment Variables
 
@@ -297,6 +300,7 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `TRICKLE_TRACE_VARS` | `1` | `0` to disable variable tracing |
 | `TRICKLE_PRODUCTION` | `0` | `1` for production mode (disables var tracing, enables sampling) |
 | `TRICKLE_SAMPLE_RATE` | `1.0` | Fraction of calls to observe (0.01 = 1%, useful for production) |
+| `TRICKLE_SERVICE_NAME` | cwd name | Service name for distributed tracing |
 | `TRICKLE_OBSERVE_INCLUDE` | all user code | Comma-separated module patterns to trace |
 | `TRICKLE_OBSERVE_EXCLUDE` | none | Comma-separated module patterns to skip |
 | `TRICKLE_INJECT` | `0` | `1` to inject types into source files |
@@ -313,15 +317,19 @@ Your Code → trickle (import hooks / AST transform)
          .trickle/calltrace.jsonl     (call graph + parent-child flow)
          .trickle/errors.jsonl        (crash context + nearby values)
          .trickle/queries.jsonl       (SQL, Redis, MongoDB queries)
+         .trickle/traces.jsonl        (distributed spans across services)
          .trickle/websocket.jsonl     (WebSocket messages)
+         .trickle/profile.jsonl       (memory RSS + heap snapshots)
          .trickle/console.jsonl       (stdout/stderr output)
+         .trickle/alerts.jsonl        (detected anomalies)
+         .trickle/heal.jsonl          (fix plans for agents)
                 ↓
     ┌───────────┼───────────┬──────────────┐
     ↓           ↓           ↓              ↓
- VSCode      CLI tools    AI Agents      MCP Server
- Extension   (codegen,    (trickle       (11 tools for
- (inline     stubs,       context,       Claude, Cursor,
-  hints)     openapi)     CLAUDE.md)     Copilot)
+ VSCode      Monitor      AI Agents      MCP Server
+ Extension   + Dashboard   (trickle       (15 tools:
+ (inline     + Webhook     heal,          alerts, traces,
+  hints)     alerts        verify)        queries, ...)
 ```
 
 ## Packages

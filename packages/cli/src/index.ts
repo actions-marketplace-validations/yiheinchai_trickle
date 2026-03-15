@@ -502,6 +502,16 @@ program
     });
   });
 
+// trickle doctor
+program
+  .command("doctor")
+  .description("Comprehensive health check — one command to understand your app's state (for agents and humans)")
+  .option("--json", "Structured JSON output for agent consumption")
+  .action(async (opts) => {
+    const { runDoctor } = await import("./commands/doctor");
+    runDoctor({ json: opts.json });
+  });
+
 // trickle cloud
 const cloudCmd = program.command("cloud").description("Cloud sync — share observability data with your team");
 cloudCmd.command("push").description("Upload .trickle/ data to the cloud").action(async () => {

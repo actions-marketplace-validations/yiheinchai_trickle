@@ -29,6 +29,7 @@
 
 import Module from 'module';
 import path from 'path';
+import fs from 'fs';
 import { configure } from './transport';
 import { detectEnvironment } from './env-detect';
 import { wrapFunction } from './wrap';
@@ -42,6 +43,146 @@ import {
   findCatchVars,
   findFunctionBodyBrace,
 } from './vite-plugin';
+
+// ── Source map support ──
+// Lightweight VLQ decoder for mapping compiled JS lines back to original TS lines
+
+const VLQ_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const VLQ_LOOKUP = new Map<string, number>();
+for (let i = 0; i < VLQ_CHARS.length; i++) VLQ_LOOKUP.set(VLQ_CHARS[i], i);
+
+function decodeVLQ(encoded: string): number[] {
+  const values: number[] = [];
+  let shift = 0;
+  let value = 0;
+  for (const c of encoded) {
+    const digit = VLQ_LOOKUP.get(c);
+    if (digit === undefined) break;
+    const cont = digit & 32; // continuation bit
+    value += (digit & 31) << shift;
+    if (cont) {
+      shift += 5;
+    } else {
+      const isNeg = value & 1;
+      value >>= 1;
+      values.push(isNeg ? -value : value);
+      shift = 0;
+      value = 0;
+    }
+  }
+  return values;
+}
+
+interface SourceMapData {
+  /** Map from compiled 1-based line → original 1-based line */
+  lineMap: Map<number, number>;
+  /** Original source file path (resolved to absolute) */
+  originalFile: string;
+  /** All source files listed in the source map */
+  sources: string[];
+}
+
+/**
+ * Parse a source map JSON and build a compiled→original line mapping.
+ * Only handles single-source maps (most common for tsc output).
+ */
+function parseSourceMap(mapJson: string, mapFilePath: string): SourceMapData | null {
+  try {
+    const map = JSON.parse(mapJson);
+    if (!map.mappings || !map.sources || map.sources.length === 0) return null;
+
+    // Resolve original source path relative to the .map file location
+    const mapDir = path.dirname(mapFilePath);
+    const sourceRoot = map.sourceRoot || '';
+    const originalFile = path.resolve(mapDir, sourceRoot, map.sources[0]);
+
+    // Decode mappings: semicolons separate lines, commas separate segments
+    // VLQ values are cumulative across ALL segments (not just first per line),
+    // so we must process every segment to maintain correct state.
+    const lineMap = new Map<number, number>();
+    const lines = map.mappings.split(';');
+    let sourceLine = 0; // Cumulative source line (0-based, relative)
+
+    for (let genLine = 0; genLine < lines.length; genLine++) {
+      const line = lines[genLine];
+      if (!line) continue;
+
+      const segments = line.split(',');
+      let firstSegmentMapped = false;
+      for (const seg of segments) {
+        if (!seg) continue;
+        const decoded = decodeVLQ(seg);
+        // decoded: [genCol, sourceIdx, sourceLine, sourceCol, ...]
+        if (decoded.length >= 3) {
+          sourceLine += decoded[2]; // Update cumulative source line
+          // Only record the first segment's mapping for this generated line
+          if (!firstSegmentMapped) {
+            lineMap.set(genLine + 1, sourceLine + 1); // Convert to 1-based
+            firstSegmentMapped = true;
+          }
+        }
+      }
+    }
+
+    return { lineMap, originalFile, sources: map.sources };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Try to load a source map for a compiled JS file.
+ * Checks: 1) sourceMappingURL comment, 2) .map file alongside .js
+ */
+function loadSourceMap(jsFilePath: string, source: string): SourceMapData | null {
+  try {
+    // Check for inline sourceMappingURL
+    const urlMatch = source.match(/\/\/[#@]\s*sourceMappingURL=(.+?)(?:\s|$)/);
+    if (urlMatch) {
+      const url = urlMatch[1].trim();
+      // Skip data URIs (inline source maps) — too complex for now
+      if (url.startsWith('data:')) return null;
+      // Resolve relative to the JS file
+      const mapPath = path.resolve(path.dirname(jsFilePath), url);
+      if (fs.existsSync(mapPath)) {
+        const mapJson = fs.readFileSync(mapPath, 'utf8');
+        return parseSourceMap(mapJson, mapPath);
+      }
+    }
+
+    // Fallback: check for .map file alongside .js
+    const mapPath = jsFilePath + '.map';
+    if (fs.existsSync(mapPath)) {
+      const mapJson = fs.readFileSync(mapPath, 'utf8');
+      return parseSourceMap(mapJson, mapPath);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Map a compiled line number to original source line using source map data.
+ * If the exact line isn't in the map, find the nearest mapped line.
+ */
+function mapLineToOriginal(sourceMap: SourceMapData, compiledLine: number): number {
+  const exact = sourceMap.lineMap.get(compiledLine);
+  if (exact !== undefined) return exact;
+
+  // Find the nearest mapped line before this one
+  let bestLine = compiledLine;
+  let bestDist = Infinity;
+  for (const [genLine, origLine] of sourceMap.lineMap) {
+    const dist = compiledLine - genLine;
+    if (dist >= 0 && dist < bestDist) {
+      bestDist = dist;
+      bestLine = origLine + dist; // Assume roughly 1:1 mapping for nearby lines
+    }
+  }
+  return bestLine;
+}
 
 const M = Module as any;
 const originalLoad = M._load;
@@ -178,6 +319,9 @@ function findVarDeclarations(source: string, lineOffset: number = 0): Array<{ li
     if (varName === '__createBinding' || varName === '__setModuleDefault' || varName === '__importStar' || varName === '__importDefault') continue;
     if (varName === '__decorate' || varName === '__metadata' || varName === '__param' || varName === '__awaiter') continue;
     if (varName === 'ownKeys' || varName === 'desc' || varName === '_') continue;
+    // Skip esbuild helpers
+    if (varName === '__defProp' || varName === '__defNormalProp' || varName === '__publicField' || varName === '__getOwnPropNames') continue;
+    if (varName === '__commonJS' || varName === '__toCommonJS' || varName === '__export' || varName === '__copyProps') continue;
     // Skip React Refresh / HMR internals
     if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker' || varName === 'invalidateMessage') continue;
     if (varName === '_s' || varName === '_c2' || varName === '_s2') continue;
@@ -368,7 +512,7 @@ function extractDestructuredNames(pattern: string): string[] {
   return names;
 }
 
-function transformCjsSource(source: string, filename: string, moduleName: string, env: string): string {
+function transformCjsSource(source: string, filename: string, moduleName: string, env: string, sourceMap?: SourceMapData | null): string {
   const funcRegex = /^[ \t]*(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
   const insertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
   let match;
@@ -453,26 +597,26 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   let varInsertions: Array<{ lineEnd: number; varName: string; lineNo: number }> = [];
   let destructInsertions: Array<{ lineEnd: number; varNames: string[]; lineNo: number }> = [];
 
+  // Helper: remap line numbers using source map if available
+  const remapLine = sourceMap
+    ? (line: number) => mapLineToOriginal(sourceMap, line)
+    : (line: number) => line;
+
   if (varTraceEnabled) {
     const isTsFile = /\.[mc]?tsx?$/.test(filename);
-    if (isTsFile) {
+    if (isTsFile && !sourceMap) {
+      // ts-node / tsx path: read original .ts file and match by occurrence
       try {
-        // Read original TypeScript source to get correct line numbers
-        const fs = require('fs');
         const originalSource: string = fs.readFileSync(filename, 'utf8');
         const tsVarInsertions = findVarDeclarations(originalSource);
         const tsDestructInsertions = findDestructuredDeclarations(originalSource);
 
-        // Map TypeScript variable names → correct line numbers (by occurrence order)
-        // Use a counter map to handle duplicate variable names in different scopes
         const tsLineByVarAndOccurrence = new Map<string, number[]>();
         for (const { varName, lineNo } of tsVarInsertions) {
           if (!tsLineByVarAndOccurrence.has(varName)) tsLineByVarAndOccurrence.set(varName, []);
           tsLineByVarAndOccurrence.get(varName)!.push(lineNo);
         }
 
-        // Find positions in compiled JS (for inserting trace calls),
-        // but use line numbers from original TypeScript source
         const compiledInsertions = findVarDeclarations(source);
         const varOccurrenceCounter = new Map<string, number>();
         for (const ins of compiledInsertions) {
@@ -484,8 +628,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
         }
 
         const compiledDestructInsertions = findDestructuredDeclarations(source);
-        destructInsertions = compiledDestructInsertions; // Keep compiled line numbers as fallback
-        // Try to fix destructured line numbers too
+        destructInsertions = compiledDestructInsertions;
         const tsDestructByKey = new Map<string, number[]>();
         for (const { varNames, lineNo } of tsDestructInsertions) {
           const key = varNames.join(',');
@@ -517,22 +660,44 @@ function transformCjsSource(source: string, filename: string, moduleName: string
         destructInsertions = findDestructuredDeclarations(source, lineOffset);
       }
     } else {
-      varInsertions = findVarDeclarations(source);
-      destructInsertions = findDestructuredDeclarations(source);
+      // Plain JS or source-map-assisted: parse compiled source, then remap lines
+      varInsertions = findVarDeclarations(source).map(ins => ({
+        ...ins,
+        lineNo: remapLine(ins.lineNo),
+      }));
+      destructInsertions = findDestructuredDeclarations(source).map(ins => ({
+        ...ins,
+        lineNo: remapLine(ins.lineNo),
+      }));
     }
   }
 
   // Additional variable patterns: reassignments, for-loops, catch clauses
   // Note: function params are NOT traced here because observe-register already
   // wraps functions with __trickle_wrap which captures param types via wrapFunction.
-  const reassignInsertions = findReassignments(source);
-  const forLoopInsertions = findForLoopVars(source);
-  const catchInsertions = findCatchVars(source);
+  // Apply source map remapping to these too.
+  const reassignInsertions = findReassignments(source).map(ins => ({
+    ...ins,
+    lineNo: remapLine(ins.lineNo),
+  }));
+  const forLoopInsertions = findForLoopVars(source).map(ins => ({
+    ...ins,
+    lineNo: remapLine(ins.lineNo),
+  }));
+  const catchInsertions = findCatchVars(source).map(ins => ({
+    ...ins,
+    lineNo: remapLine(ins.lineNo),
+  }));
 
   if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && classInsertions.length === 0) return source;
 
   // Resolve the path to the wrap helper (compiled JS)
   const wrapHelperPath = path.join(__dirname, 'wrap.js');
+
+  // When source map is available, use original module name for tracing
+  const effectiveModuleName = sourceMap
+    ? path.basename(sourceMap.originalFile).replace(/\.[jt]sx?$/, '')
+    : moduleName;
 
   // Prepend: load the wrapper and create the wrap helper
   const prefixLines = [
@@ -540,7 +705,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     `var __trickle_wrap = function(fn, name, paramNames) {`,
     `  var opts = {`,
     `    functionName: name,`,
-    `    module: ${JSON.stringify(moduleName)},`,
+    `    module: ${JSON.stringify(effectiveModuleName)},`,
     `    trackArgs: true,`,
     `    trackReturn: true,`,
     `    sampleRate: 1,`,
@@ -556,9 +721,14 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   // Add variable tracing helper if we have var insertions
   if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0) {
     const traceVarPath = path.join(__dirname, 'trace-var.js');
+    // When source map is available, trace variables against the original source file
+    const traceFilePath = sourceMap ? sourceMap.originalFile : filename;
+    const traceModuleName = sourceMap
+      ? path.basename(sourceMap.originalFile).replace(/\.[jt]sx?$/, '')
+      : moduleName;
     prefixLines.push(
       `var __trickle_tv_mod = require(${JSON.stringify(traceVarPath)});`,
-      `var __trickle_tv = function(v, n, l) { try { __trickle_tv_mod.traceVar(v, n, l, ${JSON.stringify(moduleName)}, ${JSON.stringify(filename)}); } catch(e){} };`,
+      `var __trickle_tv = function(v, n, l) { try { __trickle_tv_mod.traceVar(v, n, l, ${JSON.stringify(traceModuleName)}, ${JSON.stringify(traceFilePath)}); } catch(e){} };`,
     );
   }
 
@@ -684,7 +854,12 @@ if (enabled) {
     if (shouldObserve(filename)) {
       const moduleName = path.basename(filename).replace(/\.[jt]sx?$/, '');
       try {
-        const transformed = transformCjsSource(content, filename, moduleName, environment);
+        // Try to load source map for compiled JS files (e.g., tsc output)
+        const sourceMap = loadSourceMap(filename, content);
+        if (debug && sourceMap) {
+          console.log(`[trickle/observe] Source map found for ${filename} → ${sourceMap.originalFile}`);
+        }
+        const transformed = transformCjsSource(content, filename, moduleName, environment, sourceMap);
         if (transformed !== content) {
           // Count how many functions were wrapped (from insertions)
           const funcRegex = /^[ \t]*(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;

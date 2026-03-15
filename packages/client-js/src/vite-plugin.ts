@@ -260,6 +260,9 @@ function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: 
     if (varName === '__createBinding' || varName === '__setModuleDefault' || varName === '__importStar' || varName === '__importDefault') continue;
     if (varName === '__decorate' || varName === '__metadata' || varName === '__param' || varName === '__awaiter') continue;
     if (varName === 'ownKeys' || varName === 'desc') continue;
+    // Skip esbuild helpers
+    if (varName === '__defProp' || varName === '__defNormalProp' || varName === '__publicField' || varName === '__getOwnPropNames') continue;
+    if (varName === '__commonJS' || varName === '__toCommonJS' || varName === '__export' || varName === '__copyProps') continue;
     // Skip React Refresh / HMR internals (Vite, webpack, Next.js inject these)
     if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker' || varName === 'invalidateMessage') continue;
     if (varName === '_s' || varName === '_c2' || varName === '_s2') continue;

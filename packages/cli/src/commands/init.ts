@@ -12,7 +12,7 @@ interface ProjectInfo {
   hasPackageJson: boolean;
   hasTsConfig: boolean;
   isPython: boolean;
-  framework: "express" | "fastapi" | "flask" | "django" | null;
+  framework: "express" | "next" | "vite" | "fastapi" | "flask" | "django" | null;
   entryFile: string | null;
   packageJson: Record<string, unknown> | null;
   tsConfig: Record<string, unknown> | null;
@@ -74,7 +74,9 @@ function detectProject(dir: string, forcePython: boolean): ProjectInfo {
       ...(info.packageJson.dependencies as Record<string, string> | undefined),
       ...(info.packageJson.devDependencies as Record<string, string> | undefined),
     };
-    if (deps.express) info.framework = "express";
+    if (deps.next) info.framework = "next";
+    else if (deps.vite) info.framework = "vite";
+    else if (deps.express) info.framework = "express";
   }
 
   if (info.isPython) {
@@ -425,6 +427,51 @@ function updateVitestConfig(dir: string): boolean {
   return true;
 }
 
+function updateNextConfig(dir: string): boolean {
+  // Look for next.config.js, next.config.mjs, next.config.ts
+  const candidates = ["next.config.js", "next.config.mjs", "next.config.ts"];
+  let configFile: string | null = null;
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(dir, c))) {
+      configFile = c;
+      break;
+    }
+  }
+
+  if (!configFile) return false;
+
+  const configPath = path.join(dir, configFile);
+  const content = fs.readFileSync(configPath, "utf-8");
+
+  // Already has withTrickle
+  if (content.includes("withTrickle")) return false;
+
+  // Detect config style and wrap
+  const isESM = configFile.endsWith(".mjs") || configFile.endsWith(".ts") || content.includes("export default");
+
+  if (isESM) {
+    // ESM: add import and wrap export
+    const importLine = `import { withTrickle } from 'trickle-observe/next-plugin';\n`;
+    // Wrap: export default X → export default withTrickle(X)
+    const updated = importLine + content.replace(
+      /export\s+default\s+({[\s\S]*?}|[a-zA-Z_$][a-zA-Z0-9_$]*)/,
+      (match, configExpr) => `export default withTrickle(${configExpr})`,
+    );
+    fs.writeFileSync(configPath, updated, "utf-8");
+  } else {
+    // CJS: add require and wrap module.exports
+    const requireLine = `const { withTrickle } = require('trickle-observe/next-plugin');\n`;
+    // Wrap: module.exports = X → module.exports = withTrickle(X)
+    const updated = requireLine + content.replace(
+      /module\.exports\s*=\s*([\s\S]*?)(?=;\s*$|$)/m,
+      (match, configExpr) => `module.exports = withTrickle(${configExpr.trimEnd()})`,
+    );
+    fs.writeFileSync(configPath, updated, "utf-8");
+  }
+
+  return true;
+}
+
 function updateGitignore(dir: string): boolean {
   const giPath = path.join(dir, ".gitignore");
   let content = "";
@@ -503,10 +550,18 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   }
 
   // Step 5: Update vitest/vite config with tricklePlugin
-  if (!info.isPython) {
+  if (!info.isPython && info.framework !== "next") {
     const vitestUpdated = updateVitestConfig(dir);
     if (vitestUpdated) {
-      console.log(`  ${chalk.green("~")} Updated ${chalk.bold("vitest.config.ts")} — added tricklePlugin() for variable tracing`);
+      console.log(`  ${chalk.green("~")} Updated ${chalk.bold("vite.config.ts")} — added tricklePlugin() for variable tracing`);
+    }
+  }
+
+  // Step 5b: Update next.config.js with withTrickle
+  if (info.framework === "next") {
+    const nextUpdated = updateNextConfig(dir);
+    if (nextUpdated) {
+      console.log(`  ${chalk.green("~")} Updated ${chalk.bold("next.config.js")} — wrapped with withTrickle() for variable tracing`);
     }
   }
 
@@ -531,21 +586,35 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   console.log(chalk.bold("  Next steps:"));
   console.log("");
 
-  const entryFile = info.entryFile || (info.isPython ? "app.py" : "app.js");
-  console.log(chalk.white("  1. Run your app with trickle (one command does everything):"));
-  console.log(chalk.cyan(`     trickle run ${entryFile}`));
-  console.log("");
-  console.log(chalk.white("  2. That's it! trickle auto-detects the runtime, observes types,"));
-  console.log(chalk.white("     and generates stubs from .tricklerc.json settings."));
-  console.log("");
-  console.log(chalk.gray("  Customize .tricklerc.json:"));
-  console.log(chalk.gray('     { "stubs": "src/", "annotate": "src/", "exclude": ["test"] }'));
+  if (info.framework === "vite" || info.framework === "next") {
+    // React/Vite/Next.js — just run the dev server
+    const devCmd = info.framework === "next" ? "next dev" : "npm run dev";
+    console.log(chalk.white("  1. Install the VSCode extension:"));
+    console.log(chalk.cyan("     code --install-extension yiheinchai.trickle-vscode"));
+    console.log("");
+    console.log(chalk.white("  2. Start your dev server as usual:"));
+    console.log(chalk.cyan(`     ${devCmd}`));
+    console.log("");
+    console.log(chalk.white("  3. Open any .tsx file in VSCode — inline hints show variable values,"));
+    console.log(chalk.white("     component render counts, hook invocations, and state updates."));
+    console.log(chalk.white("     Values update live as you interact with your app."));
+  } else {
+    const entryFile = info.entryFile || (info.isPython ? "app.py" : "app.js");
+    console.log(chalk.white("  1. Run your app with trickle (one command does everything):"));
+    console.log(chalk.cyan(`     trickle run ${entryFile}`));
+    console.log("");
+    console.log(chalk.white("  2. Install the VSCode extension for inline hints:"));
+    console.log(chalk.cyan("     code --install-extension yiheinchai.trickle-vscode"));
+    console.log("");
+    console.log(chalk.white("  3. That's it! trickle auto-detects the runtime, observes types,"));
+    console.log(chalk.white("     and generates stubs from .tricklerc.json settings."));
+  }
+
   console.log("");
   console.log(chalk.gray("  Other commands:"));
   console.log(chalk.gray("     trickle functions         — list observed functions"));
   console.log(chalk.gray("     trickle vars              — list captured variable types + values"));
   console.log(chalk.gray("     trickle types <name>      — see types + sample data"));
-  console.log(chalk.gray("     trickle annotate src/     — add type annotations to source files"));
 
   console.log("");
 }

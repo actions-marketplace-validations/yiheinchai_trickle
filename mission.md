@@ -2,25 +2,11 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Go through every part of the trickle platform and make it agent first, meaning that it is designed primary to be used by AI agents, the goal is 10-100x improvement in agent capability with trickle compared to without trickle.
-
-The vision is to have AI agents eg claude code run autonomously as a on-call engineer responding the incidences and debugging and fixing autonomously in prod. Trickle is the important part to give the AI agent all the information required to fix the issue.
-
-As a key point for the agent first approach, i want you to use trickle when developing trickle (since you are an agent), and you will be able to identify any pain points in the process.
+Create the best documentations to ever exist. Currently documentation is very outdated, and old. Each usecase needs to be updated. Build the documentation for both humans and for AI agents.
 </higher directive>
 
 <focus point>
-Full end-to-end agent workflow validated on Express+SQLite todo API:
-  init → run → summary → explain → flamegraph → MCP recommended_actions
-All 26 MCP tools working. Root cause analysis, error context, guided workflows,
-flamegraph, Python decorator capture, production monitoring all shipped.
 
-Current versions: CLI 0.1.137, JS client 0.2.113, Python 0.2.22, Backend 0.1.67
-
-Next priorities:
-1. Distributed tracing improvements (cross-service flamegraphs)
-2. Improve `trickle doctor` to include root causes and recommended actions
-3. Test on Django/FastAPI production-scale projects from GitHub
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

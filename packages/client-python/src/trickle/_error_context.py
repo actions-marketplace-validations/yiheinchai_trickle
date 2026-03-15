@@ -415,17 +415,36 @@ def _write_error_jsonl(exc: BaseException) -> None:
         else:
             mapped_frames.append((f, l, fn))
 
+    # Collect nearby variable values from variables.jsonl for agent debugging
+    nearby_vars: Dict[str, Any] = {}
+    for r in relevant:
+        name = r.get("varName", "?")
+        line_no = r.get("line", 0)
+        sample = r.get("sample")
+        if sample is not None:
+            label = f"L{line_no} {name}"
+            if isinstance(sample, (int, float, bool, str)):
+                nearby_vars[label] = sample
+            elif isinstance(sample, dict):
+                nearby_vars[label] = sample
+            else:
+                nearby_vars[label] = str(sample)[:80]
+
     error_record = {
         "kind": "error",
-        "error_type": type(exc).__name__,
-        "message": str(exc),
+        "error": str(exc),
+        "type": type(exc).__name__,
         "file": original_file,
         "line": crash_line_corrected,
         "function": crash_func,
-        "shape_context": shape_context,
-        "local_vars": local_vars,
-        "local_vars_file": local_file,
-        "local_vars_line": local_line,
+        "stack": "\n".join(
+            f"  File \"{f}\", line {l}, in {fn}"
+            for f, l, fn in mapped_frames[:6]
+        ),
+        "nearbyVariables": nearby_vars if nearby_vars else None,
+        "shape_context": shape_context if shape_context else None,
+        "local_vars": local_vars if local_vars else None,
+        "timestamp": __import__("datetime").datetime.now().isoformat(),
         "frames": [
             {"file": f, "line": l, "function": fn}
             for f, l, fn in mapped_frames

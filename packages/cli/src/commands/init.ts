@@ -559,8 +559,27 @@ ${runCmd}
 \`\`\`
 
 The \`.trickle/\` directory contains cached runtime observations that persist
-across sessions. Variable values, function types, and error context are all
-available without running the app again.
+across sessions. Variable values, function types, console output, and error
+context are all available without running the app again.
+
+### MCP Server (for deeper integration)
+
+Add trickle as an MCP server for direct tool access:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "trickle": {
+      "command": "npx",
+      "args": ["trickle-cli", "mcp-server"]
+    }
+  }
+}
+\`\`\`
+
+Tools: get_runtime_context, get_annotated_source, get_function_signatures,
+get_errors, get_console_output, get_http_requests, check_data_freshness,
+refresh_runtime_data.
 `;
 
   fs.writeFileSync(claudePath, content, "utf-8");

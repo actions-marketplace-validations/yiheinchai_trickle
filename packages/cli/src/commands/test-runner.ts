@@ -473,6 +473,17 @@ export async function runTestCommand(opts: TestOptions): Promise<TestReport> {
   // Normalize "python -m pytest" to "pytest" for proper trickle run injection
   testCommand = testCommand.replace(/^python3?\s+-m\s+pytest\b/, 'pytest');
 
+  // Resolve trickle jest-setup path for setupFiles injection
+  let jestSetupPath = '';
+  try {
+    jestSetupPath = require.resolve('trickle-observe/jest-setup');
+  } catch {
+    try {
+      jestSetupPath = path.resolve(__dirname, '..', '..', '..', 'client-js', 'jest-setup.js');
+      if (!fs.existsSync(jestSetupPath)) jestSetupPath = '';
+    } catch {}
+  }
+
   if (frameworkName === 'jest' && !command.includes('--json')) {
     testCommand = `${testCommand} --json --outputFile=${path.join(trickleDir, 'test-results.json')}`;
     useJsonReporter = true;
@@ -482,6 +493,12 @@ export async function runTestCommand(opts: TestOptions): Promise<TestReport> {
   } else if (frameworkName === 'pytest' && !testCommand.includes('-v')) {
     testCommand = `${testCommand} -v`;
   }
+
+  // Note: Jest/Vitest use their own module system (jest-runtime) that bypasses
+  // Node's Module._load hooks, so DB query/function observation doesn't work
+  // inside test files. The test results (pass/fail) are still captured.
+  // For full observability during tests, run the app directly:
+  //   trickle run "node app.js"  (then run tests separately against it)
 
   if (!opts.json) {
     console.log('');

@@ -11,9 +11,46 @@ This is invoked by ``trickle run`` for Python commands.
 
 from __future__ import annotations
 
+import json
 import os
 import runpy
 import sys
+import time
+
+
+def _patch_console(local_dir: str) -> None:
+    """Patch sys.stdout/stderr to also capture output to console.jsonl."""
+    console_file = os.path.join(local_dir, "console.jsonl")
+    try:
+        os.makedirs(local_dir, exist_ok=True)
+        open(console_file, "w").close()  # Clear previous
+    except Exception:
+        return
+
+    _orig_stdout_write = sys.stdout.write
+    _orig_stderr_write = sys.stderr.write
+
+    def _capture(level: str, text: str) -> None:
+        try:
+            msg = text.strip()
+            if not msg or msg.startswith("[trickle"):
+                return
+            record = {"level": level, "message": msg[:500], "timestamp": int(time.time() * 1000)}
+            with open(console_file, "a") as f:
+                f.write(json.dumps(record) + "\n")
+        except Exception:
+            pass
+
+    def _stdout_write(text: str) -> int:
+        _capture("log", text)
+        return _orig_stdout_write(text)
+
+    def _stderr_write(text: str) -> int:
+        _capture("error", text)
+        return _orig_stderr_write(text)
+
+    sys.stdout.write = _stdout_write  # type: ignore
+    sys.stderr.write = _stderr_write  # type: ignore
 
 
 def main() -> None:
@@ -60,6 +97,10 @@ def main() -> None:
         # Legacy function-wrapping mode
         from trickle._observe_auto import install
         install()
+
+    # Capture console output to .trickle/console.jsonl for agent debugging
+    if _os2.environ.get("TRICKLE_CAPTURE_CONSOLE", "1") != "0":
+        _patch_console(_local_dir)
 
     # Patch HTTP libraries (requests, httpx) for API type capture
     import os as _os

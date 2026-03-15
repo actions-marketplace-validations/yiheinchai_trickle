@@ -1,24 +1,17 @@
 Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
-<general directive>
+<higher directive>
 Make a big push of increasing the feature set of trickle to expand the target audience and the TAM. Make sure to update the readme and usecases accordingly.
 
-Particularly, build for AI agents as the primary user.
-</general directive>
+Particularly, build a complete observability platform, it will replace datadog, with the ability for agents to automatically fix issues in production. this will be critical for the business as we will sell cloud computing and agent credits, esp now that we have the runtime cache infrastructure in place.
+
+</higher directive>
 
 <focus point>
-Agent observability stack is feature-complete. 11 MCP tools, 8 data types, 15+ drivers auto-patched.
+Added memory profiling (profile.jsonl) with RSS + heap snapshots. 12 MCP tools now. Published Python 0.2.3, CLI 0.1.93.
 
-Data captured: variables, functions+timing, call trace, DB queries (SQL/Redis/MongoDB), HTTP requests, WebSocket messages, console output, errors.
-
-Drivers: JS (pg, mysql2, better-sqlite3, ioredis, mongoose, ws, socket.io) + Python (sqlite3, psycopg2, pymysql, mysql.connector, redis, pymongo).
-
-Done: .d.ts class grouping — class methods now generate proper `export declare class` blocks.
-
-Consider next:
-1. Go/Rust support for broader TAM
-2. Performance profiling (memory, CPU)
+Full stack: 9 data types, 12 MCP tools, 15+ drivers auto-patched across JS + Python.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

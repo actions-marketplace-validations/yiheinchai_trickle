@@ -717,7 +717,10 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   }
 
   // Also find variable declarations for tracing
-  const varTraceEnabled = process.env.TRICKLE_TRACE_VARS !== '0';
+  // In production mode, disable variable tracing by default
+  const isProduction = process.env.TRICKLE_PRODUCTION === '1' || process.env.TRICKLE_PRODUCTION === 'true';
+  const varTraceDefault = isProduction ? '0' : '1';
+  const varTraceEnabled = (process.env.TRICKLE_TRACE_VARS || varTraceDefault) !== '0';
 
   // For TypeScript files (compiled by ts-node/tsc), type declarations (interfaces, type aliases)
   // are stripped from the compiled JS, shifting line numbers. The only accurate way to get correct
@@ -851,7 +854,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     `    module: ${JSON.stringify(effectiveModuleName)},`,
     `    trackArgs: true,`,
     `    trackReturn: true,`,
-    `    sampleRate: 1,`,
+    `    sampleRate: parseFloat(process.env.TRICKLE_SAMPLE_RATE || '1'),`,
     `    maxDepth: 3,`,
     `    environment: ${JSON.stringify(env)},`,
     `    enabled: true,`,
@@ -1235,7 +1238,7 @@ if (enabled) {
             module: moduleName,
             trackArgs: true,
             trackReturn: true,
-            sampleRate: 1,
+            sampleRate: parseFloat(process.env.TRICKLE_SAMPLE_RATE || '1'),
             maxDepth: 3,
             environment,
             enabled: true,
@@ -1280,7 +1283,7 @@ if (enabled) {
             module: moduleName,
             trackArgs: true,
             trackReturn: true,
-            sampleRate: 1,
+            sampleRate: parseFloat(process.env.TRICKLE_SAMPLE_RATE || '1'),
             maxDepth: 3,
             environment,
             enabled: true,
@@ -1322,7 +1325,7 @@ if (enabled) {
                 module: moduleName,
                 trackArgs: true,
                 trackReturn: true,
-                sampleRate: 1,
+                sampleRate: parseFloat(process.env.TRICKLE_SAMPLE_RATE || '1'),
                 maxDepth: 3,
                 environment,
                 enabled: true,
@@ -1353,7 +1356,7 @@ if (enabled) {
         module: moduleName,
         trackArgs: true,
         trackReturn: true,
-        sampleRate: 1,
+        sampleRate: parseFloat(process.env.TRICKLE_SAMPLE_RATE || '1'),
         maxDepth: 3,
         environment,
         enabled: true,

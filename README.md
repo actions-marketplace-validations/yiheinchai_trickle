@@ -198,25 +198,37 @@ trickle context src/api.ts --annotated   # source + runtime values
   25 | const user = getUser(id);                         // user = null  ← bug!
 ```
 
-**What agents can query:**
+**What agents can query (12 data types):**
 
 | Data | Command | Description |
 |------|---------|-------------|
+| Health check | `trickle doctor` | One-shot overview: status, counts, issues, memory |
 | Variables | `trickle context <file>` | Types + actual values at every line |
 | Functions | `trickle functions` | Signatures with parameter types + timing |
+| Call trace | `trickle context --trace` | Which function called which, execution flow |
 | Errors | `trickle context --errors` | Stack trace + nearby variable values |
 | DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts |
 | HTTP | `trickle context --http` | Fetch calls with status codes + response types |
+| Logs | `trickle context --logs` | Structured logging events with levels + context |
 | Console | `trickle context --console` | All stdout/stderr with timestamps |
+| Memory | `trickle context --profile` | RSS + heap snapshots at start/end |
+| Traces | `trickle context --traces` | Distributed spans across microservices |
+| Environment | `trickle context --env` | Runtime version, env vars, detected frameworks |
 
-**Database tracing** captures SQL queries (pg, mysql2, sqlite3, psycopg2, pymysql), Redis commands (ioredis, redis-py), and MongoDB operations (mongoose, pymongo) — all automatically, zero config.
+**Auto-remediation pipeline:**
+```bash
+trickle run python app.py       # capture everything
+trickle monitor                  # detect N+1 queries, slow functions, errors
+trickle heal                     # generate fix plans for agents
+trickle verify                   # compare before/after metrics
+```
 
-**MCP Integration** — 9 tools for direct agent access:
+**MCP Integration** — 18 tools for direct agent access:
 ```json
 { "mcpServers": { "trickle": { "command": "npx", "args": ["trickle-cli", "mcp-server"] } } }
 ```
 
-Tools: `get_runtime_context`, `get_annotated_source`, `get_function_signatures`, `get_errors`, `get_database_queries`, `get_console_output`, `get_http_requests`, `check_data_freshness`, `refresh_runtime_data`.
+Key tools: `get_doctor` (start here), `get_heal_plans`, `get_alerts`, `get_call_trace`, `get_database_queries`, `get_logs`, `get_distributed_traces`, `get_performance_profile`, `get_environment`, and 9 more.
 
 ```bash
 trickle init                     # creates CLAUDE.md with agent debugging workflow

@@ -6,9 +6,9 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-CLI 0.1.141. Added context-aware suggestions to trickle status (suggests next command based
-on data state: errors → summary, stale → re-run, calltrace → flamegraph). Also shipped
-"Next steps" hints after trickle run. 26 MCP tools, all docs complete.
+CLI 0.1.142. Fixed trickle test not expanding shell globs (e.g., `src/*.test.ts`) — found
+by testing on json-server from GitHub. Also shipped status suggestions, next steps hints.
+26 MCP tools, all docs complete.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

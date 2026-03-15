@@ -9,17 +9,10 @@ Particularly, build a complete observability platform, it will replace datadog, 
 </higher directive>
 
 <focus point>
-Observability platform: 11 data types, 16 MCP tools, 15+ auto-patched drivers. Full parity JS + Python.
+Complete observability platform: 12 data types, 18 MCP tools, 15+ auto-patched drivers. Full JS + Python parity. README updated.
 
-Pipeline: run → monitor → heal → verify. Dashboard, webhook alerts, production sampling, distributed tracing, environment capture.
-
-Validated on real APIs (Python + JS + TS). All bugs fixed.
-
-Done: Full JS/Python parity (memory, traces, env). Cloud CLI. `trickle doctor` + `get_doctor` MCP tool. 17 MCP tools total. CLI 0.1.104.
-
-Complete platform: 11 data types, 17 MCP tools, 15+ drivers, run → monitor → heal → verify → cloud.
-
-Done: Structured log aggregation (logs.jsonl) + get_logs MCP tool. 18 MCP tools. 12 data types.
+Pipeline: run → monitor → heal → verify → cloud
+Data: variables, functions+timing, call trace, DB queries, HTTP, WebSocket, logs, console, errors, memory, traces, environment
 
 Next: Build cloud.trickle.dev backend, Go/Rust language support
 </focus point>

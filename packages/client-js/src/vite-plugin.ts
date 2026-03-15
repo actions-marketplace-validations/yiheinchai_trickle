@@ -476,6 +476,158 @@ function extractDestructuredNames(pattern: string): string[] {
 }
 
 /**
+ * Find import declarations and extract imported bindings for tracing.
+ * Handles:
+ *   import { a, b } from '...'        → trace a, b
+ *   import { a as b } from '...'      → trace b (local name)
+ *   import X from '...'               → trace X (default import)
+ *   import * as X from '...'          → trace X (namespace import)
+ *   import X, { a, b } from '...'    → trace X, a, b
+ * Returns insertions to place AFTER the import statement.
+ */
+function findImportDeclarations(source: string): Array<{ lineEnd: number; varNames: string[]; lineNo: number }> {
+  const results: Array<{ lineEnd: number; varNames: string[]; lineNo: number }> = [];
+
+  // Match import statements (potentially multiline)
+  // We scan for `import` at the start of a line (with optional whitespace)
+  const importRegex = /^[ \t]*import\s+/gm;
+  let match;
+
+  while ((match = importRegex.exec(source)) !== null) {
+    const importStart = match.index;
+    let pos = importStart + match[0].length;
+    const varNames: string[] = [];
+
+    // Skip type-only imports: `import type ...`
+    if (source.slice(pos).startsWith('type ') || source.slice(pos).startsWith('type{')) continue;
+
+    // Skip bare imports: `import '...'` or `import "..."`
+    const afterImport = source[pos];
+    if (afterImport === '"' || afterImport === "'") continue;
+
+    // Parse the import clause
+    // Could be:
+    //   * as X
+    //   X (default)
+    //   { a, b, c as d }
+    //   X, { a, b }
+    //   X, * as Y
+
+    // Check for namespace import: * as X
+    if (source[pos] === '*') {
+      const nsMatch = source.slice(pos).match(/^\*\s+as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/);
+      if (nsMatch) {
+        varNames.push(nsMatch[1]);
+        pos += nsMatch[0].length;
+      }
+    }
+    // Check for default import or named imports
+    else if (source[pos] === '{') {
+      // Named imports only: { a, b, c as d }
+      const closeIdx = source.indexOf('}', pos);
+      if (closeIdx === -1) continue;
+      const namedStr = source.slice(pos + 1, closeIdx);
+      const names = parseNamedImports(namedStr);
+      varNames.push(...names);
+      pos = closeIdx + 1;
+    }
+    else {
+      // Default import: X or X, { ... } or X, * as Y
+      const defaultMatch = source.slice(pos).match(/^([a-zA-Z_$][a-zA-Z0-9_$]*)/);
+      if (defaultMatch) {
+        varNames.push(defaultMatch[1]);
+        pos += defaultMatch[0].length;
+
+        // Skip whitespace and comma
+        while (pos < source.length && /[\s,]/.test(source[pos])) pos++;
+
+        // Check for additional named imports: , { a, b }
+        if (source[pos] === '{') {
+          const closeIdx = source.indexOf('}', pos);
+          if (closeIdx !== -1) {
+            const namedStr = source.slice(pos + 1, closeIdx);
+            const names = parseNamedImports(namedStr);
+            varNames.push(...names);
+            pos = closeIdx + 1;
+          }
+        }
+        // Check for namespace: , * as Y
+        else if (source[pos] === '*') {
+          const nsMatch = source.slice(pos).match(/^\*\s+as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/);
+          if (nsMatch) {
+            varNames.push(nsMatch[1]);
+            pos += nsMatch[0].length;
+          }
+        }
+      }
+    }
+
+    if (varNames.length === 0) continue;
+
+    // Skip trickle internals
+    const filtered = varNames.filter(n => !n.startsWith('__trickle'));
+    if (filtered.length === 0) continue;
+
+    // Find the end of the import statement (semicolon or newline after `from '...'`)
+    const fromIdx = source.indexOf('from', pos);
+    if (fromIdx === -1) continue;
+    // Find the end: either `;` or end of line after the string literal
+    let endPos = fromIdx + 4;
+    // Skip whitespace
+    while (endPos < source.length && /\s/.test(source[endPos])) endPos++;
+    // Skip the string literal
+    if (endPos < source.length && (source[endPos] === '"' || source[endPos] === "'")) {
+      const quote = source[endPos];
+      endPos++;
+      while (endPos < source.length && source[endPos] !== quote) {
+        if (source[endPos] === '\\') endPos++;
+        endPos++;
+      }
+      endPos++; // skip closing quote
+    }
+    // Skip optional semicolon
+    while (endPos < source.length && (source[endPos] === ';' || source[endPos] === ' ' || source[endPos] === '\t')) endPos++;
+
+    // Calculate line number
+    let lineNo = 1;
+    for (let i = 0; i < importStart; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    results.push({ lineEnd: endPos, varNames: filtered, lineNo });
+  }
+
+  return results;
+}
+
+/**
+ * Parse named imports from the content between { and }.
+ * Handles: a, b, c as d, type e (skips type-only imports)
+ * Returns local binding names.
+ */
+function parseNamedImports(namedStr: string): string[] {
+  const names: string[] = [];
+  const parts = namedStr.split(',');
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    // Skip type-only: `type Foo` or `type Foo as Bar`
+    if (/^type\s+/.test(trimmed)) continue;
+    // Check for alias: `original as local`
+    const asMatch = trimmed.match(/^[a-zA-Z_$][a-zA-Z0-9_$]*\s+as\s+([a-zA-Z_$][a-zA-Z0-9_$]*)/);
+    if (asMatch) {
+      names.push(asMatch[1]);
+    } else {
+      const name = trimmed.split(/[\s]/)[0];
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
+        names.push(name);
+      }
+    }
+  }
+  return names;
+}
+
+/**
  * Find class body ranges in source code. Handles both:
  *   class Foo { ... }
  *   var Foo = class { ... }
@@ -729,6 +881,11 @@ function findJsxExpressions(source: string): Array<{ exprStart: number; exprEnd:
   while ((match = jsxExprRegex.exec(source)) !== null) {
     const bracePos = match.index;
 
+    // Skip if this `{` is part of an import statement: `import { ... } from '...'`
+    const lineStart = source.lastIndexOf('\n', bracePos - 1) + 1;
+    const linePrefix = source.slice(lineStart, bracePos).trimStart();
+    if (/^import\s/.test(linePrefix) || /^import\s/.test(linePrefix.replace(/^export\s+/, ''))) continue;
+
     // Skip if inside a string or comment
     // Simple check: look at the character before `{`
     const charBefore = bracePos > 0 ? source[bracePos - 1] : '';
@@ -740,8 +897,16 @@ function findJsxExpressions(source: string): Array<{ exprStart: number; exprEnd:
     // Skip if this looks like a template literal expression `${`
     if (charBefore === '$') continue;
 
-    // Skip if preceded by `,` (function arguments, not JSX)
+    // Skip if preceded (past whitespace) by `,`, `(`, or `:` — function arguments, object literals, attribute values
     if (charBefore === ',') continue;
+    {
+      let scanBack = bracePos - 1;
+      while (scanBack >= 0 && (source[scanBack] === ' ' || source[scanBack] === '\t' || source[scanBack] === '\n' || source[scanBack] === '\r')) scanBack--;
+      if (scanBack >= 0 && (source[scanBack] === ',' || source[scanBack] === '(' || source[scanBack] === ':' || source[scanBack] === ')')) continue;
+    }
+
+    // Skip if this `{` is part of a variable declaration destructuring: `const { ... }` or `let { ... }`
+    if (/(?:const|let|var)\s*$/.test(source.slice(Math.max(0, bracePos - 10), bracePos))) continue;
 
     // Must be in a JSX context: look backward for `>` or `}` (closing tag bracket or prev expression)
     // before hitting structural JS characters like `{`, `(`, `;`
@@ -1472,6 +1637,9 @@ export function transformEsmSource(
     }
   }
 
+  // Find import declarations for tracing (trace imported bindings after import statement)
+  const importInsertions = traceVars ? findImportDeclarations(source) : [];
+
   // Find variable declarations for tracing
   const varInsertions = traceVars ? findVarDeclarations(source) : [];
 
@@ -1493,7 +1661,7 @@ export function transformEsmSource(
   // Find JSX text expressions for tracing (React files only)
   const jsxExprInsertions = (traceVars && isReactFile) ? findJsxExpressions(source) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && jsxExprInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
+  if (funcInsertions.length === 0 && importInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && jsxExprInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -1561,7 +1729,7 @@ export function transformEsmSource(
   }
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
-  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || jsxExprInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
+  const needsTracing = importInsertions.length > 0 || varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || jsxExprInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
   const importLines: string[] = [];
 
   if (isSSR) {
@@ -1663,7 +1831,7 @@ export function transformEsmSource(
   }
 
   // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || jsxExprInsertions.length > 0) {
+  if (importInsertions.length > 0 || varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || jsxExprInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_var_tracer) {`,
       `  const _cache = new Map();`,
@@ -1825,6 +1993,15 @@ export function transformEsmSource(
     allInsertions.push({
       position,
       code: `\ntry{${name}=__trickle_wrap(${name},'${name}',${paramNamesArg})}catch(__e){}\n`,
+    });
+  }
+
+  // Import insertions: trace imported bindings after the import statement
+  for (const { lineEnd, varNames, lineNo } of importInsertions) {
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: lineEnd,
+      code: `\n;try{${calls}}catch(__e){}\n`,
     });
   }
 

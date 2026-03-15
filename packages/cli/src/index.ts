@@ -606,6 +606,19 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle diff-runs
+program
+  .command("diff-runs")
+  .description("Compare two trickle runs — shows new/removed functions, query changes, performance regressions")
+  .option("--snapshot", "Save current run data as a snapshot for later comparison")
+  .option("--before <dir>", "Directory with before data (default: .trickle/snapshot)")
+  .option("--after <dir>", "Directory with after data (default: .trickle)")
+  .option("--json", "Structured JSON output")
+  .action(async (opts) => {
+    const { runDiffCommand } = await import("./commands/run-diff");
+    runDiffCommand(opts);
+  });
+
 // trickle fix
 program
   .command("fix")

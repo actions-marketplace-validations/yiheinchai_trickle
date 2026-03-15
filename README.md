@@ -241,6 +241,24 @@ trickle codegen --docs           # generate API documentation
 
 ---
 
+### Teams Replacing Datadog / New Relic
+
+> *"We're paying $23/host/month for dashboards we barely use. There must be a simpler way."*
+
+```bash
+trickle run python app.py           # captures everything automatically
+trickle monitor                     # detects N+1 queries, slow functions, memory issues
+trickle heal                        # generates fix plans for AI agents
+trickle dashboard-local             # self-contained HTML dashboard
+trickle monitor --webhook <url>     # Slack/Discord alerts
+```
+
+Zero config, zero code changes. Auto-detects databases (PostgreSQL, MySQL, SQLite, Redis, MongoDB), HTTP clients, and WebSocket connections. Production mode with configurable sampling.
+
+**[Full Observability Platform Guide →](usecases/observability-platform.md)**
+
+---
+
 ## Install
 
 ### JavaScript / TypeScript

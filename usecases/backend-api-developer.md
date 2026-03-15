@@ -65,6 +65,36 @@ trickle run python manage.py runserver
 
 All work the same — trickle auto-detects the framework and instruments it.
 
+## Use Case 0: Inline Variable Hints (No console.log Needed)
+
+When you run `trickle run node app.js`, every variable in your route handlers shows its runtime value inline in VSCode:
+
+```javascript
+app.get('/api/users', (req, res) => {
+  const query = req.query.q || '';           // query: ""
+  const filtered = users.filter(u => ...);   // filtered: [{id: 1, name: "Alice", ...}]
+  const count = filtered.length;             // count: 2
+  res.json({ users: filtered, count });
+});
+
+app.post('/api/users', (req, res) => {
+  const { name, email } = req.body;          // name: "Alice", email: "alice@test.com"
+  const id = nextId++;                       // id: 1
+  const user = { id, name, email, ... };     // user: {id: 1, name: "Alice", ...}
+  users.push(user);
+  res.status(201).json(user);
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  const id = parseInt(req.params.id);        // id: 2
+  const idx = users.findIndex(u => ...);     // idx: 1
+  const deleted = users.splice(idx, 1)[0];   // deleted: {id: 2, name: "Bob", ...}
+  res.json({ deleted });
+});
+```
+
+Values update live as requests come in — `count` changes from `2` to `1` after a delete. Middleware variables (`token`, `isAuthed`) are also traced.
+
 ## Use Case 1: Generate TypeScript Types
 
 After sending some requests through your API:

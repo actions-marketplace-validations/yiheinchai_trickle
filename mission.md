@@ -8,7 +8,7 @@ if you think everything has already be accomplished, please compact conversation
 </general directive>
 
 <focus point>
-Added source map support for compiled TypeScript and fixed class field declarations causing SyntaxError in esbuild modern target output. Both tsc and esbuild outputs now work correctly with accurate line numbers pointing to original .ts source files. Continue testing on diverse codebases — next areas to explore: bundled multi-file outputs (webpack/rollup), Python decorator and async/await tracing, and testing on larger real-world open source projects.
+Added source map support for compiled TypeScript, fixed class field SyntaxError in esbuild, and added per-line sample count limiting (max 5 per variable) to prevent loop variable spam — a 100-iteration loop now produces ~20 trace entries instead of 500+. All changes applied consistently across JS and Python tracers. Continue testing on diverse codebases — next areas: bundled multi-file outputs (webpack/rollup), Python decorator tracing, and testing on larger real-world open source projects.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

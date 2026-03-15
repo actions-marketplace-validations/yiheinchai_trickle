@@ -575,9 +575,19 @@ const TOOLS = [
     description: "Get a comprehensive summary of the last trickle run — status, errors, queries (with N+1 detection), function signatures, logs, HTTP requests, memory profile, alerts, and fix recommendations. This is the RECOMMENDED first tool to call — it replaces 5-10 separate tool calls with a single comprehensive result. Use this instead of calling get_errors, get_database_queries, get_alerts, etc. individually.",
     inputSchema: { type: "object", properties: {} },
   },
+  {
+    name: "run_tests",
+    description: "Run tests with trickle observability and get structured results. Returns pass/fail for each test, and for failures: the error message, runtime variable values near the failure, database queries that ran, and the call trace. Auto-detects the test framework (jest, vitest, pytest, mocha). Much more useful than raw test output — gives agents actionable context for fixing failures.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Test command to run (e.g., 'npm test', 'python -m pytest tests/', 'npx jest'). If omitted, auto-detects." },
+      },
+    },
+  },
 ];
 
-function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
+async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
   switch (req.method) {
     case "initialize":
       return {
@@ -685,6 +695,27 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
             }
             break;
           }
+          case "run_tests": {
+            const testCommand = args.command as string | undefined;
+            try {
+              const { runTestCommand } = require('./test-runner');
+              // Suppress console output — we only want the structured result
+              const origLog = console.log;
+              const origErr = console.error;
+              console.log = () => {};
+              console.error = () => {};
+              try {
+                const report = await runTestCommand({ json: false, command: testCommand });
+                result = report;
+              } finally {
+                console.log = origLog;
+                console.error = origErr;
+              }
+            } catch (e: any) {
+              result = { error: `Failed to run tests: ${e.message}` };
+            }
+            break;
+          }
           default:
             return { jsonrpc: "2.0", id: req.id, error: { code: -32601, message: `Unknown tool: ${toolName}` } };
         }
@@ -712,10 +743,10 @@ export async function mcpServerCommand(): Promise<void> {
   // Stdio JSON-RPC transport
   const rl = readline.createInterface({ input: process.stdin });
 
-  rl.on("line", (line) => {
+  rl.on("line", async (line) => {
     try {
       const req = JSON.parse(line) as JsonRpcRequest;
-      const resp = handleRequest(req);
+      const resp = await handleRequest(req);
       if (resp.id !== null) {
         process.stdout.write(JSON.stringify(resp) + "\n");
       }

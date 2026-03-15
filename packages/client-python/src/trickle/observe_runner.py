@@ -158,6 +158,49 @@ def main() -> None:
     target = sys.argv[1]
     sys.argv = sys.argv[1:]
 
+    # Handle -m flag: "observe_runner -m module_name [args...]"
+    # At this point sys.argv has been shifted: sys.argv[0] == "-m", sys.argv[1] == module
+    if target == "-m" and len(sys.argv) >= 2:
+        target = sys.argv[1]
+        sys.argv = sys.argv[1:]  # keep module name as sys.argv[0]
+        # Force module mode by skipping the .py check below
+        _user_code_error = None
+        try:
+            runpy.run_module(target, run_name="__main__", alter_sys=True)
+        except SystemExit:
+            raise
+        except BaseException as exc:
+            _user_code_error = exc
+
+        # Generate .pyi stubs from observations (unless TRICKLE_STUBS=0)
+        _stubs_enabled = os.environ.get("TRICKLE_STUBS", "1").lower() not in ("0", "false")
+        if _stubs_enabled:
+            try:
+                from trickle._auto_codegen import generate_types
+                count = generate_types()
+                if count and count > 0:
+                    print(f"[trickle] {count} function type(s) written to .pyi")
+            except Exception:
+                pass
+
+        if _trace_vars:
+            try:
+                from trickle._run_summary import print_run_summary
+                print_run_summary()
+            except Exception:
+                pass
+
+        if _user_code_error is not None:
+            if _trace_vars:
+                try:
+                    from trickle._error_context import print_error_context
+                    print_error_context(_user_code_error)
+                except Exception:
+                    pass
+            raise _user_code_error
+
+        return
+
     _user_code_error = None
 
     if target.endswith(".py"):

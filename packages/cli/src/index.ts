@@ -236,20 +236,23 @@ program
     await mockCommand(opts);
   });
 
-// trickle test --generate
+// trickle test [command] — smart test runner or test file generation
 program
-  .command("test")
-  .description("Generate API test files from runtime-observed routes and sample data")
-  .option("--generate", "Generate test file from observed routes")
-  .option("-o, --out <path>", "Write tests to a file")
-  .option("--framework <name>", "Test framework: vitest or jest (default: vitest)")
-  .option("--base-url <url>", "Base URL for API requests (default: http://localhost:3000)")
-  .action(async (opts) => {
-    if (!opts.generate) {
-      console.log(chalk.gray("\n  Usage: trickle test --generate [--out tests.ts] [--framework vitest|jest]\n"));
+  .command("test [command...]")
+  .description("Run tests with observability (default) or generate test files (--generate)")
+  .option("--generate", "Generate test file from observed routes instead of running tests")
+  .option("--json", "Structured JSON output for agent consumption")
+  .option("-o, --out <path>", "Write tests to a file (with --generate)")
+  .option("--framework <name>", "Test framework: vitest or jest (with --generate)")
+  .option("--base-url <url>", "Base URL for API requests (with --generate)")
+  .action(async (commandParts: string[], opts) => {
+    if (opts.generate) {
+      await testGenCommand(opts);
       return;
     }
-    await testGenCommand(opts);
+    const { runTestCommand } = await import("./commands/test-runner");
+    const command = commandParts.length > 0 ? commandParts.join(' ') : undefined;
+    await runTestCommand({ json: opts.json, command });
   });
 
 // trickle dashboard

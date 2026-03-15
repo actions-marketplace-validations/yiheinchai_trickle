@@ -6,10 +6,11 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-Just shipped: AWS Lambda doc with vitest Quick Start, validated on real Lambda+vitest project.
-All docs rewritten. 26 MCP tools, CLI 0.1.138, JS 0.2.113, Python 0.2.22.
+Fixed: All 18 usecase docs now linked from README. Added JavaScript/TypeScript Developer,
+React, Next.js, React Native, AWS Lambda, SRE sections. Also fixed trickle test showing
+PASS when suites fail to load (CLI 0.1.139) — found by testing on real Express TS project.
 
-Next: improve trickle by own discretion — test on more real projects, fix pain points found.
+26 MCP tools, CLI 0.1.139, all docs complete and linked.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

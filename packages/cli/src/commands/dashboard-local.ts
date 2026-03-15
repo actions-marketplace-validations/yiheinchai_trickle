@@ -268,7 +268,33 @@ c.innerHTML='<div class="stats">'+
 '<div class="stat"><div class="label">Alerts</div><div class="val '+(cr>0?'red':w>0?'yellow':'green')+'">'+a.length+'</div></div>'+
 '</div>'+
 (a.length>0?'<h3 style="color:#58a6ff;margin:16px 0 8px">Alerts</h3><table><tr><th>Severity</th><th>Category</th><th>Message</th><th>Fix</th></tr>'+
-a.map(x=>'<tr><td><span class="tag tag-'+x.severity+'">'+x.severity+'</span></td><td>'+x.category+'</td><td>'+x.message+'</td><td style="color:#8b949e;font-size:12px">'+(x.suggestion||'')+'</td></tr>').join('')+'</table>':'');}
+a.map(x=>'<tr><td><span class="tag tag-'+x.severity+'">'+x.severity+'</span></td><td>'+x.category+'</td><td>'+x.message+'</td><td style="color:#8b949e;font-size:12px">'+(x.suggestion||'')+'</td></tr>').join('')+'</table>':'')+
+renderCharts();
+}
+function renderCharts(){
+const fns=(DATA.functions||[]).filter(f=>f.durationMs>0).sort((a,b)=>b.durationMs-a.durationMs).slice(0,10);
+const maxMs=Math.max(...fns.map(f=>f.durationMs),1);
+let html='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">';
+// Function timing chart
+html+='<div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px"><h3 style="color:#58a6ff;font-size:14px;margin-bottom:12px">Function Timing</h3>';
+if(fns.length>0){fns.forEach(f=>{const pct=Math.round(f.durationMs/maxMs*100);
+html+='<div style="display:flex;align-items:center;margin:4px 0;font-size:12px"><span class="mono" style="width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+f.functionName+'</span><div style="flex:1;height:16px;background:#21262d;border-radius:3px;margin:0 8px"><div style="height:100%;width:'+pct+'%;background:linear-gradient(90deg,#3fb950,#58a6ff);border-radius:3px"></div></div><span style="color:#8b949e;width:60px;text-align:right">'+f.durationMs.toFixed(1)+'ms</span></div>';});}
+else html+='<div class="empty">No timing data</div>';
+html+='</div>';
+// Query distribution
+const qs=(DATA.queries||[]);
+const buckets=[0,0,0,0,0]; // <1ms, 1-5ms, 5-10ms, 10-50ms, >50ms
+qs.forEach(q=>{const d=q.durationMs||0;if(d<1)buckets[0]++;else if(d<5)buckets[1]++;else if(d<10)buckets[2]++;else if(d<50)buckets[3]++;else buckets[4]++;});
+const maxBucket=Math.max(...buckets,1);
+const labels=['<1ms','1-5ms','5-10ms','10-50ms','>50ms'];
+html+='<div style="background:#161b22;border:1px solid #21262d;border-radius:8px;padding:16px"><h3 style="color:#58a6ff;font-size:14px;margin-bottom:12px">Query Latency Distribution</h3>';
+if(qs.length>0){html+='<div style="display:flex;align-items:flex-end;height:100px;gap:8px;margin-bottom:8px">';
+buckets.forEach((b,i)=>{const h=Math.round(b/maxBucket*80);const color=i<2?'#3fb950':i<4?'#d29922':'#f85149';
+html+='<div style="flex:1;display:flex;flex-direction:column;align-items:center"><div style="width:100%;height:'+h+'px;background:'+color+';border-radius:3px 3px 0 0"></div></div>';});
+html+='</div><div style="display:flex;gap:8px">';labels.forEach((l,i)=>html+='<div style="flex:1;text-align:center;font-size:10px;color:#8b949e">'+l+'<br>'+buckets[i]+'</div>');html+='</div>';}
+else html+='<div class="empty">No query data</div>';
+html+='</div></div>';
+return html;
 function renderTable(c,items,type){const filtered=items.filter(matchSearch);
 let cols=[];let rowFn;
 if(type==='functions'){cols=['Function','Module','Duration','Params'];rowFn=r=>'<td class="mono">'+r.functionName+'</td><td>'+r.module+'</td><td>'+(r.durationMs?r.durationMs.toFixed(1)+'ms':'—')+'</td><td class="mono" style="color:#8b949e;max-width:300px;overflow:hidden;text-overflow:ellipsis">'+(r.paramNames||[]).join(', ')+'</td>';}

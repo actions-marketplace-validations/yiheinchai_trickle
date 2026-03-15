@@ -23,6 +23,50 @@ export interface RunOptions {
   watch?: boolean;
 }
 
+// ── Auto-detect entry point ──
+
+function autoDetectEntryPoint(): string | null {
+  // Check package.json for start script or main field
+  const pkgPath = path.resolve("package.json");
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      // Try scripts.start (most common)
+      if (pkg.scripts?.start && !pkg.scripts.start.includes("trickle")) {
+        // Extract the actual command from "node app.js" or "ts-node src/index.ts"
+        const startCmd = pkg.scripts.start;
+        if (startCmd.includes("node ") || startCmd.includes("ts-node ") || startCmd.includes("tsx ") || startCmd.includes("python ")) {
+          return startCmd;
+        }
+      }
+      // Try main field
+      if (pkg.main && fs.existsSync(path.resolve(pkg.main))) {
+        return `node ${pkg.main}`;
+      }
+    } catch {}
+  }
+
+  // Check for common entry files
+  const candidates = [
+    "app.js", "app.ts", "index.js", "index.ts", "server.js", "server.ts",
+    "src/index.js", "src/index.ts", "src/app.js", "src/app.ts", "src/server.js", "src/server.ts",
+    "app.py", "main.py", "server.py", "manage.py",
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.resolve(candidate))) {
+      return candidate; // autoDetectCommand will add the runtime
+    }
+  }
+
+  // Check for pyproject.toml (Python project)
+  if (fs.existsSync(path.resolve("pyproject.toml"))) {
+    if (fs.existsSync(path.resolve("app.py"))) return "python app.py";
+    if (fs.existsSync(path.resolve("main.py"))) return "python main.py";
+  }
+
+  return null;
+}
+
 // ── .tricklerc.json config ──
 
 interface TrickleConfig {
@@ -202,15 +246,22 @@ export async function runCommand(
   opts: RunOptions,
 ): Promise<void> {
   if (!command) {
-    console.error(chalk.red("\n  Usage: trickle run <command>\n"));
-    console.error(chalk.gray("  Examples:"));
-    console.error(chalk.gray('    trickle run "node app.js"'));
-    console.error(chalk.gray("    trickle run app.ts              # auto-detects TypeScript runtime"));
-    console.error(chalk.gray("    trickle run script.py            # auto-detects Python"));
-    console.error(chalk.gray('    trickle run "node app.js" --stubs src/'));
-    console.error(chalk.gray("    trickle run app.js --watch       # watch for changes and re-run"));
-    console.error("");
-    process.exit(1);
+    // Auto-detect: try package.json scripts, common entry points
+    const detected = autoDetectEntryPoint();
+    if (detected) {
+      command = detected;
+      console.log(chalk.gray(`\n  Auto-detected: ${command}\n`));
+    } else {
+      console.error(chalk.red("\n  Usage: trickle run <command>\n"));
+      console.error(chalk.gray("  Examples:"));
+      console.error(chalk.gray('    trickle run "node app.js"'));
+      console.error(chalk.gray("    trickle run app.ts              # auto-detects TypeScript runtime"));
+      console.error(chalk.gray("    trickle run script.py            # auto-detects Python"));
+      console.error(chalk.gray('    trickle run "node app.js" --stubs src/'));
+      console.error(chalk.gray("    trickle run app.js --watch       # watch for changes and re-run"));
+      console.error("");
+      process.exit(1);
+    }
   }
 
   // Load project config

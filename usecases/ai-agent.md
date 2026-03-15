@@ -159,15 +159,21 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 }
 ```
 
-**9 MCP tools available:**
+**15 MCP tools available:**
 
 | Tool | What it does |
 |---|---|
+| `get_alerts` | **Start here** — detected anomalies with fix suggestions |
+| `get_heal_plans` | Remediation plans with context for auto-fixing |
 | `get_runtime_context` | Variable values + function types for a file |
 | `get_annotated_source` | Source code with inline runtime values |
 | `get_function_signatures` | All function signatures with execution timing |
+| `get_call_trace` | Execution flow — which function called which |
 | `get_errors` | Crash context with nearby variable values |
 | `get_database_queries` | SQL, Redis, MongoDB queries with timing + row counts |
+| `get_distributed_traces` | Cross-service request flow with trace IDs |
+| `get_websocket_events` | WebSocket/socket.io messages |
+| `get_performance_profile` | Memory usage (RSS + heap) snapshots |
 | `get_console_output` | Captured console.log/error/warn output |
 | `get_http_requests` | HTTP fetch calls with status + latency |
 | `check_data_freshness` | Check if runtime data exists and how old it is |
@@ -198,6 +204,41 @@ Shows all database operations with timing — agents can immediately spot N+1 qu
 
 ---
 
+## Use Case 7: Auto-Remediation Loop
+
+The full detect → heal → verify pipeline for autonomous bug fixing:
+
+```bash
+# 1. Capture runtime data
+trickle run python app.py
+
+# 2. Save baseline metrics
+trickle verify --baseline
+
+# 3. Get fix plans with context
+trickle heal --json
+```
+
+Each heal plan includes the alert, relevant context (queries, call trace, variable values), a fix recommendation, and confidence level. The agent reads the plan, applies the fix, then verifies:
+
+```bash
+# 4. After agent applies fix, re-run
+trickle run python app.py
+
+# 5. Compare metrics
+trickle verify
+```
+
+Output:
+```
+  Alerts                    2 →      0   ↓ 2
+  N+1 Queries               1 →      0   ↓ 1
+  Max Function (ms)    1843.2 →   12.3   ↓ 1830.9
+  ✓ Fix verified — 3 metric(s) improved, 0 regressed
+```
+
+---
+
 ## Complete Data Available to Agents
 
 After one run with trickle, agents have access to:
@@ -206,7 +247,13 @@ After one run with trickle, agents have access to:
 |---|---|---|
 | Variable values | `variables.jsonl` | Every variable's type and sample value |
 | Function types | `observations.jsonl` | Signatures, params, return types, execution timing (ms) |
+| Call trace | `calltrace.jsonl` | Execution flow with parent-child relationships |
 | Database queries | `queries.jsonl` | SQL/Redis/MongoDB operations with timing + row counts |
+| Distributed traces | `traces.jsonl` | Cross-service request flow with trace IDs |
 | HTTP requests | `observations.jsonl` | fetch() calls with URL, status, latency, response type |
+| WebSocket events | `websocket.jsonl` | ws/socket.io messages with data previews |
+| Memory profile | `profile.jsonl` | RSS + heap snapshots at start/end |
 | Console output | `console.jsonl` | All console.log/error/warn output |
 | Error context | `errors.jsonl` | Crash info with nearby variable values |
+| Alerts | `alerts.jsonl` | Detected anomalies with severity + fix suggestions |
+| Heal plans | `heal.jsonl` | Remediation plans with context for agent auto-fix |

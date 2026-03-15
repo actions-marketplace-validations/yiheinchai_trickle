@@ -613,6 +613,15 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle demo
+program
+  .command("demo")
+  .description("Self-running showcase of all trickle features — creates a demo project and walks through everything")
+  .action(async () => {
+    const { runDemo } = await import("./commands/demo");
+    await runDemo();
+  });
+
 // trickle ticket
 program
   .command("ticket")

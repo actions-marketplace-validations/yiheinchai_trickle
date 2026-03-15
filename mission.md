@@ -14,10 +14,11 @@ Data captured: variables, functions+timing, call trace, DB queries (SQL/Redis/Mo
 
 Drivers: JS (pg, mysql2, better-sqlite3, ioredis, mongoose, ws, socket.io) + Python (sqlite3, psycopg2, pymysql, mysql.connector, redis, pymongo).
 
+Done: .d.ts class grouping — class methods now generate proper `export declare class` blocks.
+
 Consider next:
 1. Go/Rust support for broader TAM
 2. Performance profiling (memory, CPU)
-3. .d.ts class grouping (methods as class members instead of flat functions)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

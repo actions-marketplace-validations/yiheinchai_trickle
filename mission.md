@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-MCP server shipped — `trickle mcp-server` starts an MCP server with 4 tools (get_runtime_context, get_annotated_source, get_function_signatures, get_errors). Claude Code can connect directly and query runtime data as tools. Full agent stack: MCP server, CLAUDE.md generation, trickle context (annotated/compact/json), error capture (JS+Python), tool-schema. README updated with MCP config snippet. Continue expanding TAM — consider database/ORM query tracing, new language support, or performance profiling.
+MCP server now has 6 tools — added check_data_freshness (reports data age/count, suggests run command) and refresh_runtime_data (runs app with trickle to capture fresh data). Agents can now autonomously: check if data exists → refresh if needed → query runtime context → debug. Full agent stack complete and autonomous. Continue expanding TAM — consider database/ORM tracing, new languages, or performance profiling.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

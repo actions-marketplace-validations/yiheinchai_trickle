@@ -6,14 +6,14 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.159. 30 MCP tools. All new features validated E2E on real Express+SQLite project:
-cost, waterfall, deps, anomaly, diff-runs, fix, request trace, OTLP — all working.
+CLI 0.1.161. 30 MCP tools. Shipped trickle security — scans runtime data for secrets
+(AWS keys, GitHub tokens, passwords, connection strings, JWTs) and SQL injection patterns.
+Auto-redacts evidence in output. No other observability tool does this on runtime data.
 
-Next TAM research areas:
-1. SLO burn rate alerting with budget tracking
-2. API versioning/changelog detection from type diffs
-3. Security scanning (detect secrets in variables/logs, SQL injection patterns)
-4. Multi-service dependency map (across microservices)
+Also shipped this session: cost estimation, waterfall, deps graph, anomaly detection,
+per-request tracing, diff-runs, fix suggestions, OTLP, Prometheus, Slack/Discord, GitHub PR.
+
+Next: SLO burn rate alerting, API changelog from type diffs, multi-service dependency map.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

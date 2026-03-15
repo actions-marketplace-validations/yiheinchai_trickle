@@ -8,7 +8,7 @@ if you think everything has already be accomplished, please compact conversation
 </general directive>
 
 <focus point>
-Tested on Express.js, axios, moment.js, commander.js, lodash.js — all transform cleanly. Also tested Python ML pipeline (KNN classifier) and improved dataclass sample display (list/dict fields now show '[list: 200 items]' instead of None). JS transform is now robust against regex literals, comma-separated declarations, empty-line continuations, multi-line declarations, for-loop initializers, class fields, and webpack bundles. All major real-world patterns handled. Continue looking for new improvement areas — perhaps improving the VSCode extension display or exploring new use cases.
+Ported all CJS robustness fixes to ESM loader hooks (multi-line continuations, regex literals, for-loop initializer skip). Both CJS and ESM transforms now handle all real-world patterns. Tested on Express.js, axios, moment.js, commander.js, lodash.js (JS) and ML pipelines with decorators/async (Python). Also: source maps (tsc/esbuild/webpack), class fields, per-line sample limiting, dataclass display. Codebase is in good shape — continue with VSCode extension improvements or exploring new use cases.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

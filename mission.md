@@ -10,19 +10,20 @@ the goal is to make it production ready, where real companies can start deployin
 </higher directive>
 
 <focus point>
-Production-ready cloud platform shipped.
+Production-ready cloud observability platform.
 
 Cloud: multi-tenant API, auto-push, real-time streaming, shared dashboards.
 Production: rate limiting, data retention (30d), request logging, error handling.
 Deployment: Dockerfile + fly.toml ready for `fly deploy`.
-Usecases: observability-platform.md updated with cloud workflow + Datadog comparison.
+Documentation: README with cloud section, 18 usecases (including SRE/Platform Engineer).
 
-Flow: trickle cloud login → trickle run <app> → auto-push → share dashboard URL
+Validated on: nanoGPT (ML), Express (JS), Flask (Python), multi-file APIs, production-like
+apps with auth/JWT/bcrypt/SQL. All capturing correctly: types, calltrace, queries, errors.
 
 Next priorities:
 1. Deploy cloud.trickle.dev to fly.io
 2. Team management (invite members, RBAC)
-3. PostgreSQL migration (replace SQLite for cloud scale)
+3. PostgreSQL migration for cloud scale
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

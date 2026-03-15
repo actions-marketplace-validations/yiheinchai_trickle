@@ -515,9 +515,17 @@ function generateTsForFunction(fn: FunctionTypeData): string {
 
   // Generate overloads if we have multiple distinct type patterns
   if (fn.variants && fn.variants.length >= 2) {
+    // Pre-compute merged return type hash to detect when variant returns match it
+    const mergedRetHash = JSON.stringify(fn.returnType);
     const seenOverloads = new Set<string>();
     for (const variant of fn.variants) {
-      const vRet = typeNodeToTS(variant.returnType, extracted, baseName + "Output", undefined, 0);
+      // If variant's return type matches the merged type, use the named interface
+      let vRet: string;
+      if (JSON.stringify(variant.returnType) === mergedRetHash) {
+        vRet = outputName;
+      } else {
+        vRet = typeNodeToTS(variant.returnType, extracted, baseName + "Output", "return", 0);
+      }
       const vRetStr = fn.isAsync ? `Promise<${vRet}>` : vRet;
       const vNames = variant.paramNames || fn.paramNames || [];
       let vArgEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];

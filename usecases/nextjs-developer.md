@@ -27,20 +27,24 @@ const nextConfig = {
 module.exports = withTrickle(nextConfig);
 ```
 
-Then start trickle alongside `next dev`:
+Then just run `next dev` as usual — no extra process needed:
 ```bash
-npx trickle dev &
 npx next dev
 ```
+
+The trickle ingest server starts automatically alongside Next.js. Variable data from both server and client components flows to `.trickle/variables.jsonl`, and the VSCode extension displays inline hints.
 
 ### What gets tracked
 
 **Client Components** (`'use client'`):
+- Every variable value (const, let, destructured, reassignments, for-loop vars, catch vars, function params)
 - Render counts + props every time the component re-renders
 - Every `useState` setter call with the new value
-- `useEffect`, `useMemo`, `useCallback` execution counts and duration
+- `useEffect`, `useMemo`, `useCallback` execution counts
+- Data flows from browser via fetch to the auto-started ingest server (port 4889)
 
 **Server Components** (no directive):
+- Every variable value captured during SSR
 - Render counts (how many times SSR/SSG renders this component per request)
 - Props passed in (useful for checking what data is being threaded through)
 

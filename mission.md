@@ -8,10 +8,10 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-Full end-to-end pipeline verified with real Chrome browser: 28 variables, 10 renders, 18 hooks, 2 state updates captured from React app via Vite HMR WebSocket. Next areas:
-- Consider adding a Next.js client-side transport (webpack HMR or fetch-based) so client components also capture data in the browser
+React inline hints now work end-to-end for both Vite and Next.js (including client-side). Verified with real Chrome. Key remaining areas:
 - Explore capturing JSX expression values inline (e.g., what {user.name} evaluates to inside JSX)
-- Test the VSCode extension with the captured data to verify hints display at correct positions
+- Test on larger real-world Next.js codebases (e.g., T3 stack apps, Vercel templates) to find edge cases
+- Consider adding React DevTools-style component tree visualization using the captured render data
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -20,10 +20,14 @@ Full agent observability stack now covers both JS and Python:
 
 Added: Function execution timing (durationMs), Redis + MongoDB tracing, improved CLAUDE.md templates.
 
+Database tracing now complete across both languages:
+- JS: pg, mysql2, better-sqlite3, ioredis, mongoose
+- Python: sqlite3, psycopg2, pymysql, mysql.connector, redis, pymongo
+
 Next for agent TAM:
-1. JS Redis/MongoDB tracing (ioredis, mongoose)
-2. Call graph visualization from observation data
-3. Test on real-world projects to find remaining gaps
+1. Call graph / execution trace for debugging flow
+2. Test on real-world projects to validate agent debugging workflow
+3. Update README with full feature matrix
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

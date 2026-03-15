@@ -700,6 +700,11 @@ const TOOLS = [
     },
   },
   {
+    name: "check_slos",
+    description: "Check Service Level Objective compliance — latency, error rate, query latency SLOs with error budget tracking. Returns which SLOs are passing/breaching and remaining budget percentage. Initialize SLOs with trickle slo init first.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "detect_anomalies",
     description: "Detect performance anomalies by comparing current function/query latencies against a learned baseline. Call with learn: true first to establish normal behavior, then call without to detect deviations (>2σ from mean). Returns anomalies sorted by severity.",
     inputSchema: {
@@ -876,6 +881,25 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "check_slos": {
+            try {
+              const { checkSloCommand } = require('./slo');
+              const origLog = console.log;
+              console.log = () => {};
+              checkSloCommand({ dir: findTrickleDir(), json: true });
+              console.log = origLog;
+              // Read from file since checkSloCommand writes JSON to stdout
+              const sloFile = path.join(findTrickleDir(), 'slo-results.json');
+              if (fs.existsSync(sloFile)) {
+                result = JSON.parse(fs.readFileSync(sloFile, 'utf-8'));
+              } else {
+                result = { error: 'No SLO results. Run trickle slo init first.' };
+              }
+            } catch (e: any) {
+              result = { error: `SLO check failed: ${e.message}` };
             }
             break;
           }

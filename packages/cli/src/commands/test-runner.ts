@@ -172,28 +172,48 @@ function parseJestJson(output: string): { suites: TestSuite[]; summary: TestRepo
     if (jsonStart === -1) return null;
     const json = JSON.parse(output.substring(jsonStart));
 
-    const suites: TestSuite[] = (json.testResults || []).map((suite: any) => ({
-      name: suite.name ? path.relative(process.cwd(), suite.name) : 'unknown',
-      file: suite.name ? path.relative(process.cwd(), suite.name) : undefined,
-      tests: (suite.assertionResults || []).map((t: any) => ({
+    const suites: TestSuite[] = (json.testResults || []).map((suite: any) => {
+      const tests = (suite.assertionResults || []).map((t: any) => ({
         name: t.fullName || t.title,
-        status: t.status === 'passed' ? 'passed' : t.status === 'pending' ? 'skipped' : 'failed',
+        status: (t.status === 'passed' ? 'passed' : t.status === 'pending' ? 'skipped' : 'failed') as TestResult['status'],
         durationMs: t.duration,
         error: t.status === 'failed' ? {
           message: (t.failureMessages || []).join('\n').substring(0, 500),
         } : undefined,
-      })),
-      passed: (suite.assertionResults || []).filter((t: any) => t.status === 'passed').length,
-      failed: (suite.assertionResults || []).filter((t: any) => t.status === 'failed').length,
-      skipped: (suite.assertionResults || []).filter((t: any) => t.status === 'pending').length,
-    }));
+      }));
+
+      // If suite failed but has no test results (compile/import error), add a synthetic failure
+      if (suite.status === 'failed' && tests.length === 0 && suite.message) {
+        tests.push({
+          name: 'Suite failed to load',
+          status: 'error' as TestResult['status'],
+          durationMs: undefined,
+          error: { message: suite.message.substring(0, 500) },
+        });
+      }
+
+      const suiteName = suite.name ? path.relative(process.cwd(), suite.name) : 'unknown';
+      return {
+        name: suiteName,
+        file: suite.name ? path.relative(process.cwd(), suite.name) : undefined,
+        tests,
+        passed: tests.filter((t: any) => t.status === 'passed').length,
+        failed: tests.filter((t: any) => t.status === 'failed' || t.status === 'error').length,
+        skipped: tests.filter((t: any) => t.status === 'skipped').length,
+      };
+    });
+
+    // Account for suite-level failures (e.g., compile errors, import failures)
+    const failedSuites = (json.testResults || []).filter((s: any) => s.status === 'failed').length;
+    const totalFailed = (json.numFailedTests || 0) + (json.numTotalTests === 0 && failedSuites > 0 ? failedSuites : 0);
+    const totalTests = (json.numTotalTests || 0) + (json.numTotalTests === 0 && failedSuites > 0 ? failedSuites : 0);
 
     return {
       suites,
       summary: {
-        total: json.numTotalTests || 0,
+        total: totalTests,
         passed: json.numPassedTests || 0,
-        failed: json.numFailedTests || 0,
+        failed: totalFailed,
         skipped: json.numPendingTests || 0,
         suites: json.numTotalTestSuites || suites.length,
       },

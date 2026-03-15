@@ -2,22 +2,14 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Create the best documentations to ever exist. Currently documentation is very outdated, and old. Each usecase needs to be updated. Build the documentation for both humans and for AI agents.
-
-document is atrocious. i had a backend nodejs developer (aws lambdas) trying to run a vitest. no idea what to do. documentation is no good enough if real users don't even know what to do and how to use trickle
-
-this is just an example, you need to follow through and empathise with the user in the customer journey and think about each piece of information they need
+Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-Documentation rewrite COMPLETE:
-- README: new "Getting Started (2 minutes)" at the very top with install, run, test, vitest
-  plugin, and AI agent setup. Shows exact commands for every framework.
-- All 18 usecase docs updated to lead with debugging/testing workflows
-- All MCP tool counts updated to 26
+Just shipped: AWS Lambda doc with vitest Quick Start, validated on real Lambda+vitest project.
+All docs rewritten. 26 MCP tools, CLI 0.1.138, JS 0.2.113, Python 0.2.22.
 
-The first thing a new user sees is now a concrete step-by-step: install → run → see results.
-No more ambiguity about "what do I type."
+Next: improve trickle by own discretion — test on more real projects, fix pain points found.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

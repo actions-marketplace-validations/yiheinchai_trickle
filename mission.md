@@ -3,10 +3,12 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 For now, i want you to specifically focus on:
 <general directive>
 Improving the developer experience in real codebases, test diverse codebases from online and find painpoints and fix them
+
+if you think everything has already be accomplished, please compact conversation, and work on improving trickle by your discretions
 </general directive>
 
 <focus point>
-Added source map support for compiled TypeScript — when running `trickle run node dist/app.js`, line numbers now correctly reference the original .ts source file instead of compiled .js output. Tested with tsc and esbuild outputs on multi-file TS projects. Also added esbuild helper filtering. Continue testing on diverse codebases — next areas to explore: class field declarations (esbuild modern target), bundled multi-file outputs, and React Native Metro transformer source maps.
+Added source map support for compiled TypeScript and fixed class field declarations causing SyntaxError in esbuild modern target output. Both tsc and esbuild outputs now work correctly with accurate line numbers pointing to original .ts source files. Continue testing on diverse codebases — next areas to explore: bundled multi-file outputs (webpack/rollup), Python decorator and async/await tracing, and testing on larger real-world open source projects.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

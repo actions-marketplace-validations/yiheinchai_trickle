@@ -6,11 +6,12 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.165. 31 MCP tools. Added GitLab CI integration — MR comment posting + annotations.
-trickle ci now works on both GitHub Actions (PR comments) and GitLab CI (MR notes).
+CLI 0.1.166. 31 MCP tools. Shipped trickle ticket — auto-create tickets in Jira, Linear,
+or GitHub Issues from detected issues, with full context (root cause, fix suggestions,
+N+1 details). Also shipped GitLab CI integration.
 
-25+ features shipped this session. Next: Jira/Linear ticket creation from alerts,
-multi-service dependency map, Bitbucket Pipelines support.
+Integrations: GitHub Actions, GitLab CI, Slack, Discord, Jira, Linear, Grafana (OTLP),
+Prometheus, SigNoz, Jaeger. Next: Bitbucket Pipelines, PagerDuty, multi-service deps.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

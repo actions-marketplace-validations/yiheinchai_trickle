@@ -6,15 +6,15 @@ Trickle's strategic moat is zero-code, local-first runtime observability that wo
 </higher directive>
 
 <focus point>
-CLI 0.1.176. Priority areas ranked by impact on TAM capture:
+CLI 0.1.177, client-js 0.2.118, client-python 0.2.24. Priority areas:
 
-1. **LLM/AI call auto-instrumentation** — Add zero-code capture of OpenAI, Anthropic, and other LLM API calls in both JS and Python. Record prompts, completions, token counts, latency, cost, and model metadata into .trickle/llm.jsonl. This lets trickle compete with Langfuse/LangSmith/Helicone on the fastest-growing observability segment while keeping trickle's zero-code DX advantage.
+1. **LLM/AI call auto-instrumentation** — SHIPPED: Zero-code capture of OpenAI and Anthropic SDK calls in both JS and Python. Records model, messages, token counts (input/output/total), latency, estimated cost (USD), streaming, tool use, temperature, system prompt, and finish reason into .trickle/llm.jsonl. Dashboard has LLM Calls tab with faceted browsing by provider/model. CLI has `trickle llm` command for terminal viewing. JS uses prototype-level monkey-patching of Completions/Messages classes. Python uses `__init__` patching + `builtins.__import__` hook. Still TODO: streaming token accumulation (Python), more providers (Cohere, Mistral, Google Gemini).
 
 2. **Agent workflow tracing** — Extend tracing to capture multi-step AI agent workflows (tool calls, reasoning chains, delegation between agents). Trickle's MCP integration already makes it agent-native; adding agent-aware tracing makes it indispensable.
 
-3. **Real-world reliability hardening** — Test trickle against 10+ popular open-source repos (Express apps, FastAPI services, Next.js apps, PyTorch training scripts, LangChain agents). Fix every instrumentation failure found.
+3. **Real-world reliability hardening** — Test trickle against 10+ popular open-source repos. Fix every instrumentation failure found. The JS LLM observer was tested against OpenAI SDK v4+ with real API calls.
 
-4. **Export and interoperability** — SHIPPED: CSV export from dashboard (per-tab Export CSV button, /api/csv/:type endpoint, `trickle export --csv` CLI), paginated tables (25/50/100/250 per page). Fixed dashboard table rendering bug. Still TODO: OpenTelemetry GenAI semantic conventions for LLM span export.
+4. **Export and interoperability** — SHIPPED: CSV export, pagination, LLM data in CSV export. Still TODO: OpenTelemetry GenAI semantic conventions for LLM span export.
 
 5. **Live streaming mode** — Real-time tail of observations in the dashboard (WebSocket-based). Critical for debugging long-running processes and agent workflows.
 </focus point>

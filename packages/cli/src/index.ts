@@ -924,6 +924,18 @@ program
     serveDashboard({ port: parseInt(opts.port) });
   });
 
+// trickle llm
+program
+  .command("llm")
+  .description("Show captured LLM/AI API calls — models, tokens, cost, latency (OpenAI, Anthropic)")
+  .option("--json", "Output raw JSON")
+  .option("--provider <provider>", "Filter by provider (openai, anthropic)")
+  .option("--model <model>", "Filter by model name")
+  .action(async (opts) => {
+    const { llmCommand } = await import("./commands/llm");
+    llmCommand(opts);
+  });
+
 // trickle annotate <file>
 program
   .command("annotate <file>")

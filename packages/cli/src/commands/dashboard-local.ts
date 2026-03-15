@@ -49,6 +49,7 @@ export function exportToCsvFiles(trickleDir: string, outDir: string): { file: st
     variables: 'variables.jsonl',
     alerts: 'alerts.jsonl',
     profile: 'profile.jsonl',
+    llm: 'llm.jsonl',
   };
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const results: { file: string; rows: number }[] = [];
@@ -293,6 +294,7 @@ tr:hover{background:#161b22}
   <div class="tab" data-tab="errors">Errors <span class="badge" id="e-count">0</span></div>
   <div class="tab" data-tab="calltrace">Call Trace <span class="badge" id="ct-count">0</span></div>
   <div class="tab" data-tab="variables">Variables <span class="badge" id="v-count">0</span></div>
+  <div class="tab" data-tab="llm">LLM Calls <span class="badge" id="llm-count">0</span></div>
 </div>
 <div class="content" id="content"></div>
 <script>
@@ -306,6 +308,7 @@ document.getElementById('l-count').textContent=DATA.logs?.length||0;
 document.getElementById('e-count').textContent=DATA.errors?.length||0;
 document.getElementById('ct-count').textContent=DATA.calltrace?.length||0;
 document.getElementById('v-count').textContent=DATA.variables?.length||0;
+document.getElementById('llm-count').textContent=DATA.llm?.length||0;
 document.getElementById('timestamp').textContent=new Date().toLocaleString();
 render();}
 
@@ -326,6 +329,7 @@ function getColsAndValues(type){
   if(type==='calltrace')return{cols:['Function','Module','Duration (ms)','Depth','Error'],vals:r=>[r.function,r.module,r.durationMs||'',r.depth||0,r.error||'']};
   if(type==='variables')return{cols:['Variable','Line','Module','Type','Value'],vals:r=>[r.varName,r.line,r.module,typeStr(r.type),typeof r.sample==='string'?r.sample:JSON.stringify(r.sample)||'']};
   if(type==='alerts')return{cols:['Severity','Category','Message','Suggestion'],vals:r=>[r.severity,r.category,r.message,r.suggestion||'']};
+  if(type==='llm')return{cols:['Provider','Model','Duration (ms)','Input Tokens','Output Tokens','Total Tokens','Cost (USD)','Stream','Finish Reason','Temperature','Max Tokens','System Prompt','Input Preview','Output Preview','Tool Use','Error'],vals:r=>[r.provider,r.model,r.durationMs||'',r.inputTokens||0,r.outputTokens||0,r.totalTokens||0,r.estimatedCostUsd||'',r.stream?'yes':'no',r.finishReason||'',r.temperature??'',r.maxTokens??'',r.systemPrompt||'',r.inputPreview||'',r.outputPreview||'',r.toolUse?'yes':'no',r.error||'']};
   return{cols:[],vals:()=>[]};
 }
 
@@ -337,7 +341,7 @@ function toCSV(items,type){
 }
 
 function downloadCSV(type){
-  const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables,alerts:DATA.alerts};
+  const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables,alerts:DATA.alerts,llm:DATA.llm};
   const items=(dataMap[type]||[]).filter(matchSearch);
   const csv=toCSV(items,type);
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
@@ -355,7 +359,8 @@ else if(currentTab==='queries')renderTable(c,DATA.queries||[],'queries');
 else if(currentTab==='logs')renderTable(c,DATA.logs||[],'logs');
 else if(currentTab==='errors')renderTable(c,DATA.errors||[],'errors');
 else if(currentTab==='calltrace')renderTable(c,DATA.calltrace||[],'calltrace');
-else if(currentTab==='variables')renderTable(c,DATA.variables||[],'variables');}
+else if(currentTab==='variables')renderTable(c,DATA.variables||[],'variables');
+else if(currentTab==='llm')renderTable(c,DATA.llm||[],'llm');}
 
 function renderOverview(c){const a=DATA.alerts||[];const cr=a.filter(x=>x.severity==='critical').length;
 const w=a.filter(x=>x.severity==='warning').length;
@@ -366,6 +371,7 @@ c.innerHTML='<div class="stats">'+
 '<div class="stat"><div class="label">Errors</div><div class="val '+(DATA.errors?.length>0?'red':'green')+'">'+(DATA.errors?.length||0)+'</div></div>'+
 '<div class="stat"><div class="label">Logs</div><div class="val">'+(DATA.logs?.length||0)+'</div></div>'+
 '<div class="stat"><div class="label">Alerts</div><div class="val '+(cr>0?'red':w>0?'yellow':'green')+'">'+a.length+'</div></div>'+
+'<div class="stat"><div class="label">LLM Calls</div><div class="val">'+(DATA.llm?.length||0)+'</div></div>'+
 '</div>'+
 (a.length>0?'<h3 style="color:#58a6ff;margin:16px 0 8px">Alerts</h3><table><tr><th>Severity</th><th>Category</th><th>Message</th><th>Fix</th></tr>'+
 a.map(x=>'<tr><td><span class="tag tag-'+x.severity+'">'+x.severity+'</span></td><td>'+x.category+'</td><td>'+x.message+'</td><td style="color:#8b949e;font-size:12px">'+(x.suggestion||'')+'</td></tr>').join('')+'</table>':'')+
@@ -405,6 +411,7 @@ else if(type==='logs'){cols=['Level','Logger','Message','Time'];rowFn=r=>{const 
 else if(type==='errors'){cols=['Type','Message','File','Line'];rowFn=r=>'<td class="tag tag-critical">'+(r.type||'Error')+'</td><td>'+(r.message||r.error||'').substring(0,100)+'</td><td class="mono">'+(r.file||'').split('/').pop()+'</td><td>'+(r.line||'')+'</td>';}
 else if(type==='calltrace'){cols=['Function','Module','Duration','Depth','Error'];rowFn=r=>'<td class="mono" style="padding-left:'+(r.depth||0)*16+'px">'+r.function+'</td><td>'+r.module+'</td><td>'+(r.durationMs?r.durationMs.toFixed(1)+'ms':'\\u2014')+'</td><td>'+r.depth+'</td><td style="color:#f85149">'+(r.error||'')+'</td>';}
 else if(type==='variables'){cols=['Variable','Line','Module','Type','Value'];rowFn=r=>'<td class="mono">'+r.varName+'</td><td>'+r.line+'</td><td>'+r.module+'</td><td style="color:#8b949e">'+typeStr(r.type)+'</td><td class="mono" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;color:#8b949e">'+(typeof r.sample==='string'?r.sample:JSON.stringify(r.sample)||'').substring(0,60)+'</td>';}
+else if(type==='llm'){cols=['Provider','Model','Duration','Tokens','Cost','Stream','Input','Output'];rowFn=r=>'<td><span class="tag tag-info">'+r.provider+'</span></td><td class="mono">'+r.model+'</td><td>'+(r.durationMs?r.durationMs.toFixed(0)+'ms':'\\u2014')+'</td><td>'+(r.totalTokens||0)+' <span style="color:#8b949e;font-size:11px">('+((r.inputTokens||0))+'\\u2192'+(r.outputTokens||0)+')</span></td><td style="color:#3fb950">'+(r.estimatedCostUsd?'$'+r.estimatedCostUsd.toFixed(4):'\\u2014')+'</td><td>'+(r.stream?'\\u26A1':'')+'</td><td class="mono" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;color:#8b949e">'+(r.inputPreview||'').substring(0,80)+'</td><td class="mono" style="max-width:200px;overflow:hidden;text-overflow:ellipsis">'+(r.outputPreview||'').substring(0,80)+'</td>';}
 if(sortCol){const si=cols.indexOf(sortCol);if(si>=0){filtered.sort((a,b)=>{const av=getSortVal(a,type,si);const bv=getSortVal(b,type,si);if(typeof av==='number'&&typeof bv==='number')return(av-bv)*sortDir;return String(av).localeCompare(String(bv))*sortDir;});}}
 const totalPages=Math.max(1,Math.ceil(filtered.length/pageSize));
 if(currentPage>totalPages)currentPage=totalPages;
@@ -438,7 +445,7 @@ function goPage(p){currentPage=p;renderTableKeep();}
 function changePageSize(n){pageSize=parseInt(n);currentPage=1;renderTableKeep();}
 function renderTableKeep(){
 const c=document.getElementById('content');
-const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables};
+const dataMap={functions:DATA.functions,queries:DATA.queries,logs:DATA.logs,errors:DATA.errors,calltrace:DATA.calltrace,variables:DATA.variables,llm:DATA.llm};
 if(dataMap[currentTab])renderTable(c,dataMap[currentTab]||[],currentTab);
 }
 
@@ -448,6 +455,7 @@ function getFacets(items,type){const counts={};
 if(type==='queries')items.forEach(r=>{const d=r.driver||'sql';counts[d]=(counts[d]||0)+1;});
 else if(type==='logs')items.forEach(r=>{const l=(r.level||r.levelname||'info').toLowerCase();counts[l]=(counts[l]||0)+1;});
 else if(type==='functions')items.forEach(r=>{counts[r.module||'?']=(counts[r.module||'?']||0)+1;});
+else if(type==='llm')items.forEach(r=>{const k=r.provider+'/'+(r.model||'?');counts[k]=(counts[k]||0)+1;});
 else return'';
 return Object.entries(counts).map(([k,v])=>'<span class="facet" onclick="filterFacet(this,\\''+k+'\\')">'+k+' ('+v+')</span>').join('');}
 
@@ -463,6 +471,7 @@ if(type==='logs')return[(r.level||'').toLowerCase(),r.logger||'',r.message||'',r
 if(type==='errors')return[r.type||'',r.message||'',r.file||'',r.line||0][colIdx];
 if(type==='calltrace')return[r.function||'',r.module||'',r.durationMs||0,r.depth||0,r.error||''][colIdx];
 if(type==='variables')return[r.varName||'',r.line||0,r.module||'',typeStr(r.type),JSON.stringify(r.sample)||''][colIdx];
+if(type==='llm')return[r.provider||'',r.model||'',r.durationMs||0,r.totalTokens||0,r.estimatedCostUsd||0,r.stream?1:0,r.inputPreview||'',r.outputPreview||''][colIdx];
 return'';}
 
 function toggleRow(tr){const next=tr.nextElementSibling;next.style.display=next.style.display==='none'?'':'none';}
@@ -503,18 +512,19 @@ export function serveDashboard(opts: { port?: number; dir?: string }): void {
         calltrace: readJsonl(path.join(trickleDir, 'calltrace.jsonl')),
         logs: readJsonl(path.join(trickleDir, 'logs.jsonl')),
         variables: readJsonl(path.join(trickleDir, 'variables.jsonl')),
+        llm: readJsonl(path.join(trickleDir, 'llm.jsonl')),
       };
       res.end(JSON.stringify(data));
       return;
     }
     // CSV download endpoint: /api/csv/:type
-    const csvMatch = req.url?.match(/^\/api\/csv\/(functions|queries|errors|calltrace|logs|variables|alerts|profile)$/);
+    const csvMatch = req.url?.match(/^\/api\/csv\/(functions|queries|errors|calltrace|logs|variables|alerts|profile|llm)$/);
     if (csvMatch) {
       const type = csvMatch[1];
       const fileMap: Record<string, string> = {
         functions: 'observations.jsonl', queries: 'queries.jsonl', errors: 'errors.jsonl',
         calltrace: 'calltrace.jsonl', logs: 'logs.jsonl', variables: 'variables.jsonl',
-        alerts: 'alerts.jsonl', profile: 'profile.jsonl',
+        alerts: 'alerts.jsonl', profile: 'profile.jsonl', llm: 'llm.jsonl',
       };
       const items = readJsonl(path.join(trickleDir, fileMap[type]));
       const csv = jsonlToCsv(items);

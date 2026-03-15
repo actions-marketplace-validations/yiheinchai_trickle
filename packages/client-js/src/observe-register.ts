@@ -38,6 +38,7 @@ import { patchFetch } from './fetch-observer';
 import { instrumentExpress, trickleMiddleware } from './express';
 import { initVarTracer, traceVar } from './trace-var';
 import { initCallTrace } from './call-trace';
+import { initLlmObserver } from './llm-observer';
 import {
   findReassignments,
   findForLoopVars,
@@ -1227,6 +1228,9 @@ if (enabled) {
   // ── Hook 0b2: Initialize call trace ──
   initCallTrace();
 
+  // ── Hook 0b3: Initialize LLM observer ──
+  initLlmObserver();
+
   // ── Hook 0c: Capture environment snapshot ──
   try {
     const envDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
@@ -1512,6 +1516,24 @@ if (enabled) {
       try {
         const { patchSocketIo } = require(path.join(__dirname, 'ws-observer.js'));
         patchSocketIo(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // OpenAI SDK
+    if (request === 'openai' && !expressPatched.has('openai')) {
+      expressPatched.add('openai');
+      try {
+        const { patchOpenAI } = require(path.join(__dirname, 'llm-observer.js'));
+        patchOpenAI(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // Anthropic SDK
+    if ((request === '@anthropic-ai/sdk' || request === 'anthropic') && !expressPatched.has('anthropic')) {
+      expressPatched.add('anthropic');
+      try {
+        const { patchAnthropic } = require(path.join(__dirname, 'llm-observer.js'));
+        patchAnthropic(exports, debug);
       } catch { /* not critical */ }
     }
 

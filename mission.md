@@ -8,10 +8,10 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-React inline hints work end-to-end for Vite and Next.js with live-updating values. Tested on 2700+ files from shadcn/ui, bulletproof-react, cal.com, zustand — 0 errors. Key remaining areas:
+React inline hints feature is complete: declarations, destructuring, for-loops, params, reassignments, catch clauses, React renders/hooks/state — all with live-updating values, working for Vite (HMR WebSocket) and Next.js (fetch transport + auto ingest server). Tested on 2700+ files, verified e2e with Chrome. Python tracing also verified on nanoGPT (108 vars, 44 tensors). Next areas:
 - Explore capturing JSX expression values inline (e.g., what {user.name} evaluates to inside JSX)
+- Improve onboarding DX — consider auto-detecting Vite/Next.js and suggesting setup
 - Consider adding React DevTools-style component tree visualization using the captured render data
-- Improve type display for React-specific types (React elements, JSX, context values)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

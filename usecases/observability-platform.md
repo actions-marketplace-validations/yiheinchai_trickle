@@ -274,7 +274,7 @@ cd packages/backend && fly deploy
 | Function signatures | No | Yes — with param types |
 | N+1 detection | Manual query analysis | Automatic |
 | Auto-fix | No | Yes — `trickle heal` |
-| AI agent access | Limited API | 18 MCP tools |
+| AI agent access | Limited API | 26 MCP tools |
 | Code changes | SDK instrumentation | Zero |
 | Cloud dashboard | Hosted SaaS | Self-hosted or cloud.trickle.dev |
 | Team sharing | Paid feature | Free — shareable links |

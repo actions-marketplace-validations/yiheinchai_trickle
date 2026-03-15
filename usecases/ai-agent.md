@@ -1,276 +1,186 @@
-# AI Coding Agent: Debug with Runtime Context Instead of console.log
+# AI Coding Agent: 10x Debugging with Runtime Observability
 
-You're an AI coding agent (Claude Code, Cursor, Copilot, etc.) debugging an application. Instead of asking the user to add console.log statements and re-run, use trickle's cached runtime data to understand what happened at runtime.
+You're an AI coding agent (Claude Code, Cursor, Copilot, etc.) working on a codebase. Instead of guessing at runtime behavior or asking users to add console.log statements, use trickle to see exactly what happened at runtime — variable values, function signatures, database queries, errors with context, and performance hotspots.
 
-## Setup
+## Setup (30 seconds)
 
-When you encounter a project with `.trickle/` directory or `CLAUDE.md` mentioning trickle, the runtime data is already available.
-
-If not set up yet:
 ```bash
-npm install -g trickle-cli && npm install trickle-observe
-trickle init     # sets up project + creates CLAUDE.md
-trickle run node app.js   # captures runtime data
+npm install -g trickle-cli
+trickle init              # creates CLAUDE.md, .claude/settings.json, config
+trickle run node app.js   # or: trickle run python app.py
 ```
+
+`trickle init` auto-creates `.claude/settings.json` with the MCP server config, so Claude Code can use all 26 tools immediately.
 
 ---
 
-## Use Case 1: Understanding Variable Values Without Running Code
+## The Agent On-Call Loop
 
-**Before trickle (traditional debugging):**
-```
-Agent: "I need to add a console.log to see what `user` contains at line 25"
-User: *adds console.log, re-runs app, copies output*
-Agent: "OK, now I can see the issue..."
-```
+The complete autonomous debugging workflow:
 
-**With trickle:**
-```bash
-trickle context src/api.ts:25
 ```
-
-Output:
-```
-## Variables (runtime values)
-### src/api.ts
-- L13 `user`: `{ id: number, name: string, email: string }` = `{"id":1,"name":"Alice",...}`
-- L18 `users`: `User[]` = `[{"id":1,...}, {"id":2,...}]`
-- L19 `count`: `number` = `3`
-- L25 `user`: `undefined` = `null`
+1. DETECT    →  get_last_run_summary    (status, errors, alerts, root causes)
+2. UNDERSTAND →  explain_file           (functions, call graph, data flow, queries)
+3. BASELINE  →  save_baseline           (save metrics before fixing)
+4. FIX       →  agent edits code        (guided by root causes + heal plans)
+5. VERIFY    →  refresh_runtime_data    (re-run the app)
+              →  compare_with_baseline  ("Fix verified — 3 metrics improved")
 ```
 
-The agent immediately sees that `user` is `undefined` at line 25 — the bug is a failed lookup.
+Or for quick triage: `get_recommended_actions` tells you exactly what to do next.
 
 ---
 
-## Use Case 2: Understanding Function Signatures
+## Use Case 1: Get a Complete Overview in One Call
 
 ```bash
-trickle context --function handleCreateUser
+trickle summary
 ```
 
-Output:
-```
-## Functions
-- `api.handleCreateUser(body: { name: string, email: string }) -> { success: boolean, data: User }`
-  Sample call: [{"name":"Alice","email":"alice@co.com"}] -> {"success":true,"data":{"id":1,...}}
-```
+Returns everything in one structured JSON:
 
-The agent sees exact parameter types and sample inputs/outputs — no need to trace through the code.
-
----
-
-## Use Case 3: Debugging Errors
-
-```bash
-trickle context --errors
-```
-
-Shows variable values near where errors occurred — like a local Sentry.
-
----
-
-## Use Case 4: Cross-File Data Flow
-
-```bash
-trickle context --compact
-```
-
-Compact output showing all variables across all files — perfect for understanding how data flows through the application:
-
-```
-### src/db.ts
-  L9 users: User[] = []
-  L13 user: User = {"id":1,"name":"Alice",...}
-
-### src/api.ts
-  L13 user: User = {"id":1,"name":"Alice",...}
-  L19 count: number = 3
-
-### src/index.ts
-  L4 r1: ApiResponse = {"success":true,"data":{"id":1,...}}
-```
-
----
-
-## Use Case 5: JSON Output for Programmatic Analysis
-
-```bash
-trickle context src/api.ts --json
-```
-
-Returns structured JSON that agents can parse:
 ```json
 {
-  "variables": [
-    {"file": "src/api.ts", "line": 13, "name": "user", "type": "{ id: number, ... }", "value": {"id": 1, ...}},
-    {"file": "src/api.ts", "line": 19, "name": "count", "type": "number", "value": 3}
+  "status": "warning",
+  "counts": { "functions": 9, "queries": 25, "errors": 0, "logs": 4 },
+  "rootCauses": [
+    { "severity": "warning", "category": "n_plus_one",
+      "description": "N+1: \"SELECT * FROM users WHERE id = ?\" repeated 15 times",
+      "suggestedFix": "Replace with JOIN or batch query using IN clause" }
   ],
-  "functions": [
-    {"name": "handleCreateUser", "module": "api", "params": [...], "returns": "..."}
-  ]
+  "alerts": [...],
+  "functions": { "signatures": [...] },
+  "queries": { "nPlusOnePatterns": [...], "slowQueries": [...] },
+  "healPlans": [{ "recommendation": "...", "confidence": "high" }]
 }
 ```
 
----
-
-## Agent Workflow
-
-1. **Detect issue** → `get_last_run_summary` or `get_alerts` shows N+1 queries, errors, slow functions
-2. **Understand the code** → `explain_file` shows functions, call graph, queries, variables, errors for a file
-3. **Save baseline** → `save_baseline` saves current metrics before making changes
-4. **Fix the code** → Agent applies changes based on runtime data and heal plan recommendations
-5. **Re-run** → `refresh_runtime_data` or `run_tests` captures fresh data after the fix
-6. **Verify the fix** → `compare_with_baseline` shows "Fix verified — 3 metrics improved, 0 regressed"
-
-This reduces debugging from multiple "add log → run → read output" cycles to structured, actionable data.
+One call replaces: `get_errors` + `get_alerts` + `get_database_queries` + `get_function_signatures` + `get_performance_profile` + `get_heal_plans`.
 
 ---
 
-## Use Case 8: Understanding Unfamiliar Code
+## Use Case 2: Understand Any File Instantly
 
 ```bash
 trickle explain src/api.ts
 ```
 
 Shows everything about a file via runtime data:
-- **Functions**: signatures with parameter/return types, timing, sample I/O
-- **Call graph**: who calls this file's functions, what they call
-- **Variables**: runtime values at each line
-- **Queries**: database operations triggered by this code
-- **Errors**: runtime errors with context
-- **Alerts**: N+1 patterns, slow queries, performance issues
+
+```
+Functions:
+  → GET /api/posts() -> Post[]                         (14.5ms)
+  → POST /api/users(body: { name: string }) -> User    (3.2ms)
+
+Data Flow:
+  GET /api/posts: () → Post[]
+    out: [{"id":1,"title":"Hello World","author":"Alice"}]
+  POST /api/users: (body: { name: string }) → User
+    in: [{"name":"Bob"}]
+    out: {"id":2,"name":"Bob","email":"bob@example.com"}
+
+Call Graph:
+  Callers: server.handleRequest → api.GET /api/posts ×3
+  Callees: api.GET /api/posts → db.getUser ×15 (N+1!)
+
+Variables:
+  L13 user: { id: number, name: string } = {"id":1,"name":"Alice"}
+  L25 result: undefined = null   ← bug here!
+
+Database Queries: 4 unique (SELECT * FROM posts, SELECT * FROM users WHERE id = ?, ...)
+Alerts: N+1 pattern detected, suggestion: use JOIN
+```
 
 ---
 
-## Use Case 9: Smart Test Running
+## Use Case 3: Debug Errors with Variable Context
 
 ```bash
-trickle test                    # auto-detect framework
-trickle test "npm test"         # specific command
-trickle test --json             # structured output for agents
+trickle context --errors
 ```
 
-Returns structured test results with runtime context at failure points:
-- Per-test pass/fail with error messages
-- Variable values near the failure
-- Database queries that ran during the test
-- Call trace showing execution flow
-- Observability alerts (N+1 queries, etc.)
+Errors now include **variable values at the error location**:
+
+```
+TypeError: 'NoneType' object is not iterable
+  at app.py:5 (get_user)
+
+Variable context:
+  L3 user_id: integer = 3
+  L4 row: null               ← root cause: DB returned nothing
+  L5 <return>: dict = {'id': 1, 'name': 'Alice'}  (from a previous successful call)
+```
+
+The agent sees `row = null` for `user_id = 3` — the database has no user 3, and the code doesn't handle None.
 
 ---
 
-## Integration with CLAUDE.md
+## Use Case 4: Performance Profiling
 
-When `trickle init` is run, it creates a `CLAUDE.md` with instructions for agents:
-
-```markdown
-## Debugging with Runtime Data
-
-This project uses **trickle** for runtime type observability.
-Use cached runtime data instead of adding console.log/print statements:
-
-    trickle context src/api.ts        # variable values for a file
-    trickle context src/api.ts:42     # values near a specific line
-    trickle context --compact          # minimal output
+```bash
+trickle flamegraph
 ```
 
-AI agents that read `CLAUDE.md` (like Claude Code) will automatically know to use `trickle context` instead of adding debug prints.
+Generates an interactive HTML flamegraph + text hotspot analysis:
+
+```
+Hotspots:
+  █████████████████░░░  83.2%  1.24ms  app.listAllUserOrders
+  ████░░░░░░░░░░░░░░░░  17.4%  0.26ms  app.getUserOrders
+  ███░░░░░░░░░░░░░░░░░  10.7%  0.16ms  app.riskyOperation
+
+Call tree:
+  app.listAllUserOrders (1.24ms)
+    app.getUserOrders (0.07ms)
+    app.getUserOrders (0.05ms)    ← N+1 visible in tree!
+    app.getUserOrders (0.05ms)
+    app.getUserOrders (0.05ms)
+    app.getUserOrders (0.04ms)
+  app.riskyOperation (0.16ms) ✗ error
+```
 
 ---
 
-## MCP Server Integration
+## Use Case 5: Smart Test Running
 
-For the deepest integration, add trickle as an MCP server so Claude can query runtime data directly as tools:
+```bash
+trickle test                    # auto-detect framework (jest, pytest, vitest, mocha)
+trickle test "npm test" --json  # structured output for agents
+```
+
+Returns structured pass/fail with runtime context at failure points:
 
 ```json
 {
-  "mcpServers": {
-    "trickle": {
-      "command": "npx",
-      "args": ["trickle-cli", "mcp-server"]
+  "summary": { "passed": 9, "failed": 1, "total": 10 },
+  "failures": [{
+    "test": "test_get_user_not_found",
+    "error": { "message": "assert user is not None" },
+    "runtimeContext": {
+      "variablesNearFailure": [{ "name": "user_id", "value": 999, "type": "int" }],
+      "queriesDuringTest": [{ "query": "SELECT * FROM users WHERE id = 999", "durationMs": 0.1 }]
     }
+  }],
+  "observability": {
+    "functionsObserved": 10,
+    "queriesCaptured": 69,
+    "alerts": [{ "severity": "warning", "message": "N+1 pattern detected" }]
   }
 }
 ```
 
-**25 MCP tools available:**
-
-| Tool | What it does |
-|---|---|
-| `get_last_run_summary` | **Start here** — comprehensive post-run summary with status, errors, queries, signatures, alerts, logs, memory, and fix recommendations. Replaces 5-10 individual tool calls. |
-| `get_alerts` | Detected anomalies with fix suggestions |
-| `get_heal_plans` | Remediation plans with context for auto-fixing |
-| `get_runtime_context` | Variable values + function types for a file |
-| `get_annotated_source` | Source code with inline runtime values |
-| `get_function_signatures` | All function signatures with execution timing |
-| `get_call_trace` | Execution flow — which function called which |
-| `get_errors` | Crash context with nearby variable values |
-| `get_database_queries` | SQL, Redis, MongoDB queries with timing + row counts |
-| `get_distributed_traces` | Cross-service request flow with trace IDs |
-| `get_logs` | Structured log entries from logging frameworks |
-| `get_websocket_events` | WebSocket/socket.io messages |
-| `get_performance_profile` | Memory usage (RSS + heap) snapshots |
-| `get_doctor` | Overall health check with status and data counts |
-| `get_environment` | Runtime, platform, and framework detection |
-| `get_console_output` | Captured console.log/error/warn output |
-| `get_http_requests` | HTTP fetch calls with status + latency |
-| `explain_file` | Understand a file via runtime data — functions, call graph, queries, variables, errors |
-| `run_tests` | Run tests with observability — structured pass/fail with runtime context at failures |
-| `get_flamegraph` | Performance flamegraph — hotspots sorted by time, call tree with durations |
-| `get_new_alerts` | Get only NEW alerts since last check — for polling-based production monitoring |
-| `save_baseline` | Save current metrics as baseline before making changes |
-| `compare_with_baseline` | Compare current metrics against baseline — shows improvements/regressions |
-| `check_data_freshness` | Check if runtime data exists and how old it is |
-| `refresh_runtime_data` | Re-run the app to capture fresh data (returns summary) |
-
 ---
 
-## Use Case 6: Debugging Slow Database Queries
+## Use Case 6: Before/After Fix Verification
 
 ```bash
-trickle context --queries
-```
-
-Shows all database operations with timing — agents can immediately spot N+1 queries or slow operations:
-
-```
-  sqlite3   2.79ms  CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)
-  sqlite3   0.06ms  INSERT INTO users VALUES ('Alice', 'alice@test.com')
-  sqlite3  45.20ms  SELECT * FROM users WHERE email LIKE '%test%'  ← slow!
-  redis     0.12ms  GET session:user123
-  pymongo   3.40ms  db.orders.find({"user_id": "123"})
-```
-
-**Supported databases (auto-detected, zero config):**
-- SQL: PostgreSQL (pg/psycopg2), MySQL (mysql2/pymysql), SQLite (better-sqlite3/sqlite3)
-- Redis: ioredis (JS), redis-py (Python)
-- MongoDB: mongoose (JS), pymongo (Python)
-
----
-
-## Use Case 7: Auto-Remediation Loop
-
-The full detect → heal → verify pipeline for autonomous bug fixing:
-
-```bash
-# 1. Capture runtime data
-trickle run python app.py
-
-# 2. Save baseline metrics
+# 1. Save current state
 trickle verify --baseline
 
-# 3. Get fix plans with context
-trickle heal --json
-```
+# 2. Agent fixes the N+1 query (replaces loop with JOIN)
 
-Each heal plan includes the alert, relevant context (queries, call trace, variable values), a fix recommendation, and confidence level. The agent reads the plan, applies the fix, then verifies:
-
-```bash
-# 4. After agent applies fix, re-run
+# 3. Re-run and compare
 trickle run python app.py
-
-# 5. Compare metrics
 trickle verify
 ```
 
@@ -284,21 +194,110 @@ Output:
 
 ---
 
-## Complete Data Available to Agents
+## Use Case 7: Production Monitoring
 
-After one run with trickle, agents have access to:
+```bash
+trickle watch-alerts --webhook https://hooks.slack.com/services/... --interval 5
+```
 
-| Data | File | Description |
-|---|---|---|
-| Variable values | `variables.jsonl` | Every variable's type and sample value |
-| Function types | `observations.jsonl` | Signatures, params, return types, execution timing (ms) |
-| Call trace | `calltrace.jsonl` | Execution flow with parent-child relationships |
-| Database queries | `queries.jsonl` | SQL/Redis/MongoDB operations with timing + row counts |
-| Distributed traces | `traces.jsonl` | Cross-service request flow with trace IDs |
-| HTTP requests | `observations.jsonl` | fetch() calls with URL, status, latency, response type |
-| WebSocket events | `websocket.jsonl` | ws/socket.io messages with data previews |
-| Memory profile | `profile.jsonl` | RSS + heap snapshots at start/end |
-| Console output | `console.jsonl` | All console.log/error/warn output |
-| Error context | `errors.jsonl` | Crash info with nearby variable values |
-| Alerts | `alerts.jsonl` | Detected anomalies with severity + fix suggestions |
-| Heal plans | `heal.jsonl` | Remediation plans with context for agent auto-fix |
+Continuous monitoring that outputs JSON events for new alerts:
+
+```json
+{"kind":"alert","timestamp":"2026-03-15T18:35:26Z","alerts":[
+  {"severity":"critical","category":"n_plus_one","message":"SELECT * FROM users repeated 20 times"}
+]}
+```
+
+Via MCP: `get_new_alerts` returns only NEW alerts since last check (deduplication built in).
+
+---
+
+## Use Case 8: Auto-Remediation
+
+```bash
+trickle heal --json
+```
+
+Each heal plan includes: detected issue, relevant context (queries, call trace, variable values), fix recommendation, and confidence level:
+
+```json
+{
+  "alert": { "severity": "critical", "category": "n_plus_one" },
+  "context": {
+    "queries": [{"query": "SELECT * FROM users WHERE id = ?", "count": 15}],
+    "callTrace": [{"function": "listAllUserOrders", "children": ["getUserOrders ×15"]}]
+  },
+  "recommendation": "Replace with JOIN: SELECT p.*, u.name FROM posts p JOIN users u ON p.user_id = u.id",
+  "confidence": "high"
+}
+```
+
+---
+
+## MCP Server Integration
+
+`trickle init` auto-creates `.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "trickle": {
+      "command": "npx",
+      "args": ["trickle-cli", "mcp-server"]
+    }
+  }
+}
+```
+
+**26 MCP tools available:**
+
+| Tool | What it does |
+|---|---|
+| **`get_recommended_actions`** | **Start here** — analyzes state, tells you which tools to call and in what order |
+| **`get_last_run_summary`** | Complete overview: status, errors, queries, signatures, root causes, fix recommendations |
+| **`explain_file`** | Understand a file: functions, call graph, data flow with sample I/O, queries, variables |
+| **`run_tests`** | Smart test runner: structured pass/fail with runtime context at failures |
+| **`get_flamegraph`** | Performance hotspots sorted by time with call tree |
+| `get_errors` | Errors with variable values at the error location |
+| `get_alerts` | Detected anomalies (N+1 queries, slow functions, memory) with fix suggestions |
+| `get_heal_plans` | Auto-fix recommendations with context and confidence level |
+| `get_runtime_context` | Variable values + function types for a specific file |
+| `get_annotated_source` | Source code with inline runtime values as comments |
+| `get_function_signatures` | All function signatures with parameter types and timing |
+| `get_call_trace` | Call tree with parent-child relationships and timing |
+| `get_database_queries` | SQL, Redis, MongoDB queries with timing + row counts |
+| `get_distributed_traces` | Cross-service request flow with trace IDs |
+| `get_logs` | Structured log entries from logging frameworks |
+| `get_websocket_events` | WebSocket/socket.io messages |
+| `get_performance_profile` | Memory usage (RSS + heap) snapshots |
+| `get_doctor` | Health check with root causes and recommended next actions |
+| `get_environment` | Runtime, platform, and framework detection |
+| `get_console_output` | Captured console.log/error/warn output |
+| `get_http_requests` | HTTP fetch calls with status + latency |
+| `get_flamegraph` | Performance flamegraph with hotspot analysis |
+| `get_new_alerts` | Only NEW alerts since last check (polling-based monitoring) |
+| `save_baseline` | Save current metrics before making changes |
+| `compare_with_baseline` | Compare metrics against baseline (fix verification) |
+| `check_data_freshness` | Check if runtime data exists and how old it is |
+| `refresh_runtime_data` | Re-run the app and return comprehensive summary |
+
+---
+
+## What trickle Captures (automatically, zero config)
+
+| Data | Description |
+|---|---|
+| **Functions** | Signatures, params, return types, execution timing, sample I/O |
+| **Variables** | Types + runtime values at each line (including tensor shapes for ML) |
+| **Database queries** | SQL text, duration, row count — pg, mysql2, sqlite3, Prisma, SQLAlchemy, Django ORM, Knex, Sequelize, TypeORM, Drizzle |
+| **Errors** | Stack trace + variable values at the error location |
+| **Logs** | winston, pino, bunyan (JS); logging, loguru, structlog (Python) |
+| **HTTP requests** | fetch/requests calls with URL, status, latency, response type |
+| **Call traces** | Execution flow with parent-child relationships + timing |
+| **WebSocket** | ws, socket.io connections and messages |
+| **Memory** | RSS + heap snapshots at start/end |
+| **Distributed traces** | Cross-service request flow with trace IDs |
+
+**Supported frameworks**: Express, FastAPI, Flask, Django, Next.js, React, Vue, Svelte
+**Languages**: JavaScript, TypeScript, Python
+**Test frameworks**: Jest, Vitest, Pytest, Mocha

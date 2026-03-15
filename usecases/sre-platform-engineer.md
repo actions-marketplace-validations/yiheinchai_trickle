@@ -204,7 +204,7 @@ trickle cloud team info --team abc123
 }
 ```
 
-25 MCP tools available — AI agents can query runtime data, detect issues, and apply fixes without human intervention.
+26 MCP tools available — AI agents can query runtime data, detect issues, generate flamegraphs, run root cause analysis, and apply fixes without human intervention. Key tools: `get_recommended_actions` (guided workflow), `get_last_run_summary` (complete overview), `explain_file` (understand any file), `get_flamegraph` (performance hotspots).
 
 ## Environment Variables
 
@@ -227,6 +227,6 @@ trickle cloud team info --team abc123
 | Setup time | Days | Minutes |
 | Code changes | SDK integration | None |
 | Data ownership | Datadog servers | Your infrastructure |
-| AI agent access | Limited API | 18 MCP tools |
+| AI agent access | Limited API | 26 MCP tools |
 | Auto-fix | No | Yes (heal + verify) |
 | Lock-in | High | None (open source) |

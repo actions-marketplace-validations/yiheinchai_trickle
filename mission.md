@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Complete agent stack shipped and documented: MCP server (8 tools), CLAUDE.md generation, trickle context (annotated/compact/json with all data), console capture (JS+Python), error capture (JS+Python), function timing, HTTP timing. JSON mode now returns variables + functions + errors + console. Updated ai-agent.md with MCP config, tools table, and data reference. Continue expanding TAM — consider new language support or database tracing.
+Added PostgreSQL query tracing — auto-patches pg driver to capture SQL queries, timing, row counts, columns. Works with Prisma/Knex/Sequelize/TypeORM. MCP server now 9 tools. CLAUDE.md template includes MCP config. Full data: variables, functions (timing), HTTP (timing+status), console output, errors, database queries. Continue expanding — consider MySQL/SQLite support, or new language tracers.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

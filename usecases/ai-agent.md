@@ -159,11 +159,12 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 }
 ```
 
-**15 MCP tools available:**
+**19 MCP tools available:**
 
 | Tool | What it does |
 |---|---|
-| `get_alerts` | **Start here** — detected anomalies with fix suggestions |
+| `get_last_run_summary` | **Start here** — comprehensive post-run summary with status, errors, queries, signatures, alerts, logs, memory, and fix recommendations. Replaces 5-10 individual tool calls. |
+| `get_alerts` | Detected anomalies with fix suggestions |
 | `get_heal_plans` | Remediation plans with context for auto-fixing |
 | `get_runtime_context` | Variable values + function types for a file |
 | `get_annotated_source` | Source code with inline runtime values |
@@ -172,12 +173,15 @@ For the deepest integration, add trickle as an MCP server so Claude can query ru
 | `get_errors` | Crash context with nearby variable values |
 | `get_database_queries` | SQL, Redis, MongoDB queries with timing + row counts |
 | `get_distributed_traces` | Cross-service request flow with trace IDs |
+| `get_logs` | Structured log entries from logging frameworks |
 | `get_websocket_events` | WebSocket/socket.io messages |
 | `get_performance_profile` | Memory usage (RSS + heap) snapshots |
+| `get_doctor` | Overall health check with status and data counts |
+| `get_environment` | Runtime, platform, and framework detection |
 | `get_console_output` | Captured console.log/error/warn output |
 | `get_http_requests` | HTTP fetch calls with status + latency |
 | `check_data_freshness` | Check if runtime data exists and how old it is |
-| `refresh_runtime_data` | Re-run the app to capture fresh data |
+| `refresh_runtime_data` | Re-run the app to capture fresh data (returns summary) |
 
 ---
 

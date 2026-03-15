@@ -12,6 +12,7 @@ import {
   ErrorRow,
   AnnotationEntry,
 } from "../api-client";
+import { writeRunSummary } from "./summary";
 
 export interface RunOptions {
   module?: string;
@@ -398,6 +399,9 @@ async function executeSingleRun(
     // Auto-push to cloud if configured
     await autoCloudPush();
 
+    // Generate post-run summary for AI agents
+    writeRunSummary({ exitCode, command: instrumentedCommand });
+
     return exitCode;
   }
 
@@ -504,6 +508,9 @@ async function executeSingleRun(
 
   // Auto-push all data to cloud if configured
   await autoCloudPush();
+
+  // Generate post-run summary for AI agents
+  writeRunSummary({ dir: localDir, exitCode, command: instrumentedCommand });
 
   return exitCode;
 }

@@ -429,18 +429,32 @@ function refreshData(params: Record<string, unknown>): unknown {
   try {
     const output = execSync(`npx trickle-cli run ${command}`, {
       cwd: process.cwd(),
-      timeout: 30000,
+      timeout: 60000,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
     });
-    return { success: true, output: output.substring(0, 500) };
+    // Return comprehensive summary after run
+    try {
+      const { generateRunSummary } = require('./summary');
+      const summary = generateRunSummary({ command });
+      return { success: true, summary };
+    } catch {
+      return { success: true, output: output.substring(0, 500) };
+    }
   } catch (e: any) {
     // Command may fail (e.g., crash) but still capture data
     const hasData = fs.existsSync(path.join(findTrickleDir(), "variables.jsonl"));
+    // Still try to return summary even on failure — errors are valuable data
+    let summary;
+    try {
+      const { generateRunSummary } = require('./summary');
+      summary = generateRunSummary({ command, exitCode: e.status || 1 });
+    } catch {}
     return {
       success: false,
       dataCaptured: hasData,
       error: (e.stderr || e.message || "").substring(0, 300),
+      summary,
     };
   }
 }
@@ -548,13 +562,18 @@ const TOOLS = [
   },
   {
     name: "refresh_runtime_data",
-    description: "Run the application with trickle to capture fresh runtime data. Use when data is stale or missing.",
+    description: "Run the application with trickle to capture fresh runtime data. Use when data is stale or missing. Returns a comprehensive summary of everything captured.",
     inputSchema: {
       type: "object",
       properties: {
         command: { type: "string", description: "Command to run (e.g., 'node app.js' or 'python app.py'). If omitted, suggests a command." },
       },
     },
+  },
+  {
+    name: "get_last_run_summary",
+    description: "Get a comprehensive summary of the last trickle run — status, errors, queries (with N+1 detection), function signatures, logs, HTTP requests, memory profile, alerts, and fix recommendations. This is the RECOMMENDED first tool to call — it replaces 5-10 separate tool calls with a single comprehensive result. Use this instead of calling get_errors, get_database_queries, get_alerts, etc. individually.",
+    inputSchema: { type: "object", properties: {} },
   },
 ];
 
@@ -645,6 +664,27 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;
           case "refresh_runtime_data": result = refreshData(args); break;
+          case "get_last_run_summary": {
+            const summaryFile = path.join(findTrickleDir(), "summary.json");
+            if (fs.existsSync(summaryFile)) {
+              try {
+                result = JSON.parse(fs.readFileSync(summaryFile, "utf-8"));
+              } catch {
+                // Regenerate if file is corrupt
+                const { generateRunSummary } = require('./summary');
+                result = generateRunSummary({ dir: findTrickleDir() });
+              }
+            } else {
+              // Generate on-the-fly from existing data
+              try {
+                const { generateRunSummary } = require('./summary');
+                result = generateRunSummary({ dir: findTrickleDir() });
+              } catch (e: any) {
+                result = { error: "No runtime data found. Run the app with trickle first." };
+              }
+            }
+            break;
+          }
           default:
             return { jsonrpc: "2.0", id: req.id, error: { code: -32601, message: `Unknown tool: ${toolName}` } };
         }

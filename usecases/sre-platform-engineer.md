@@ -204,7 +204,7 @@ trickle cloud team info --team abc123
 }
 ```
 
-18 MCP tools available — AI agents can query runtime data, detect issues, and apply fixes without human intervention.
+19 MCP tools available — AI agents can query runtime data, detect issues, and apply fixes without human intervention.
 
 ## Environment Variables
 

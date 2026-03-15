@@ -2,40 +2,18 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Make a big push of increasing the feature set of trickle to expand the target audience and the TAM. Make sure to update the readme and usecases accordingly.
+Go through every part of the trickle platform and make it agent first, meaning that it is designed primary to be used by AI agents, the goal is 10-100x improvement in agent capability with trickle compared to without trickle.
 
-Particularly, build a complete observability platform, it will replace datadog, with the ability for agents to automatically fix issues in production. this will be critical for the business as we will sell cloud computing and agent credits, esp now that we have the runtime cache infrastructure in place.
-
-the goal is to make it production ready, where real companies can start deploying trickle to production
+The vision is to have AI agents eg claude code run autonomously as a on-call engineer responding the incidences and debugging and fixing autonomously in prod. Trickle is the important part to give the AI agent all the information required to fix the issue.
 </higher directive>
 
 <focus point>
-Production-ready cloud observability platform.
-
-Cloud: multi-tenant API, auto-push, real-time streaming, shared dashboards.
-Team management: RBAC with 4 roles (owner/admin/member/viewer), invite members, shared projects.
-Production: rate limiting, data retention (30d), request logging, error handling.
-Deployment: Dockerfile + fly.toml ready for `fly deploy`.
-Documentation: README with cloud + team sections, 18 usecases (including SRE/Platform Engineer).
-
-ORM/DB auto-patching: 18 drivers (pg, mysql2, sqlite3, Prisma, Sequelize, TypeORM, Knex,
-Drizzle, ioredis, mongoose + psycopg2, pymysql, redis, pymongo, SQLAlchemy, Django ORM,
-mysql.connector, sqlite3).
-Alerting rules engine: .trickle/rules.json with custom thresholds, pattern matching, query limits.
-
-Validated on: nanoGPT (ML), Express (JS), Flask (Python), FastAPI+SQLAlchemy, Django+SQLite,
-Prisma+SQLite, Sequelize+SQLite, multi-file APIs, production-like apps with auth/JWT/bcrypt/SQL.
-
-Log aggregation: winston, pino, bunyan (JS); loguru, structlog (Python) auto-patched to logs.jsonl.
-
-APM metrics: trickle metrics — p50/p95/p99 latency, error rates, query perf, HTML dashboard.
-
-SLO monitoring: trickle slo init/check — latency, error rate, query SLOs with budget tracking, CI exit codes.
+Shipped: Post-run auto-summary (summary.json + get_last_run_summary MCP tool + trickle summary CLI) — agents get status, errors, queries, N+1 patterns, function signatures, logs, memory, alerts, and fix recommendations in a single call instead of 5-10 separate MCP calls.
 
 Next priorities:
-1. Deploy cloud.trickle.dev to fly.io
-2. PostgreSQL migration for cloud scale
-3. Distributed tracing improvements (cross-service flame graphs)
+1. Agent action tools — MCP tools that let agents DO things (apply fixes, run tests, compare before/after), not just observe
+2. Smart test runner — `trickle test` that runs tests with full observability and returns structured pass/fail with runtime context at failure points
+3. Codebase understanding — `trickle explain <file>` showing data flow, callers, callees, queries triggered by a code path
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

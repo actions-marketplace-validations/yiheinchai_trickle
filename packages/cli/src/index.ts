@@ -559,6 +559,17 @@ program
     runDoctor({ json: opts.json });
   });
 
+// trickle summary
+program
+  .command("summary")
+  .description("Comprehensive post-run summary — everything captured in one JSON (agent-optimized)")
+  .option("--json", "Output as JSON (default)")
+  .action(async () => {
+    const { generateRunSummary } = await import("./commands/summary");
+    const summary = generateRunSummary({});
+    console.log(JSON.stringify(summary, null, 2));
+  });
+
 // trickle cloud
 const cloudCmd = program.command("cloud").description("Cloud sync — share observability data with your team");
 cloudCmd.command("login").description("Authenticate with a trickle cloud server")

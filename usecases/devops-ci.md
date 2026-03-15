@@ -29,16 +29,18 @@ trickle check --against api-baseline.json
 
 Exit code 1 if any breaking change is detected.
 
-## GitHub Actions Example
+## GitHub Actions Example (with PR comments)
 
 ```yaml
-name: API Contract Check
+name: Observability Check
 
 on: [pull_request]
 
 jobs:
-  api-check:
+  trickle-check:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write    # needed for PR comments
     steps:
       - uses: actions/checkout@v4
 
@@ -49,23 +51,41 @@ jobs:
       - run: npm ci
       - run: npm install -g trickle-cli
 
-      # Start the server
+      # One command: run tests + detect issues + post PR comment
+      - name: Trickle CI
+        run: trickle ci "npm test"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Detects: N+1 queries, slow functions, errors, memory issues
+        # Posts a formatted comment on the PR with root causes + fix suggestions
+        # Exits non-zero if critical issues found
+```
+
+This automatically posts a PR comment like:
+
+> ## 🟡 trickle: Warnings
+> | Metric | Count |
+> |---|---|
+> | Functions | 12 |
+> | Queries | 45 |
+> | Errors | 0 |
+>
+> ### Root Causes
+> 🟡 **n_plus_one**: N+1 query "SELECT * FROM users WHERE id = ?" repeated 15 times
+> > Replace with JOIN or batch query using IN clause
+
+For more control:
+
+```yaml
+      # Separate steps for granular control
       - run: trickle run node src/server.js &
       - run: sleep 3
-
-      # Run test suite to generate traffic
       - run: npm test
-
-      # Check for breaking changes
       - name: API contract check
         run: trickle check --against api-baseline.json
-
-      # Quality audit
-      - name: API audit
+      - name: Quality audit
         run: trickle audit --fail-on-error
-
-      # Coverage threshold
-      - name: Type coverage
+      - name: Coverage
         run: trickle coverage --fail-under 80 --json
 ```
 

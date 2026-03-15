@@ -563,6 +563,45 @@ async function sendWebhook(url: string, alerts: Alert[]): Promise<void> {
     return;
   }
 
+  // Microsoft Teams webhook (Adaptive Cards)
+  if (url.includes('webhook.office.com') || url.includes('microsoft.com')) {
+    const color = critical.length > 0 ? 'attention' : warnings.length > 0 ? 'warning' : 'good';
+    const title = `trickle: ${critical.length} critical, ${warnings.length} warnings`;
+
+    const facts = alerts.slice(0, 6).map(a => ({
+      title: a.severity === 'critical' ? '🔴 ' + a.category : '🟡 ' + a.category,
+      value: a.message + (a.suggestion ? ` → ${a.suggestion}` : ''),
+    }));
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          '@type': 'MessageCard',
+          '@context': 'http://schema.org/extensions',
+          themeColor: critical.length > 0 ? 'FF0000' : warnings.length > 0 ? 'FFA500' : '00FF00',
+          summary: title,
+          sections: [{
+            activityTitle: title,
+            facts,
+            markdown: true,
+          }],
+          potentialAction: [{
+            '@type': 'OpenUri',
+            name: 'View trickle docs',
+            targets: [{ os: 'default', uri: 'https://github.com/yiheinchai/trickle' }],
+          }],
+        }),
+      });
+      if (res.ok) console.log(chalk.green(`  ✓ Alerts sent to Teams`));
+      else console.log(chalk.yellow(`  ⚠ Teams responded with ${res.status}`));
+    } catch (err: any) {
+      console.log(chalk.yellow(`  ⚠ Failed to send to Teams: ${err.message}`));
+    }
+    return;
+  }
+
   // PagerDuty Events API v2
   if (url.includes('pagerduty.com') || url.includes('events.pagerduty')) {
     const routingKey = process.env.PAGERDUTY_ROUTING_KEY || url.split('/').pop() || '';

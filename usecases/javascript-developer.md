@@ -44,13 +44,26 @@ Open `app.js` in VSCode — type hints appear automatically after every variable
 
 ---
 
-## Use Case 2: TypeScript File (with ts-node)
+## Use Case 2: Compiled TypeScript (tsc, esbuild, webpack)
 
 ```bash
+# Pre-compiled TypeScript — just run the JS output with source maps
+tsc --sourceMap && trickle run node dist/app.js
+
+# esbuild
+esbuild src/index.ts --bundle --sourcemap --outfile=dist/bundle.js
+trickle run node dist/bundle.js
+
+# webpack (with devtool: 'source-map')
+npx webpack && trickle run node dist/bundle.js
+
+# ts-node (also works)
 trickle run ts-node --transpile-only app.ts
 ```
 
-TypeScript with full type annotations? Trickle reads your original `.ts` source and maps observations back to the correct lines — even through type stripping.
+Trickle automatically detects `.map` files and maps line numbers back to your original `.ts` source — even for webpack bundles with multiple source files. Open the `.ts` file in VSCode and hints appear on the correct lines.
+
+Works with: **tsc**, **esbuild**, **webpack**, **rollup**, **ts-node**, **tsx** — any tool that produces standard source maps.
 
 ```typescript
 interface Order {

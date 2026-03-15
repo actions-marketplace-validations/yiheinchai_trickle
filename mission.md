@@ -26,10 +26,17 @@ Database tracing now complete across both languages:
 
 Done: Updated README with full agent observability stack, database tracing matrix, 9 MCP tools, architecture diagram.
 
-Next for agent TAM:
-1. Call graph / execution trace for debugging flow
-2. Test on real-world projects to validate agent debugging workflow
-3. Update ai-agent.md usecase with database + timing examples
+Done: Call trace (calltrace.jsonl) with parent-child relationships + timing. 10 MCP tools now. Updated ai-agent.md with database debugging.
+
+MCP server now has 10 tools:
+get_runtime_context, get_annotated_source, get_function_signatures, get_errors,
+get_database_queries, get_call_trace, get_console_output, get_http_requests,
+check_data_freshness, refresh_runtime_data
+
+Next:
+1. Python call trace (matching JS calltrace.jsonl)
+2. Test full agent debugging workflow on real project
+3. Consider adding Go/Rust support for broader TAM
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

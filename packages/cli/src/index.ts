@@ -595,6 +595,17 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle flamegraph
+program
+  .command("flamegraph")
+  .description("Generate an interactive flamegraph from call traces — shows where time is spent")
+  .option("--json", "Output structured JSON (hotspots, tree, folded stacks)")
+  .option("-o, --out <path>", "Output HTML file path")
+  .action(async (opts) => {
+    const { runFlamegraph } = await import("./commands/flamegraph");
+    runFlamegraph({ json: opts.json, out: opts.out });
+  });
+
 // trickle watch-alerts — continuous monitoring
 program
   .command("watch-alerts")

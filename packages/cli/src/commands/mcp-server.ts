@@ -643,6 +643,11 @@ const TOOLS = [
     },
   },
   {
+    name: "get_flamegraph",
+    description: "Generate a performance flamegraph from call traces. Returns hotspots (functions sorted by time), a call tree, and folded stacks format. Use this to understand WHERE time is being spent in the application — essential for performance debugging.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_new_alerts",
     description: "Get only NEW alerts since the last check. Designed for polling-based production monitoring — call this periodically to detect new issues without seeing duplicates. On first call, returns all current alerts. Subsequent calls return only alerts that appeared after the previous check.",
     inputSchema: { type: "object", properties: {} },
@@ -774,6 +779,24 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "get_flamegraph": {
+            try {
+              const { generateFlamegraph } = require('./flamegraph');
+              const data = generateFlamegraph({ dir: findTrickleDir() });
+              if (!data) {
+                result = { error: "No call trace data found. Run the app with trickle first." };
+              } else {
+                result = {
+                  totalMs: data.totalMs,
+                  hotspots: data.hotspots,
+                  tree: data.tree,
+                };
+              }
+            } catch (e: any) {
+              result = { error: `Failed to generate flamegraph: ${e.message}` };
             }
             break;
           }

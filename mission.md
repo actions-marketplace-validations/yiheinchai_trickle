@@ -10,12 +10,16 @@ this is just an example, you need to follow through and empathise with the user 
 </higher directive>
 
 <focus point>
-Shipped: Rewrote AI agent usecase (complete), javascript-developer testing section (3 options:
-trickle test, vitest plugin, trickle run), backend-api-developer (added debugging, testing,
-verification use cases). Enhanced trickle doctor with root causes + recommended actions.
+Docs rewrite complete for core usecases:
+- README: backend section now shows debugging/testing first, AI agent section shows 26 MCP tools
+- ai-agent.md: complete rewrite (8 use cases, on-call loop, all 26 tools)
+- javascript-developer.md: vitest/jest testing with 3 options
+- backend-api-developer.md: debugging, testing, verification use cases added
+- python-developer.md: debugging/observability quick start at top
+- fullstack-developer.md: debugging quick start added
 
-Still need to update: python-developer.md, fullstack-developer.md, README.md backend section.
-The README "Backend / API Developers" section still only mentions codegen — needs debugging/testing.
+Remaining docs to review: qa-engineer.md, devops-ci.md, legacy-codebase.md,
+react-developer.md, nextjs-developer.md, react-native-developer.md
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

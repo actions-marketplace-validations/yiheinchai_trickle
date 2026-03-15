@@ -613,6 +613,16 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle security
+program
+  .command("security")
+  .description("Scan runtime data for security issues — secrets, SQL injection, sensitive data")
+  .option("--json", "Structured JSON output")
+  .action(async (opts) => {
+    const { runSecurityScan } = await import("./commands/security");
+    runSecurityScan({ json: opts.json });
+  });
+
 // trickle deps
 program
   .command("deps")

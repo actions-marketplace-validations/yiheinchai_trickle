@@ -498,6 +498,16 @@ program
     });
   });
 
+// trickle dashboard --local
+program
+  .command("dashboard-local")
+  .description("Open a self-contained observability dashboard — no backend needed. Shows alerts, functions, queries, errors, memory.")
+  .option("-p, --port <port>", "Port to serve on", "4321")
+  .action(async (opts) => {
+    const { serveDashboard } = await import("./commands/dashboard-local");
+    serveDashboard({ port: parseInt(opts.port) });
+  });
+
 // trickle annotate <file>
 program
   .command("annotate <file>")

@@ -8,56 +8,16 @@ Particularly, build for AI agents as the primary user.
 </general directive>
 
 <focus point>
-Added Python database query tracing (sqlite3, psycopg2, pymysql, mysql.connector). Auto-patches drivers to capture SQL queries, timing, row counts, columns to .trickle/queries.jsonl. Works with the MCP server's get_database_queries tool.
+Agent observability stack is feature-complete. 11 MCP tools, 8 data types, 15+ drivers auto-patched.
 
-Full agent observability stack now covers both JS and Python:
-- Variables + types + sample values
-- Function signatures + timing
-- HTTP requests + status codes
-- Console output
-- Error context with nearby variables
-- Database queries (JS: pg, mysql2, better-sqlite3 | Python: sqlite3, psycopg2, pymysql, redis, pymongo)
+Data captured: variables, functions+timing, call trace, DB queries (SQL/Redis/MongoDB), HTTP requests, WebSocket messages, console output, errors.
 
-Added: Function execution timing (durationMs), Redis + MongoDB tracing, improved CLAUDE.md templates.
-
-Database tracing now complete across both languages:
-- JS: pg, mysql2, better-sqlite3, ioredis, mongoose
-- Python: sqlite3, psycopg2, pymysql, mysql.connector, redis, pymongo
-
-Done: Updated README with full agent observability stack, database tracing matrix, 9 MCP tools, architecture diagram.
-
-Done: Call trace (calltrace.jsonl) with parent-child relationships + timing. 10 MCP tools now. Updated ai-agent.md with database debugging.
-
-MCP server now has 10 tools:
-get_runtime_context, get_annotated_source, get_function_signatures, get_errors,
-get_database_queries, get_call_trace, get_console_output, get_http_requests,
-check_data_freshness, refresh_runtime_data
-
-Done: Python call trace with parent-child relationships + timing. Both JS and Python now write calltrace.jsonl.
-
-Full agent observability stack is now feature-complete across both languages:
-- Variables + types + sample values (JS + Python)
-- Function signatures + execution timing (JS + Python)
-- Call trace / execution flow (JS + Python)
-- Database queries: SQL, Redis, MongoDB (JS + Python)
-- HTTP requests + status codes (JS + Python)
-- Console output (JS + Python)
-- Error context with nearby variables (JS + Python)
-- 10 MCP server tools
-
-Validated: Full agent debugging workflow tested on real 4-file Python project (app→service→db with sqlite3). All data captured: 47 vars, 4 functions, 18 SQL queries, 26 call trace events, 46 console lines. Agent can identify N+1 queries, missing users, slow initialization.
-
-Added: WebSocket tracing (ws, socket.io) with get_websocket_events MCP tool. Now 11 MCP tools.
-
-Full observability coverage:
-- Variables, functions+timing, call trace, DB queries (SQL/Redis/MongoDB), HTTP requests, WebSocket messages, console output, errors
-- 11 database/transport drivers auto-patched (JS + Python)
-- 11 MCP tools for agent access
+Drivers: JS (pg, mysql2, better-sqlite3, ioredis, mongoose, ws, socket.io) + Python (sqlite3, psycopg2, pymysql, mysql.connector, redis, pymongo).
 
 Consider next:
 1. Go/Rust support for broader TAM
-2. Performance profiling (memory, CPU flamegraphs)
-3. Python WebSocket tracing (websockets, aiohttp)
+2. Performance profiling (memory, CPU)
+3. .d.ts class grouping (methods as class members instead of flat functions)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

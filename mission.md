@@ -6,11 +6,11 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.164. 31 MCP tools. Added check_slos MCP tool for SLO compliance checking with
-error budget tracking. CI PR comments now include changelog + security scan.
+CLI 0.1.165. 31 MCP tools. Added GitLab CI integration — MR comment posting + annotations.
+trickle ci now works on both GitHub Actions (PR comments) and GitLab CI (MR notes).
 
-25+ features shipped this session. Next: multi-service dependency map, real-time streaming
-dashboard, GitLab CI integration, Jira/Linear ticket creation from alerts.
+25+ features shipped this session. Next: Jira/Linear ticket creation from alerts,
+multi-service dependency map, Bitbucket Pipelines support.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

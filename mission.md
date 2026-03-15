@@ -6,18 +6,14 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.150. Shipped Slack Block Kit + Discord webhook formatting.
-
-Completed TAM opportunities:
-1. ✓ OpenTelemetry export (trickle export --otlp)
-2. ✓ GitHub PR comments (trickle ci with GITHUB_TOKEN)
-3. ✓ Slack Block Kit webhooks (auto-detected, rich formatting)
+CLI 0.1.151. All major TAM integrations shipped:
+1. ✓ OpenTelemetry OTLP export (trickle export --otlp)
+2. ✓ GitHub PR comments (trickle ci + GITHUB_TOKEN)
+3. ✓ Slack Block Kit webhooks
 4. ✓ Discord webhook compatibility
+5. ✓ Prometheus /metrics endpoint (trickle metrics --prometheus)
 
-Remaining:
-1. Prometheus metrics endpoint (/metrics in text format)
-2. GitHub App for richer PR integration
-3. PagerDuty integration
+26 MCP tools. Integrates with: Grafana, SigNoz, Jaeger, Prometheus, Slack, Discord, GitHub.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

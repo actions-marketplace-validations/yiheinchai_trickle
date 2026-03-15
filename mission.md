@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Added PostgreSQL query tracing — auto-patches pg driver to capture SQL queries, timing, row counts, columns. Works with Prisma/Knex/Sequelize/TypeORM. MCP server now 9 tools. CLAUDE.md template includes MCP config. Full data: variables, functions (timing), HTTP (timing+status), console output, errors, database queries. Continue expanding — consider MySQL/SQLite support, or new language tracers.
+Database tracing now covers PostgreSQL (pg), MySQL (mysql2), and SQLite (better-sqlite3) — auto-patches drivers to capture SQL queries, timing, row counts, columns. MCP server has 9 tools. Full observability: variables, functions+timing, HTTP+status, console output, errors, database queries. Continue expanding TAM — consider adding Redis/MongoDB support, Python database tracing, or new language support.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

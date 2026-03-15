@@ -271,6 +271,75 @@ trickle codegen --class-validator  # NestJS class-validator DTOs
 trickle codegen --handlers         # Typed Express handler types
 ```
 
+## Use Case 9: Debugging with Runtime Data (No console.log)
+
+```bash
+trickle run node app.js          # capture runtime data
+trickle summary                   # errors, queries, alerts, root causes
+trickle explain src/routes.js     # functions, call graph, data flow, queries
+trickle flamegraph                # where is time being spent?
+```
+
+`trickle explain` shows everything about a file:
+```
+Functions:
+  → GET /api/posts() -> Post[]  (14.5ms)
+  → POST /api/users(body: { name: string }) -> User  (3.2ms)
+
+Data Flow:
+  GET /api/posts: () → Post[]
+    out: [{"id":1,"title":"Hello World"}]
+
+Queries: SELECT * FROM posts, SELECT * FROM users WHERE id = ?
+Alerts: N+1 query pattern detected (SELECT * FROM users WHERE id = ? ×15)
+```
+
+## Use Case 10: Running Tests with Observability
+
+```bash
+# Auto-detects jest, vitest, mocha
+trickle test
+
+# Or specify:
+trickle test "npx vitest run"
+trickle test "npx jest --testPathPattern=api"
+trickle test "python -m pytest tests/"
+```
+
+Returns structured results:
+```
+Tests:  8 passed | 1 failed | 0 skipped
+Observability: 10 functions | 25 queries | N+1 pattern detected
+```
+
+For **vitest** specifically, you can also add the trickle Vite plugin for inline type hints:
+```typescript
+// vitest.config.ts
+import { defineConfig } from 'vitest/config';
+import { tricklePlugin } from 'trickle-observe/vite-plugin';
+
+export default defineConfig({
+  plugins: [tricklePlugin()],
+});
+```
+
+Then run `npx vitest run` — inline hints appear in test files and source files.
+
+## Use Case 11: Fix Verification (Before/After)
+
+```bash
+trickle verify --baseline          # save current metrics
+# ... fix the N+1 query ...
+trickle run node app.js            # re-run
+trickle verify                     # compare
+```
+
+```
+  N+1 Queries    1 →  0  ↓ 1
+  Alerts         2 →  0  ↓ 2
+  ✓ Fix verified — 2 metric(s) improved
+```
+
 ## Project Setup
 
 One-time setup for a project:
@@ -281,6 +350,8 @@ trickle init
 
 This:
 - Creates `.trickle/` directory
+- Creates `CLAUDE.md` with agent debugging instructions
+- Creates `.claude/settings.json` with MCP server config
 - Updates `tsconfig.json` to include trickle types
 - Adds npm scripts (`trickle:dev`, `trickle:client`, `trickle:mock`)
 - Updates `.gitignore`

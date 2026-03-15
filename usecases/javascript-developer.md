@@ -373,57 +373,78 @@ trickle run ts-node --transpile-only app.ts
 
 ---
 
-## Use Case 8: Vitest Integration — See Types While Writing Tests
+## Use Case 8: Running Tests with Observability
 
-Add trickle to your Vitest setup to get inline type hints in both your source files and your test files as you run them.
+### Option A: `trickle test` (recommended for quick insights)
 
-**Setup:**
 ```bash
-npm install trickle-observe
+trickle test                     # auto-detects jest, vitest, pytest, mocha
+trickle test "npm test"          # specific command
+trickle test "npx vitest run"   # vitest specifically
+trickle test --json              # structured output for automation
 ```
 
+Returns structured pass/fail with observability data:
+```
+Tests:  8 passed | 1 failed | 0 skipped | 9 total
+Failures:
+  ✗ test_app.test.js > should return user by id
+    Expected 200 but got 404
+    Queries: 3 captured
+    Variables: 5 captured near failure
+Observability:
+  10 functions | 25 queries | 1 errors | 2 alerts
+  ⚠ N+1 query pattern detected
+```
+
+### Option B: Vitest with inline type hints (IDE integration)
+
+Add the trickle Vite plugin for inline variable hints in test files:
+
 ```typescript
-// vitest.config.ts
+// vitest.config.ts (or vite.config.ts)
 import { defineConfig } from 'vitest/config';
-import react from '@vitejs/plugin-react';  // if using React
 import { tricklePlugin } from 'trickle-observe/vite-plugin';
 
 export default defineConfig({
-  plugins: [react(), tricklePlugin()],
-  test: {
-    environment: 'jsdom',  // or 'node'
-  },
+  plugins: [tricklePlugin()],
+  test: { environment: 'node' },
 });
 ```
 
-**Run your tests:**
 ```bash
 npx vitest run
-# or: npx vitest --watch
 ```
 
-Now open any source file or test file in VSCode — inline type hints appear for every variable in both:
+Now open test files in VSCode — inline type hints appear:
 
 ```typescript
-// utils.test.ts
 describe('filterActiveUsers', () => {
   it('filters by role', () => {
     const result = filterActiveUsers(testUsers, 'admin');
     // → result: {filtered: User[], count: number, names: string[]}
-
     const adminCount = result.count;
     // → adminCount: 2
-
-    const adminNames = result.names;
-    // → adminNames: ["Alice", "Charlie"]
   });
 });
 ```
 
-Trickle transforms both the source module AND the test file — so you see the types flowing from your implementation into your assertions. Useful when:
-- Debugging what shape a function actually returns (vs what you expected)
-- Understanding what a complex transformation produces mid-way
-- Spotting when a type changes between test runs (type hash changes → new hint)
+### Option C: Run your app directly for full observability
+
+For the richest data (database queries, call traces, errors with context):
+
+```bash
+trickle run node app.js     # run the app
+# hit some endpoints, then check:
+trickle summary             # full overview with root causes
+trickle explain app.js      # understand the file
+trickle flamegraph           # performance hotspots
+```
+
+This captures everything: functions, queries, variables, errors, logs, HTTP requests, memory profile.
+
+> **Note**: Jest/Vitest worker processes use isolated module systems, so database query
+> observation doesn't work inside test files. For full DB observability, use Option C.
 
 ---
 

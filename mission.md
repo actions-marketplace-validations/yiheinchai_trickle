@@ -6,7 +6,7 @@ Improving the developer experience in real codebases, test diverse codebases fro
 </general directive>
 
 <focus point>
-Fixed numpy scalar display (np.float64 showed tensor metadata instead of actual values like 0.95). Tested on sklearn ML pipeline with 44 variables. Continue testing on diverse real-world codebases to find more pain points.
+Fixed numpy scalar display and TypeScript compiler helper noise filtering. Tested on sklearn ML pipeline (Python) and compiled TypeScript Express API (Node.js). Continue testing on diverse codebases to find more pain points — particularly around TypeScript source map support for line number accuracy.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

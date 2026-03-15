@@ -247,6 +247,17 @@ export async function contextCommand(
 
   // Output
   if (opts.json) {
+    // Load console output for JSON mode
+    const consoleFile = path.join(localDir, "console.jsonl");
+    let consoleOutput: unknown[] | undefined;
+    if (fs.existsSync(consoleFile)) {
+      const lines: unknown[] = [];
+      for (const line of fs.readFileSync(consoleFile, "utf-8").split("\n").filter(Boolean)) {
+        try { lines.push(JSON.parse(line)); } catch {}
+      }
+      if (lines.length > 0) consoleOutput = lines;
+    }
+
     const context = {
       variables: filteredVars.map(v => ({
         file: path.relative(process.cwd(), v.file),
@@ -263,8 +274,10 @@ export async function contextCommand(
           type: typeNodeToCompact(e),
         })),
         returns: typeNodeToCompact(f.returnType),
+        durationMs: (f as any).durationMs,
       })),
       errors: errors.length > 0 ? errors : undefined,
+      console: consoleOutput,
     };
     console.log(JSON.stringify(context, null, 2));
     return;

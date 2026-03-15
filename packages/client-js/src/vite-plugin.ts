@@ -257,6 +257,11 @@ function findVarDeclarations(source: string): Array<{ lineEnd: number; varName: 
     if (varName.startsWith('__trickle')) continue;
     // Skip TS compiled vars
     if (varName === '_a' || varName === '_b' || varName === '_c') continue;
+    // Skip React Refresh / HMR internals (Vite, webpack, Next.js inject these)
+    if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker' || varName === 'invalidateMessage') continue;
+    if (varName === '_s' || varName === '_c2' || varName === '_s2') continue;
+    // Skip single-underscore discard variables
+    if (varName === '_') continue;
 
     // Check if this is a require() call or import — skip those
     const restOfLine = source.slice(vmatch.index + vmatch[0].length - 1, vmatch.index + vmatch[0].length + 200);
@@ -486,6 +491,9 @@ function findReassignments(source: string): Array<{ lineEnd: number; varName: st
     if (varName === '_a' || varName === '_b' || varName === '_c') continue;
     // Skip 'this', 'self', 'super' (not reassignable in practice)
     if (varName === 'this' || varName === 'super') continue;
+    // Skip React Refresh / HMR internals and discard variables
+    if (varName === 'prevRefreshReg' || varName === 'prevRefreshSig' || varName === 'inWebWorker') continue;
+    if (varName === '_s' || varName === '_c2' || varName === '_s2' || varName === '_') continue;
     // Skip keywords that could look like identifiers
     if (['if', 'else', 'while', 'for', 'do', 'switch', 'case', 'default', 'return', 'throw',
          'break', 'continue', 'try', 'catch', 'finally', 'new', 'delete', 'typeof', 'void',

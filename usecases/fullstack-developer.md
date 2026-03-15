@@ -19,9 +19,19 @@ cd your-project
 trickle init
 ```
 
-This creates `.trickle/` directory, updates `tsconfig.json`, adds npm scripts, and updates `.gitignore`.
+This creates `.trickle/` directory, `CLAUDE.md` (AI agent instructions), `.claude/settings.json` (MCP config), updates `tsconfig.json`, adds npm scripts, and updates `.gitignore`.
 
-### Start developing
+### Debug and understand your code
+
+```bash
+trickle run node src/server.js   # capture runtime data (zero code changes)
+trickle summary                   # errors, queries, N+1 patterns, root causes
+trickle explain src/routes.js     # functions, call graph, data flow, variables
+trickle test                      # run jest/vitest/mocha with observability
+trickle flamegraph                # performance hotspots
+```
+
+### Auto-generate types
 
 ```bash
 trickle dev

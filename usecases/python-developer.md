@@ -1,41 +1,76 @@
-# Python Developer: Add Types to Untyped Code Without Writing Them
+# Python Developer: Runtime Observability + Auto Types
 
-You have a Python codebase with no type annotations. Instead of manually adding types to hundreds of functions, trickle observes your code at runtime and generates `.pyi` stub files — your IDE immediately gets autocomplete and type checking.
+You have a Python codebase. Trickle gives you two things with zero code changes:
+1. **Debugging**: see what your code actually does at runtime (variables, queries, errors, performance)
+2. **Types**: auto-generated `.pyi` stubs so your IDE gets autocomplete
 
 ## Install
 
 ```bash
 pip install trickle-observe
-npm install -g trickle-cli      # optional, for CLI commands
+npm install -g trickle-cli
 ```
 
-## Quick Start
-
-### Option A: One import
-
-Add one line to the top of your script:
-
-```python
-import trickle.auto
-```
-
-Run your script normally:
+## Quick Start: Debug and Understand Your Code
 
 ```bash
-python app.py
+# Step 1: Run your code through trickle (zero code changes)
+trickle run python app.py
+
+# Step 2: See what happened
+trickle summary                  # errors, queries, N+1 patterns, root causes
+trickle explain app.py           # functions, call graph, data flow, variables
+trickle flamegraph               # where is time being spent?
+
+# Step 3: Run tests with observability
+trickle test "python -m pytest"  # structured pass/fail + runtime context
+
+# Step 4: Fix and verify
+trickle verify --baseline        # save metrics
+# ... fix the code ...
+trickle run python app.py        # re-run
+trickle verify                   # "Fix verified — 3 metrics improved"
 ```
 
-When it finishes, `.pyi` files appear next to your source files with full type stubs. Your IDE picks them up immediately.
+**What trickle captures automatically:**
+- Function signatures with types, timing, sample I/O
+- Variable values at every line (including tensor shapes for ML)
+- Database queries (sqlite3, psycopg2, pymysql, SQLAlchemy, Django ORM) with timing
+- Errors with variable values at the error location
+- Logs (logging, loguru, structlog)
+- N+1 query detection, slow function alerts, memory profiling
 
-### Option B: CLI wrapper (no code changes)
+### Frameworks — zero config
+
+```bash
+trickle run python app.py                      # Flask
+trickle run uvicorn app:app                    # FastAPI
+trickle run python manage.py runserver         # Django
+trickle run gunicorn app:app                   # Gunicorn
+trickle run python -m pytest tests/            # Pytest
+```
+
+All work the same — trickle auto-detects the framework and instruments it.
+
+## Quick Start: Auto-Generate Types
+
+### Option A: CLI wrapper (no code changes)
 
 ```bash
 trickle run python app.py
 ```
 
-Same result, no import needed.
+`.pyi` files appear next to your source files. Your IDE picks them up immediately.
 
-### Option C: Module runner (no CLI needed)
+### Option B: One import
+
+```python
+import trickle.auto
+```
+
+Run normally: `python app.py`. Same result.
+
+### Option C: Module runner
 
 ```bash
 TRICKLE_LOCAL=1 python -m trickle app.py

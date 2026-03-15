@@ -113,18 +113,19 @@ Also generates: React Query hooks, SWR hooks, Axios clients, MSW mock handlers, 
 
 ### Backend / API Developers
 
-> *"I want types and OpenAPI specs without maintaining them by hand."*
+> *"I want to see what my API actually does at runtime — queries, errors, performance."*
 
-Run your server through trickle. It captures every request/response type and generates TypeScript interfaces, OpenAPI specs, and validation middleware.
+Run your server through trickle. Zero code changes. It captures functions, database queries, errors, and detects N+1 patterns automatically.
 
 ```bash
-trickle run node app.js          # or: trickle run uvicorn app:app
-
-# After hitting some endpoints:
-trickle codegen --handlers       # typed Express handler signatures
-trickle openapi                  # OpenAPI 3.0 spec from real traffic
-trickle codegen --zod            # Zod validation schemas
+trickle run node app.js          # or: trickle run python app.py
+trickle summary                   # errors, queries, N+1 patterns, root causes
+trickle explain src/routes.js     # functions, call graph, data flow, queries
+trickle test                      # run tests with observability (jest/vitest/pytest)
+trickle flamegraph                # where is time being spent?
 ```
+
+Also generates types: `trickle codegen` (TypeScript), `trickle openapi` (OpenAPI spec), `trickle codegen --zod` (Zod schemas).
 
 **[Full Backend Developer Guide →](usecases/backend-api-developer.md)**
 
@@ -188,58 +189,27 @@ trickle test --generate          # auto-generate API tests
 
 > *"My agent keeps adding console.log to debug. There must be a better way."*
 
-Trickle caches **full runtime state** so AI agents can debug autonomously without re-running your code:
+One command sets up everything — CLAUDE.md, MCP server config, and project settings:
 
 ```bash
-trickle run node app.js          # capture everything once
+trickle init                     # creates CLAUDE.md + .claude/settings.json
+trickle run node app.js          # capture runtime data (zero code changes)
 ```
 
-Agents then query the cached data — no more edit→run→read cycles:
+Agents use **26 MCP tools** for autonomous debugging:
 
-```bash
-trickle context src/api.ts --annotated   # source + runtime values
 ```
-```
-  13 | const user = createUser(body.name, body.email);  // user = {"id":1,"name":"Alice",...}
-  19 | const count = users.length;                       // count = 3
-  25 | const user = getUser(id);                         // user = null  ← bug!
-```
-
-**What agents can query (12 data types):**
-
-| Data | Command | Description |
-|------|---------|-------------|
-| Health check | `trickle doctor` | One-shot overview: status, counts, issues, memory |
-| Variables | `trickle context <file>` | Types + actual values at every line |
-| Functions | `trickle functions` | Signatures with parameter types + timing |
-| Call trace | `trickle context --trace` | Which function called which, execution flow |
-| Errors | `trickle context --errors` | Stack trace + nearby variable values |
-| DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts (Prisma, Sequelize, TypeORM, SQLAlchemy, Knex, Drizzle auto-patched) |
-| HTTP | `trickle context --http` | Fetch calls with status codes + response types |
-| Logs | `trickle context --logs` | Structured logging events with levels + context (winston, pino, bunyan, loguru, structlog auto-patched) |
-| Console | `trickle context --console` | All stdout/stderr with timestamps |
-| Memory | `trickle context --profile` | RSS + heap snapshots at start/end |
-| Traces | `trickle context --traces` | Distributed spans across microservices |
-| Environment | `trickle context --env` | Runtime version, env vars, detected frameworks |
-
-**Auto-remediation pipeline:**
-```bash
-trickle run python app.py       # capture everything
-trickle monitor                  # detect N+1 queries, slow functions, errors
-trickle heal                     # generate fix plans for agents
-trickle verify                   # compare before/after metrics
+Agent workflow:
+1. get_recommended_actions     → "You have 2 N+1 queries. Call get_last_run_summary."
+2. get_last_run_summary        → errors, queries, root causes, fix recommendations
+3. explain_file("src/api.ts")  → functions, call graph, data flow, queries, variables
+4. save_baseline               → save metrics before fixing
+5. (agent fixes the code)
+6. refresh_runtime_data        → re-run the app
+7. compare_with_baseline       → "Fix verified — 3 metrics improved, 0 regressed"
 ```
 
-**MCP Integration** — 18 tools for direct agent access:
-```json
-{ "mcpServers": { "trickle": { "command": "npx", "args": ["trickle-cli", "mcp-server"] } } }
-```
-
-Key tools: `get_doctor` (start here), `get_heal_plans`, `get_alerts`, `get_call_trace`, `get_database_queries`, `get_logs`, `get_distributed_traces`, `get_performance_profile`, `get_environment`, and 9 more.
-
-```bash
-trickle init                     # creates CLAUDE.md with agent debugging workflow
-```
+Also: `run_tests` (structured pass/fail), `get_flamegraph` (performance hotspots), `get_errors` (errors with variable context), `get_new_alerts` (production monitoring).
 
 **[Full AI Agent Guide →](usecases/ai-agent.md)** | **[LLM Tool Schema Guide →](usecases/ai-developer.md)**
 

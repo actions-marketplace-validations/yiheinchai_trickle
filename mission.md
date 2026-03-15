@@ -5,15 +5,21 @@ For now, i want you to specifically focus on:
 Go through every part of the trickle platform and make it agent first, meaning that it is designed primary to be used by AI agents, the goal is 10-100x improvement in agent capability with trickle compared to without trickle.
 
 The vision is to have AI agents eg claude code run autonomously as a on-call engineer responding the incidences and debugging and fixing autonomously in prod. Trickle is the important part to give the AI agent all the information required to fix the issue.
+
+As a key point for the agent first approach, i want you to use trickle when developing trickle (since you are an agent), and you will be able to identify any pain points in the process.
 </higher directive>
 
 <focus point>
-Shipped: Post-run auto-summary (summary.json + get_last_run_summary MCP tool + trickle summary CLI) — agents get status, errors, queries, N+1 patterns, function signatures, logs, memory, alerts, and fix recommendations in a single call instead of 5-10 separate MCP calls.
+Shipped recently:
+- Post-run auto-summary (summary.json + get_last_run_summary MCP tool) — agents get everything in one call
+- Smart test runner (`trickle test` + `run_tests` MCP tool) — structured pass/fail with runtime context at failure points
+- Fixed Python observe_runner `-m module` flag for pytest/uvicorn/gunicorn
+- 20 MCP tools total
 
-Next priorities:
-1. Agent action tools — MCP tools that let agents DO things (apply fixes, run tests, compare before/after), not just observe
-2. Smart test runner — `trickle test` that runs tests with full observability and returns structured pass/fail with runtime context at failure points
-3. Codebase understanding — `trickle explain <file>` showing data flow, callers, callees, queries triggered by a code path
+Use trickle when developing trickle (dogfooding). Next priorities:
+1. Agent action tools — MCP tools that let agents apply fixes, run before/after comparisons
+2. Codebase understanding — `trickle explain <file>` showing data flow, callers, callees, queries triggered by a code path
+3. Production incident workflow — automated detect → diagnose → fix → verify loop for on-call agents
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

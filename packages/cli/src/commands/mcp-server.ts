@@ -269,6 +269,17 @@ function getErrors(): unknown {
   return { errors: errors.length > 0 ? errors : "No errors recorded." };
 }
 
+function getConsoleOutput(): unknown {
+  const file = path.join(findTrickleDir(), "console.jsonl");
+  if (!fs.existsSync(file)) return { output: "No console output captured. Run the app with trickle first." };
+  const lines: unknown[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
+    try { lines.push(JSON.parse(line)); } catch {}
+  }
+  if (lines.length === 0) return { output: "No console output recorded." };
+  return { output: lines };
+}
+
 function getHttpRequests(): unknown {
   const funcs = loadFuncs();
   const httpObs = funcs.filter(f =>
@@ -392,6 +403,11 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "get_console_output",
+    description: "Get console.log/error/warn output from the last application run. Shows what the app printed to stdout/stderr.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_http_requests",
     description: "Get all HTTP requests (fetch calls) made by the application, with URL, status, response time, and response type.",
     inputSchema: { type: "object", properties: {} },
@@ -443,6 +459,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_annotated_source": result = getAnnotatedSource(args); break;
           case "get_function_signatures": result = getFunctionSignatures(); break;
           case "get_errors": result = getErrors(); break;
+          case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;
           case "refresh_runtime_data": result = refreshData(args); break;

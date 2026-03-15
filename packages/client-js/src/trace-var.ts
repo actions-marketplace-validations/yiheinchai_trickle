@@ -63,6 +63,47 @@ export function initVarTracer(opts: { debug?: boolean } = {}): void {
   if (debugMode) {
     console.log(`[trickle/vars] Variable tracing enabled → ${varsFilePath}`);
   }
+
+  // Capture console output to .trickle/console.jsonl for agent debugging
+  if (process.env.TRICKLE_CAPTURE_CONSOLE !== '0') {
+    patchConsole(dir);
+  }
+}
+
+/** Patch console.log/error/warn to also write to console.jsonl */
+function patchConsole(dir: string): void {
+  const consoleFile = path.join(dir, 'console.jsonl');
+  // Clear previous console log
+  try { fs.writeFileSync(consoleFile, ''); } catch { return; }
+
+  const origLog = console.log;
+  const origError = console.error;
+  const origWarn = console.warn;
+
+  function capture(level: string, args: unknown[]): void {
+    try {
+      const message = args.map(a =>
+        typeof a === 'string' ? a : JSON.stringify(a)
+      ).join(' ');
+      // Skip trickle's own output
+      if (message.startsWith('[trickle')) return;
+      const record = { level, message: message.substring(0, 500), timestamp: Date.now() };
+      fs.appendFileSync(consoleFile, JSON.stringify(record) + '\n');
+    } catch {}
+  }
+
+  console.log = function (...args: unknown[]) {
+    capture('log', args);
+    return origLog.apply(console, args);
+  };
+  console.error = function (...args: unknown[]) {
+    capture('error', args);
+    return origError.apply(console, args);
+  };
+  console.warn = function (...args: unknown[]) {
+    capture('warn', args);
+    return origWarn.apply(console, args);
+  };
 }
 
 /**

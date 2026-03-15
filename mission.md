@@ -6,11 +6,14 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.153. Shipped trickle diff-runs — compare runtime behavior between runs (new/removed
-functions, query changes, performance regressions, error changes, verdict). Also shipped
-trickle fix (code patches), OTLP export, Prometheus, Slack/Discord webhooks, GitHub PR comments.
+CLI 0.1.154. 28 MCP tools. Shipped diff_runs MCP tool — agents can save snapshots and compare
+runtime behavior between runs. Investigated per-request tracing — needs request correlation
+IDs in middleware (architectural change, not yet built).
 
-27 MCP tools. Next: session replay (per-request tracing), anomaly detection, team dashboards.
+Recent TAM features shipped: diff-runs, fix suggestions, OTLP export, Prometheus, Slack/Discord,
+GitHub PR comments, flamegraph, root cause analysis, inline issue summary.
+
+Next: per-request correlation IDs in Express/Flask middleware, anomaly detection baselines.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

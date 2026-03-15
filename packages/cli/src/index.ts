@@ -606,6 +606,22 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle anomaly
+program
+  .command("anomaly")
+  .description("Detect performance anomalies — compare current latency against learned baseline")
+  .option("--learn", "Learn normal baseline from current data")
+  .option("--json", "Structured JSON output")
+  .action(async (opts) => {
+    if (opts.learn) {
+      const { learnBaseline } = await import("./commands/anomaly");
+      learnBaseline();
+    } else {
+      const { detectAnomalies } = await import("./commands/anomaly");
+      detectAnomalies({ json: opts.json });
+    }
+  });
+
 // trickle diff-runs
 program
   .command("diff-runs")

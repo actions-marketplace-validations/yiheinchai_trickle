@@ -700,6 +700,16 @@ const TOOLS = [
     },
   },
   {
+    name: "detect_anomalies",
+    description: "Detect performance anomalies by comparing current function/query latencies against a learned baseline. Call with learn: true first to establish normal behavior, then call without to detect deviations (>2σ from mean). Returns anomalies sorted by severity.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        learn: { type: "boolean", description: "If true, learns the current data as the normal baseline" },
+      },
+    },
+  },
+  {
     name: "get_request_trace",
     description: "Show everything that happened during a single HTTP request — functions called, database queries, timing. Pass a requestId to filter, or omit to list all requests. Requires trickle-observe >= 0.2.115 with per-request correlation enabled.",
     inputSchema: {
@@ -866,6 +876,27 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "detect_anomalies": {
+            try {
+              if (args.learn) {
+                const { learnBaseline } = require('./anomaly');
+                const origLog = console.log;
+                console.log = () => {};
+                learnBaseline(findTrickleDir());
+                console.log = origLog;
+                result = { learned: true, message: 'Baseline learned. Run the app again and call detect_anomalies to find deviations.' };
+              } else {
+                const { detectAnomalies } = require('./anomaly');
+                const origLog = console.log;
+                console.log = () => {};
+                result = detectAnomalies({ dir: findTrickleDir() });
+                console.log = origLog;
+              }
+            } catch (e: any) {
+              result = { error: `Anomaly detection failed: ${e.message}` };
             }
             break;
           }

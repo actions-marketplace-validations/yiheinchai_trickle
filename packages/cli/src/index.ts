@@ -606,6 +606,17 @@ program
     runExplain({ file, json: opts.json });
   });
 
+// trickle deps
+program
+  .command("deps")
+  .description("Visualize module dependency graph from call traces")
+  .option("--json", "Structured JSON output")
+  .option("--mermaid", "Output Mermaid diagram (paste into GitHub/docs)")
+  .action(async (opts) => {
+    const { runDeps } = await import("./commands/deps");
+    runDeps({ json: opts.json, mermaid: opts.mermaid });
+  });
+
 // trickle cost
 program
   .command("cost")

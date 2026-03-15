@@ -8,10 +8,10 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-React + Python inline hints are comprehensive with live-updating values. JS: JSX expressions, React renders/hooks/state. Python: training loop metrics now update (loss 10->5->3.3). Vite HMR + Next.js fetch + Remix. trickle init auto-detects frameworks. Next areas:
+React + Python inline hints are comprehensive with live-updating values across all tracer paths (entry file, import hook, sys.settrace, notebook). JS: JSX expressions, React renders/hooks/state. Python: training loop metrics update in scripts and notebooks. Vite HMR + Next.js fetch + Remix. trickle init auto-detects frameworks. Next areas:
 - Consider adding React DevTools-style component tree visualization using the captured render data
 - Explore tracing custom hook return values with richer type info
-- Add Python notebook (.ipynb) live variable display improvements
+- Improve type display for complex nested React props in VSCode hints
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -47,10 +47,17 @@ Full agent observability stack is now feature-complete across both languages:
 
 Validated: Full agent debugging workflow tested on real 4-file Python project (app→service→db with sqlite3). All data captured: 47 vars, 4 functions, 18 SQL queries, 26 call trace events, 46 console lines. Agent can identify N+1 queries, missing users, slow initialization.
 
-The agent observability stack is feature-complete and validated. Consider:
+Added: WebSocket tracing (ws, socket.io) with get_websocket_events MCP tool. Now 11 MCP tools.
+
+Full observability coverage:
+- Variables, functions+timing, call trace, DB queries (SQL/Redis/MongoDB), HTTP requests, WebSocket messages, console output, errors
+- 11 database/transport drivers auto-patched (JS + Python)
+- 11 MCP tools for agent access
+
+Consider next:
 1. Go/Rust support for broader TAM
-2. Performance profiling data (memory, CPU)
-3. Streaming/WebSocket tracing
+2. Performance profiling (memory, CPU flamegraphs)
+3. Python WebSocket tracing (websockets, aiohttp)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

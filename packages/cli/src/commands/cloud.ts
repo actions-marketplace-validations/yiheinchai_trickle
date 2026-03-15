@@ -344,6 +344,213 @@ export async function cloudStatus(): Promise<void> {
   console.log('');
 }
 
+// ── Team commands ──
+
+export async function teamCreate(opts: { name: string }): Promise<void> {
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
+    return;
+  }
+
+  console.log('');
+  console.log(chalk.bold('  trickle cloud team create'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+
+  try {
+    const res = await cloudFetch('/api/v1/teams', config, {
+      method: 'POST',
+      body: JSON.stringify({ name: opts.name }),
+    });
+
+    if (res.ok) {
+      const data = await res.json() as any;
+      console.log(chalk.green(`  ✓ Team "${data.name}" created`));
+      console.log(`  ID: ${chalk.cyan(data.id)}`);
+      console.log(chalk.gray('  You are the owner. Invite members with:'));
+      console.log(chalk.gray(`    trickle cloud team invite --team ${data.id} --key-id <their-key-id>`));
+    } else {
+      const err = await res.json().catch(() => ({})) as any;
+      console.log(chalk.red(`  ✗ Failed: ${err.error || res.statusText}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
+
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+  console.log('');
+}
+
+export async function teamList(): Promise<void> {
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
+    return;
+  }
+
+  console.log('');
+  console.log(chalk.bold('  trickle cloud team list'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+
+  try {
+    const res = await cloudFetch('/api/v1/teams', config);
+
+    if (res.ok) {
+      const data = await res.json() as any;
+      if (data.teams.length === 0) {
+        console.log(chalk.gray('  No teams yet. Create one with: trickle cloud team create <name>'));
+      } else {
+        for (const t of data.teams) {
+          const roleBadge = t.role === 'owner' ? chalk.green(t.role) :
+            t.role === 'admin' ? chalk.cyan(t.role) :
+            t.role === 'viewer' ? chalk.gray(t.role) : chalk.white(t.role);
+          console.log(`  ${chalk.bold(t.name)} (${roleBadge}) — ${t.members} members, ${t.projects} projects`);
+          console.log(chalk.gray(`    ID: ${t.id}`));
+        }
+      }
+    } else {
+      console.log(chalk.red(`  ✗ Failed: ${res.status}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
+
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+  console.log('');
+}
+
+export async function teamInfo(opts: { team: string }): Promise<void> {
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
+    return;
+  }
+
+  console.log('');
+  console.log(chalk.bold('  trickle cloud team info'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+
+  try {
+    const res = await cloudFetch(`/api/v1/teams/${encodeURIComponent(opts.team)}`, config);
+
+    if (res.ok) {
+      const data = await res.json() as any;
+      console.log(`  Team: ${chalk.bold(data.name)} (your role: ${data.role})`);
+      console.log('');
+
+      if (data.members.length > 0) {
+        console.log(chalk.gray('  Members:'));
+        for (const m of data.members) {
+          const roleBadge = m.role === 'owner' ? chalk.green(m.role) :
+            m.role === 'admin' ? chalk.cyan(m.role) :
+            m.role === 'viewer' ? chalk.gray(m.role) : chalk.white(m.role);
+          const email = m.email ? ` (${m.email})` : '';
+          console.log(`    ${m.keyPrefix}... ${m.keyName}${email} — ${roleBadge}`);
+        }
+      }
+
+      if (data.projects.length > 0) {
+        console.log('');
+        console.log(chalk.gray('  Projects:'));
+        for (const p of data.projects) {
+          console.log(`    ${chalk.bold(p.name)} — ${formatBytes(p.size)}, updated ${new Date(p.updatedAt).toLocaleDateString()}`);
+        }
+      }
+    } else if (res.status === 404) {
+      console.log(chalk.yellow(`  Team not found or you're not a member.`));
+    } else {
+      console.log(chalk.red(`  ✗ Failed: ${res.status}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
+
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+  console.log('');
+}
+
+export async function teamInvite(opts: { team: string; keyId: string; role?: string }): Promise<void> {
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
+    return;
+  }
+
+  console.log('');
+  console.log(chalk.bold('  trickle cloud team invite'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+
+  try {
+    const res = await cloudFetch(`/api/v1/teams/${encodeURIComponent(opts.team)}/members`, config, {
+      method: 'POST',
+      body: JSON.stringify({ keyId: opts.keyId, role: opts.role || 'member' }),
+    });
+
+    if (res.ok) {
+      const data = await res.json() as any;
+      console.log(chalk.green(`  ✓ ${data.message}`));
+    } else {
+      const err = await res.json().catch(() => ({})) as any;
+      console.log(chalk.red(`  ✗ ${err.error || res.statusText}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
+
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+  console.log('');
+}
+
+export async function teamRemove(opts: { team: string; keyId: string }): Promise<void> {
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
+    return;
+  }
+
+  try {
+    const res = await cloudFetch(`/api/v1/teams/${encodeURIComponent(opts.team)}/members/${encodeURIComponent(opts.keyId)}`, config, {
+      method: 'DELETE',
+    });
+
+    if (res.ok) {
+      const data = await res.json() as any;
+      console.log(chalk.green(`  ✓ ${data.message}`));
+    } else {
+      const err = await res.json().catch(() => ({})) as any;
+      console.log(chalk.red(`  ✗ ${err.error || res.statusText}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
+}
+
+export async function teamAddProject(opts: { team: string; project?: string }): Promise<void> {
+  const config = loadConfig();
+  if (!config.token) {
+    console.log(chalk.yellow('  Not logged in. Run: trickle cloud login'));
+    return;
+  }
+
+  const project = opts.project || path.basename(process.cwd());
+
+  try {
+    const res = await cloudFetch(`/api/v1/teams/${encodeURIComponent(opts.team)}/projects`, config, {
+      method: 'POST',
+      body: JSON.stringify({ project }),
+    });
+
+    if (res.ok) {
+      console.log(chalk.green(`  ✓ Project "${project}" added to team`));
+    } else {
+      const err = await res.json().catch(() => ({})) as any;
+      console.log(chalk.red(`  ✗ ${err.error || res.statusText}`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  Cloud service not available.`));
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (!bytes || bytes < 1024) return `${bytes || 0}B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(0)}KB`;

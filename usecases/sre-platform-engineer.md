@@ -139,7 +139,39 @@ Production mode:
 trickle monitor --webhook https://hooks.slack.com/services/... --watch
 ```
 
-## Use Case 7: MCP Server for AI Agents
+## Use Case 7: Team Management (RBAC)
+
+```bash
+# Create a team for your org
+trickle cloud team create "Platform Engineering"
+#   ✓ Team "Platform Engineering" created
+#   ID: abc123...
+
+# Invite team members (they need an API key first via `trickle cloud login`)
+trickle cloud team invite --team abc123 --key-id <bobs-key-id> --role admin
+trickle cloud team invite --team abc123 --key-id <carols-key-id> --role member
+trickle cloud team invite --team abc123 --key-id <daves-key-id> --role viewer
+
+# Share a project with the team
+trickle cloud team add-project --team abc123 --project my-api
+
+# Team members can now pull and view your project
+# (Bob runs on his machine:)
+trickle cloud pull  # downloads team project data
+
+# View team details
+trickle cloud team info --team abc123
+```
+
+**Roles:**
+| Role | View dashboards | Push data | Manage projects | Invite members | Remove members |
+|------|:-:|:-:|:-:|:-:|:-:|
+| **viewer** | ✓ | | | | |
+| **member** | ✓ | ✓ | ✓ (own) | | |
+| **admin** | ✓ | ✓ | ✓ | ✓ | ✓ (below rank) |
+| **owner** | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+## Use Case 8: MCP Server for AI Agents
 
 ```json
 {

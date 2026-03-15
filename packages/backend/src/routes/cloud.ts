@@ -208,11 +208,29 @@ router.get("/pull", requireAuth, (req: AuthedRequest, res: Response) => {
     return;
   }
 
-  const projectId = `${req.keyId}:${project}`;
-
-  const rows = db.prepare(
+  // Try own project first, then team access
+  let projectId = `${req.keyId}:${project}`;
+  let rows = db.prepare(
     "SELECT filename, content FROM project_data WHERE project_id = ?"
   ).all(projectId) as any[];
+
+  // If not found, search team projects by name
+  if (rows.length === 0) {
+    const teamProject = db.prepare(`
+      SELECT tp.project_id
+      FROM team_projects tp
+      JOIN team_members tm ON tm.team_id = tp.team_id AND tm.key_id = ?
+      JOIN projects p ON p.id = tp.project_id AND p.name = ?
+      LIMIT 1
+    `).get(req.keyId, project) as any;
+
+    if (teamProject) {
+      projectId = teamProject.project_id;
+      rows = db.prepare(
+        "SELECT filename, content FROM project_data WHERE project_id = ?"
+      ).all(projectId) as any[];
+    }
+  }
 
   if (rows.length === 0) {
     res.status(404).json({ error: "No data found for this project" });
@@ -230,7 +248,8 @@ router.get("/pull", requireAuth, (req: AuthedRequest, res: Response) => {
 // ── GET /api/v1/projects — List projects ──
 
 router.get("/projects", requireAuth, (req: AuthedRequest, res: Response) => {
-  const rows = db.prepare(`
+  // Own projects
+  const ownRows = db.prepare(`
     SELECT p.id, p.name, p.created_at, p.updated_at,
       (SELECT COUNT(*) FROM project_data pd WHERE pd.project_id = p.id) as file_count,
       (SELECT SUM(pd.size_bytes) FROM project_data pd WHERE pd.project_id = p.id) as total_bytes
@@ -239,16 +258,42 @@ router.get("/projects", requireAuth, (req: AuthedRequest, res: Response) => {
     ORDER BY p.updated_at DESC
   `).all(req.keyId) as any[];
 
-  res.json({
-    projects: rows.map((r: any) => ({
+  // Team projects (not owned by this key)
+  const teamRows = db.prepare(`
+    SELECT DISTINCT p.id, p.name, p.created_at, p.updated_at, t.name as team_name,
+      (SELECT COUNT(*) FROM project_data pd WHERE pd.project_id = p.id) as file_count,
+      (SELECT SUM(pd.size_bytes) FROM project_data pd WHERE pd.project_id = p.id) as total_bytes
+    FROM team_projects tp
+    JOIN team_members tm ON tm.team_id = tp.team_id AND tm.key_id = ?
+    JOIN projects p ON p.id = tp.project_id AND p.owner_key_id != ?
+    JOIN teams t ON t.id = tp.team_id
+    ORDER BY p.updated_at DESC
+  `).all(req.keyId, req.keyId) as any[];
+
+  const projects = ownRows.map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    files: r.file_count || 0,
+    size: r.total_bytes || 0,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    owned: true,
+  }));
+
+  for (const r of teamRows) {
+    projects.push({
       id: r.id,
       name: r.name,
       files: r.file_count || 0,
       size: r.total_bytes || 0,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
-    })),
-  });
+      owned: false,
+      team: r.team_name,
+    } as any);
+  }
+
+  res.json({ projects });
 });
 
 // ── POST /api/v1/projects — Create project ──
@@ -350,10 +395,18 @@ router.get("/shared/:id", (req: Request, res: Response) => {
 router.get("/dashboard/:projectId", requireAuth, (req: AuthedRequest, res: Response) => {
   const projectId = decodeURIComponent(req.params.projectId);
 
-  // Verify ownership
-  const proj = db.prepare(
+  // Verify ownership or team access
+  let proj = db.prepare(
     "SELECT name FROM projects WHERE id = ? AND owner_key_id = ?"
   ).get(projectId, req.keyId) as any;
+
+  if (!proj) {
+    // Check team access
+    const teamAccess = hasTeamAccess(projectId, req.keyId!);
+    if (teamAccess) {
+      proj = db.prepare("SELECT name FROM projects WHERE id = ?").get(projectId) as any;
+    }
+  }
 
   if (!proj) {
     res.status(404).json({ error: "Project not found" });
@@ -376,6 +429,337 @@ router.get("/dashboard/:projectId", requireAuth, (req: AuthedRequest, res: Respo
 
   res.json({ project: proj.name, files, fileCount: rows.length });
 });
+
+// ── Team RBAC helpers ──
+
+type TeamRole = "owner" | "admin" | "member" | "viewer";
+
+const ROLE_RANK: Record<TeamRole, number> = { owner: 4, admin: 3, member: 2, viewer: 1 };
+
+function getTeamRole(teamId: string, keyId: string): TeamRole | null {
+  const row = db.prepare(
+    "SELECT role FROM team_members WHERE team_id = ? AND key_id = ?"
+  ).get(teamId, keyId) as any;
+  return row ? row.role as TeamRole : null;
+}
+
+function requireTeamRole(teamId: string, keyId: string, minRole: TeamRole): TeamRole | null {
+  const role = getTeamRole(teamId, keyId);
+  if (!role) return null;
+  if (ROLE_RANK[role] < ROLE_RANK[minRole]) return null;
+  return role;
+}
+
+// ── POST /api/v1/teams — Create a team ──
+
+router.post("/teams", requireAuth, (req: AuthedRequest, res: Response) => {
+  const { name } = req.body;
+  if (!name || typeof name !== "string" || name.trim().length === 0) {
+    res.status(400).json({ error: "team name required" });
+    return;
+  }
+
+  const teamId = generateId();
+  const keyId = req.keyId!;
+
+  db.transaction(() => {
+    db.prepare(
+      "INSERT INTO teams (id, name, created_by) VALUES (?, ?, ?)"
+    ).run(teamId, name.trim(), keyId);
+
+    db.prepare(
+      "INSERT INTO team_members (team_id, key_id, role, invited_by) VALUES (?, ?, 'owner', ?)"
+    ).run(teamId, keyId, keyId);
+  })();
+
+  res.status(201).json({ id: teamId, name: name.trim(), role: "owner" });
+});
+
+// ── GET /api/v1/teams — List teams for current user ──
+
+router.get("/teams", requireAuth, (req: AuthedRequest, res: Response) => {
+  const rows = db.prepare(`
+    SELECT t.id, t.name, t.created_at, tm.role,
+      (SELECT COUNT(*) FROM team_members tm2 WHERE tm2.team_id = t.id) as member_count,
+      (SELECT COUNT(*) FROM team_projects tp WHERE tp.team_id = t.id) as project_count
+    FROM teams t
+    JOIN team_members tm ON tm.team_id = t.id AND tm.key_id = ?
+    ORDER BY t.name
+  `).all(req.keyId) as any[];
+
+  res.json({
+    teams: rows.map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      role: r.role,
+      members: r.member_count,
+      projects: r.project_count,
+      createdAt: r.created_at,
+    })),
+  });
+});
+
+// ── GET /api/v1/teams/:id — Get team details ──
+
+router.get("/teams/:id", requireAuth, (req: AuthedRequest, res: Response) => {
+  const teamId = req.params.id;
+  const role = getTeamRole(teamId, req.keyId!);
+  if (!role) {
+    res.status(404).json({ error: "Team not found" });
+    return;
+  }
+
+  const team = db.prepare("SELECT id, name, created_at FROM teams WHERE id = ?").get(teamId) as any;
+  if (!team) {
+    res.status(404).json({ error: "Team not found" });
+    return;
+  }
+
+  const members = db.prepare(`
+    SELECT tm.key_id, tm.role, tm.joined_at, ak.key_prefix, ak.name as key_name, ak.owner_email
+    FROM team_members tm
+    JOIN api_keys ak ON ak.id = tm.key_id
+    WHERE tm.team_id = ?
+    ORDER BY tm.joined_at
+  `).all(teamId) as any[];
+
+  const projects = db.prepare(`
+    SELECT tp.project_id, p.name, p.updated_at,
+      (SELECT SUM(pd.size_bytes) FROM project_data pd WHERE pd.project_id = p.id) as total_bytes
+    FROM team_projects tp
+    JOIN projects p ON p.id = tp.project_id
+    WHERE tp.team_id = ?
+    ORDER BY p.updated_at DESC
+  `).all(teamId) as any[];
+
+  res.json({
+    id: team.id,
+    name: team.name,
+    role,
+    createdAt: team.created_at,
+    members: members.map((m: any) => ({
+      keyId: m.key_id,
+      keyPrefix: m.key_prefix,
+      keyName: m.key_name,
+      email: m.owner_email,
+      role: m.role,
+      joinedAt: m.joined_at,
+    })),
+    projects: projects.map((p: any) => ({
+      id: p.project_id,
+      name: p.name,
+      size: p.total_bytes || 0,
+      updatedAt: p.updated_at,
+    })),
+  });
+});
+
+// ── POST /api/v1/teams/:id/members — Add a member (invite) ──
+
+router.post("/teams/:id/members", requireAuth, (req: AuthedRequest, res: Response) => {
+  const teamId = req.params.id;
+  const callerRole = requireTeamRole(teamId, req.keyId!, "admin");
+  if (!callerRole) {
+    res.status(403).json({ error: "Must be admin or owner to invite members" });
+    return;
+  }
+
+  const { keyId, role } = req.body;
+  if (!keyId) {
+    res.status(400).json({ error: "keyId required — the API key ID of the member to add" });
+    return;
+  }
+
+  const memberRole = (role || "member") as TeamRole;
+  if (!ROLE_RANK[memberRole]) {
+    res.status(400).json({ error: "Invalid role. Must be: owner, admin, member, or viewer" });
+    return;
+  }
+
+  // Cannot assign role >= your own (except owner can do anything)
+  if (callerRole !== "owner" && ROLE_RANK[memberRole] >= ROLE_RANK[callerRole]) {
+    res.status(403).json({ error: "Cannot assign a role equal to or higher than your own" });
+    return;
+  }
+
+  // Verify the key exists
+  const key = db.prepare("SELECT id, key_prefix, name FROM api_keys WHERE id = ? AND revoked = 0").get(keyId) as any;
+  if (!key) {
+    res.status(404).json({ error: "API key not found or revoked" });
+    return;
+  }
+
+  try {
+    db.prepare(
+      "INSERT INTO team_members (team_id, key_id, role, invited_by) VALUES (?, ?, ?, ?)"
+    ).run(teamId, keyId, memberRole, req.keyId);
+
+    res.status(201).json({
+      teamId,
+      keyId,
+      keyPrefix: key.key_prefix,
+      role: memberRole,
+      message: `Added ${key.name} (${key.key_prefix}...) as ${memberRole}`,
+    });
+  } catch (err: any) {
+    if (err.message?.includes("UNIQUE")) {
+      res.status(409).json({ error: "Member already in team" });
+    } else {
+      throw err;
+    }
+  }
+});
+
+// ── PATCH /api/v1/teams/:id/members/:keyId — Change member role ──
+
+router.patch("/teams/:id/members/:keyId", requireAuth, (req: AuthedRequest, res: Response) => {
+  const teamId = req.params.id;
+  const targetKeyId = req.params.keyId;
+  const callerRole = requireTeamRole(teamId, req.keyId!, "admin");
+  if (!callerRole) {
+    res.status(403).json({ error: "Must be admin or owner to change roles" });
+    return;
+  }
+
+  const { role } = req.body;
+  if (!role || !ROLE_RANK[role as TeamRole]) {
+    res.status(400).json({ error: "Invalid role. Must be: owner, admin, member, or viewer" });
+    return;
+  }
+
+  const newRole = role as TeamRole;
+
+  // Cannot change someone with >= your role (unless you're owner)
+  const targetRole = getTeamRole(teamId, targetKeyId);
+  if (!targetRole) {
+    res.status(404).json({ error: "Member not found in team" });
+    return;
+  }
+
+  if (callerRole !== "owner") {
+    if (ROLE_RANK[targetRole] >= ROLE_RANK[callerRole]) {
+      res.status(403).json({ error: "Cannot change role of someone with equal or higher rank" });
+      return;
+    }
+    if (ROLE_RANK[newRole] >= ROLE_RANK[callerRole]) {
+      res.status(403).json({ error: "Cannot promote to equal or higher than your own role" });
+      return;
+    }
+  }
+
+  db.prepare(
+    "UPDATE team_members SET role = ? WHERE team_id = ? AND key_id = ?"
+  ).run(newRole, teamId, targetKeyId);
+
+  res.json({ teamId, keyId: targetKeyId, role: newRole });
+});
+
+// ── DELETE /api/v1/teams/:id/members/:keyId — Remove member ──
+
+router.delete("/teams/:id/members/:keyId", requireAuth, (req: AuthedRequest, res: Response) => {
+  const teamId = req.params.id;
+  const targetKeyId = req.params.keyId;
+
+  // Members can remove themselves; admins+ can remove others
+  const callerRole = getTeamRole(teamId, req.keyId!);
+  if (!callerRole) {
+    res.status(403).json({ error: "Not a member of this team" });
+    return;
+  }
+
+  const isSelf = targetKeyId === req.keyId;
+  if (!isSelf) {
+    if (ROLE_RANK[callerRole] < ROLE_RANK["admin"]) {
+      res.status(403).json({ error: "Must be admin or owner to remove other members" });
+      return;
+    }
+    const targetRole = getTeamRole(teamId, targetKeyId);
+    if (targetRole && callerRole !== "owner" && ROLE_RANK[targetRole!] >= ROLE_RANK[callerRole]) {
+      res.status(403).json({ error: "Cannot remove someone with equal or higher rank" });
+      return;
+    }
+  }
+
+  // Cannot remove the last owner
+  if (isSelf && callerRole === "owner") {
+    const ownerCount = db.prepare(
+      "SELECT COUNT(*) as c FROM team_members WHERE team_id = ? AND role = 'owner'"
+    ).get(teamId) as any;
+    if (ownerCount.c <= 1) {
+      res.status(400).json({ error: "Cannot leave — you are the last owner. Transfer ownership first." });
+      return;
+    }
+  }
+
+  db.prepare("DELETE FROM team_members WHERE team_id = ? AND key_id = ?").run(teamId, targetKeyId);
+  res.json({ ok: true, message: isSelf ? "Left team" : "Member removed" });
+});
+
+// ── POST /api/v1/teams/:id/projects — Add project to team ──
+
+router.post("/teams/:id/projects", requireAuth, (req: AuthedRequest, res: Response) => {
+  const teamId = req.params.id;
+  const callerRole = requireTeamRole(teamId, req.keyId!, "member");
+  if (!callerRole) {
+    res.status(403).json({ error: "Must be a team member to add projects" });
+    return;
+  }
+
+  const { project } = req.body;
+  if (!project) {
+    res.status(400).json({ error: "project name required" });
+    return;
+  }
+
+  // Verify project exists and caller owns it
+  const projectId = `${req.keyId}:${project}`;
+  const proj = db.prepare("SELECT id FROM projects WHERE id = ? AND owner_key_id = ?").get(projectId, req.keyId) as any;
+  if (!proj) {
+    res.status(404).json({ error: "Project not found or you don't own it" });
+    return;
+  }
+
+  try {
+    db.prepare(
+      "INSERT INTO team_projects (team_id, project_id, added_by) VALUES (?, ?, ?)"
+    ).run(teamId, projectId, req.keyId);
+    res.status(201).json({ teamId, projectId, project });
+  } catch (err: any) {
+    if (err.message?.includes("UNIQUE")) {
+      res.status(409).json({ error: "Project already in team" });
+    } else {
+      throw err;
+    }
+  }
+});
+
+// ── DELETE /api/v1/teams/:id/projects/:projectId — Remove project from team ──
+
+router.delete("/teams/:id/projects/:projectId", requireAuth, (req: AuthedRequest, res: Response) => {
+  const teamId = req.params.id;
+  const callerRole = requireTeamRole(teamId, req.keyId!, "admin");
+  if (!callerRole) {
+    res.status(403).json({ error: "Must be admin or owner to remove projects" });
+    return;
+  }
+
+  const projectId = decodeURIComponent(req.params.projectId);
+  db.prepare("DELETE FROM team_projects WHERE team_id = ? AND project_id = ?").run(teamId, projectId);
+  res.json({ ok: true });
+});
+
+// ── Helper: check if keyId has team access to a project ──
+
+function hasTeamAccess(projectId: string, keyId: string): { teamId: string; role: TeamRole } | null {
+  const row = db.prepare(`
+    SELECT tp.team_id, tm.role
+    FROM team_projects tp
+    JOIN team_members tm ON tm.team_id = tp.team_id AND tm.key_id = ?
+    WHERE tp.project_id = ?
+    LIMIT 1
+  `).get(keyId, projectId) as any;
+  return row ? { teamId: row.team_id, role: row.role as TeamRole } : null;
+}
 
 // ── Dashboard HTML generator ──
 

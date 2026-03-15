@@ -57,5 +57,35 @@ export function runCloudMigrations(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_project_data_project ON project_data(project_id);
     CREATE INDEX IF NOT EXISTS idx_push_history_project ON push_history(project_id);
     CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+
+    -- Teams: group multiple API keys under one org
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- Team members: links API keys to teams with roles
+    CREATE TABLE IF NOT EXISTS team_members (
+      team_id TEXT NOT NULL REFERENCES teams(id),
+      key_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member',
+      invited_by TEXT,
+      joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (team_id, key_id)
+    );
+
+    -- Team projects: links projects to teams for shared access
+    CREATE TABLE IF NOT EXISTS team_projects (
+      team_id TEXT NOT NULL REFERENCES teams(id),
+      project_id TEXT NOT NULL REFERENCES projects(id),
+      added_by TEXT,
+      added_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (team_id, project_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_team_members_key ON team_members(key_id);
+    CREATE INDEX IF NOT EXISTS idx_team_projects_project ON team_projects(project_id);
   `);
 }

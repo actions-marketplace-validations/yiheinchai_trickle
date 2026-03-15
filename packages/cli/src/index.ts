@@ -575,6 +575,45 @@ cloudCmd.command("status").description("Check cloud sync status").action(async (
   await cloudStatus();
 });
 
+// trickle cloud team
+const teamCmd = cloudCmd.command("team").description("Team management — invite members, manage roles (RBAC)");
+teamCmd.command("create <name>").description("Create a new team").action(async (name: string) => {
+  const { teamCreate } = await import("./commands/cloud");
+  await teamCreate({ name });
+});
+teamCmd.command("list").description("List your teams").action(async () => {
+  const { teamList } = await import("./commands/cloud");
+  await teamList();
+});
+teamCmd.command("info").description("Show team details, members, and projects")
+  .requiredOption("--team <id>", "Team ID")
+  .action(async (opts: any) => {
+    const { teamInfo } = await import("./commands/cloud");
+    await teamInfo(opts);
+  });
+teamCmd.command("invite").description("Add a member to a team")
+  .requiredOption("--team <id>", "Team ID")
+  .requiredOption("--key-id <id>", "API key ID of the member to invite")
+  .option("--role <role>", "Role: owner, admin, member, viewer", "member")
+  .action(async (opts: any) => {
+    const { teamInvite } = await import("./commands/cloud");
+    await teamInvite({ team: opts.team, keyId: opts.keyId, role: opts.role });
+  });
+teamCmd.command("remove").description("Remove a member from a team")
+  .requiredOption("--team <id>", "Team ID")
+  .requiredOption("--key-id <id>", "API key ID of the member to remove")
+  .action(async (opts: any) => {
+    const { teamRemove } = await import("./commands/cloud");
+    await teamRemove({ team: opts.team, keyId: opts.keyId });
+  });
+teamCmd.command("add-project").description("Share a project with your team")
+  .requiredOption("--team <id>", "Team ID")
+  .option("--project <name>", "Project name (defaults to current directory)")
+  .action(async (opts: any) => {
+    const { teamAddProject } = await import("./commands/cloud");
+    await teamAddProject({ team: opts.team, project: opts.project });
+  });
+
 // trickle heal
 program
   .command("heal")

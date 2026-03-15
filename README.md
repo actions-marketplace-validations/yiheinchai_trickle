@@ -328,6 +328,11 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `trickle mcp-server` | MCP server (15 tools) for AI agent access |
 | `trickle init` | Setup project + create CLAUDE.md for agents |
 | `trickle heal --json` | Structured fix plans for agent consumption |
+| **Team Management** | |
+| `trickle cloud team create <name>` | Create a team with you as owner |
+| `trickle cloud team invite` | Invite members with role-based access |
+| `trickle cloud team add-project` | Share a project with your team |
+| `trickle cloud team list` | List teams you belong to |
 
 ## Environment Variables
 
@@ -371,6 +376,16 @@ trickle cloud login --url http://your-server:4888
 ```
 
 The hosted dashboard shows alerts, errors, performance hotspots, database queries, and observed functions — all in a dark-themed UI accessible via a single URL.
+
+**Team Management (RBAC):**
+```bash
+trickle cloud team create "My Team"        # create a team
+trickle cloud team invite --team <id> --key-id <their-key-id> --role admin
+trickle cloud team add-project --team <id>  # share current project
+trickle cloud team list                     # list your teams
+```
+
+Four roles: **owner** (full control), **admin** (manage members/projects), **member** (push/pull), **viewer** (read-only). Team members can pull and view shared projects.
 
 **[Full Observability Platform Guide →](usecases/observability-platform.md)**
 

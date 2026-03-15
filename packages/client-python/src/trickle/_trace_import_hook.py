@@ -189,9 +189,13 @@ def _trickle_tv(_val, _name, _line, _func=None):
         _th = _trickle_json.dumps(_t, sort_keys=True)[:32]
         _s = None
         if hasattr(_val, 'shape') and hasattr(_val, 'dtype'):
-            _parts = [f'shape={{list(_val.shape)}}', f'dtype={{_val.dtype}}']
-            if hasattr(_val, 'device'): _parts.append(f'device={{_val.device}}')
-            _s = f'{{type(_val).__name__}}({{", ".join(_parts)}})'
+            _sh = _val.shape
+            if hasattr(_sh, '__len__') and len(_sh) == 0:
+                _s = _val.item() if hasattr(_val, 'item') else float(_val)
+            else:
+                _parts = [f'shape={{list(_sh)}}', f'dtype={{_val.dtype}}']
+                if hasattr(_val, 'device'): _parts.append(f'device={{_val.device}}')
+                _s = f'{{type(_val).__name__}}({{", ".join(_parts)}})'
         elif isinstance(_val, bool):
             _s = _val
         elif isinstance(_val, (int, float)):

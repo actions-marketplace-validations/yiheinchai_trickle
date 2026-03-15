@@ -492,6 +492,102 @@ function updateGitignore(dir: string): boolean {
   return true;
 }
 
+function createClaudeMd(dir: string, info: ProjectInfo): boolean {
+  const claudePath = path.join(dir, "CLAUDE.md");
+
+  // Don't overwrite existing CLAUDE.md
+  if (fs.existsSync(claudePath)) {
+    // Check if trickle section already exists
+    const existing = fs.readFileSync(claudePath, "utf-8");
+    if (existing.includes("trickle")) return false;
+
+    // Append trickle section to existing CLAUDE.md
+    const section = generateTrickleSection(info);
+    fs.writeFileSync(claudePath, existing.trimEnd() + "\n\n" + section, "utf-8");
+    return true;
+  }
+
+  // Create new CLAUDE.md with trickle instructions
+  const runCmd = info.isPython
+    ? `trickle run python ${info.entryFile || "app.py"}`
+    : `trickle run node ${info.entryFile || "app.js"}`;
+
+  const content = `# Project Instructions
+
+## Debugging with Runtime Data
+
+This project uses **trickle** for runtime type observability. When debugging issues,
+use the cached runtime data instead of adding console.log/print statements.
+
+### Quick Commands
+
+\`\`\`bash
+# See runtime variable values for a specific file
+trickle context src/api.ts
+
+# See values near a specific line (useful for debugging errors)
+trickle context src/api.ts:42
+
+# Compact output (less tokens)
+trickle context --compact
+
+# JSON output for programmatic use
+trickle context --json
+
+# See all observed function signatures
+trickle functions
+
+# See variable types and values
+trickle vars
+\`\`\`
+
+### When to Use
+
+- **Before debugging**: Run \`trickle context <file>\` to see what values variables
+  actually had at runtime — no need to add print statements or re-run the code.
+- **Understanding data flow**: Run \`trickle context --compact\` to see how data
+  flows through the application across files.
+- **After errors**: Run \`trickle context --errors\` to see variable values near
+  where errors occurred.
+
+### Refreshing Runtime Data
+
+If the runtime data is stale, re-run the app with trickle:
+
+\`\`\`bash
+${runCmd}
+\`\`\`
+
+The \`.trickle/\` directory contains cached runtime observations that persist
+across sessions. Variable values, function types, and error context are all
+available without running the app again.
+`;
+
+  fs.writeFileSync(claudePath, content, "utf-8");
+  return true;
+}
+
+function generateTrickleSection(info: ProjectInfo): string {
+  const runCmd = info.isPython
+    ? `trickle run python ${info.entryFile || "app.py"}`
+    : `trickle run node ${info.entryFile || "app.js"}`;
+
+  return `## Debugging with Runtime Data (trickle)
+
+This project uses **trickle** for runtime type observability. Use cached runtime data
+instead of adding console.log/print statements:
+
+\`\`\`bash
+trickle context src/api.ts        # variable values for a file
+trickle context src/api.ts:42     # values near a specific line
+trickle context --compact          # minimal output
+trickle functions                  # observed function signatures
+\`\`\`
+
+Refresh data: \`${runCmd}\`
+`;
+}
+
 export async function initCommand(opts: InitOptions): Promise<void> {
   const dir = path.resolve(opts.dir || ".");
 
@@ -582,7 +678,13 @@ export async function initCommand(opts: InitOptions): Promise<void> {
     console.log(`  ${chalk.green("~")} Updated ${chalk.bold(".gitignore")} — added .trickle/`);
   }
 
-  // Step 8: Print next steps
+  // Step 8: Create CLAUDE.md for AI agent integration
+  const claudeCreated = createClaudeMd(dir, info);
+  if (claudeCreated) {
+    console.log(`  ${chalk.green("+")} Created ${chalk.bold("CLAUDE.md")} — AI agent instructions for debugging with trickle`);
+  }
+
+  // Step 9: Print next steps
   console.log("");
   console.log(chalk.bold("  Next steps:"));
   console.log("");
@@ -613,9 +715,10 @@ export async function initCommand(opts: InitOptions): Promise<void> {
 
   console.log("");
   console.log(chalk.gray("  Other commands:"));
+  console.log(chalk.gray("     trickle context <file>    — runtime context for AI agent debugging"));
   console.log(chalk.gray("     trickle functions         — list observed functions"));
   console.log(chalk.gray("     trickle vars              — list captured variable types + values"));
-  console.log(chalk.gray("     trickle types <name>      — see types + sample data"));
+  console.log(chalk.gray("     trickle tool-schema       — generate LLM tool calling schemas"));
 
   console.log("");
 }

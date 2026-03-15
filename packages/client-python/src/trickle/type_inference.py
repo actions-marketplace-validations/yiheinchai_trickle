@@ -457,8 +457,11 @@ def _get_torch_tensor_type() -> Any:
         return _torch_tensor_type
     _torch_checked = True
     try:
-        import torch
-        _torch_tensor_type = torch.Tensor
+        # Only resolve if torch is already imported — never trigger a cold import
+        # (importing torch takes 3-10s and would cripple startup for non-ML apps)
+        import sys
+        if 'torch' in sys.modules:
+            _torch_tensor_type = sys.modules['torch'].Tensor
     except Exception:
         pass
     return _torch_tensor_type
@@ -475,8 +478,9 @@ def _get_torch_module_type() -> Any:
         return _torch_module_type
     _torch_module_checked = True
     try:
-        import torch.nn
-        _torch_module_type = torch.nn.Module
+        import sys
+        if 'torch.nn' in sys.modules:
+            _torch_module_type = sys.modules['torch.nn'].Module
     except Exception:
         pass
     return _torch_module_type
@@ -642,8 +646,9 @@ def _get_torch_optimizer_type() -> Any:
         return _torch_optimizer_type
     _torch_optimizer_checked = True
     try:
-        import torch.optim
-        _torch_optimizer_type = torch.optim.Optimizer
+        import sys
+        if 'torch.optim' in sys.modules:
+            _torch_optimizer_type = sys.modules['torch.optim'].Optimizer
     except Exception:
         pass
     return _torch_optimizer_type
@@ -690,12 +695,13 @@ def _get_torch_scheduler_type() -> Any:
         return _torch_scheduler_type
     _torch_scheduler_checked = True
     try:
-        import torch.optim.lr_scheduler
-        # _LRScheduler for older PyTorch, LRScheduler for newer
-        _torch_scheduler_type = getattr(
-            torch.optim.lr_scheduler, "LRScheduler",
-            getattr(torch.optim.lr_scheduler, "_LRScheduler", None)
-        )
+        import sys
+        mod = sys.modules.get('torch.optim.lr_scheduler')
+        if mod is not None:
+            _torch_scheduler_type = getattr(
+                mod, "LRScheduler",
+                getattr(mod, "_LRScheduler", None)
+            )
     except Exception:
         pass
     return _torch_scheduler_type
@@ -745,8 +751,10 @@ def _get_torch_dataloader_type() -> Any:
         return _torch_dataloader_type
     _torch_dataloader_checked = True
     try:
-        import torch.utils.data
-        _torch_dataloader_type = torch.utils.data.DataLoader
+        import sys
+        mod = sys.modules.get('torch.utils.data')
+        if mod is not None:
+            _torch_dataloader_type = mod.DataLoader
     except Exception:
         pass
     return _torch_dataloader_type
@@ -810,8 +818,10 @@ def _get_torch_dataset_type() -> Any:
         return _torch_dataset_type
     _torch_dataset_checked = True
     try:
-        import torch.utils.data
-        _torch_dataset_type = torch.utils.data.Dataset
+        import sys
+        mod = sys.modules.get('torch.utils.data')
+        if mod is not None:
+            _torch_dataset_type = mod.Dataset
     except Exception:
         pass
     return _torch_dataset_type
@@ -863,8 +873,9 @@ def _get_pandas_dataframe_type() -> Any:
         return _pandas_dataframe_type
     _pandas_dataframe_checked = True
     try:
-        import pandas
-        _pandas_dataframe_type = pandas.DataFrame
+        import sys
+        if 'pandas' in sys.modules:
+            _pandas_dataframe_type = sys.modules['pandas'].DataFrame
     except Exception:
         pass
     return _pandas_dataframe_type
@@ -881,8 +892,9 @@ def _get_pandas_series_type() -> Any:
         return _pandas_series_type
     _pandas_series_checked = True
     try:
-        import pandas
-        _pandas_series_type = pandas.Series
+        import sys
+        if 'pandas' in sys.modules:
+            _pandas_series_type = sys.modules['pandas'].Series
     except Exception:
         pass
     return _pandas_series_type
@@ -998,8 +1010,10 @@ def _get_sklearn_estimator_type() -> Any:
         return _sklearn_estimator_type
     _sklearn_estimator_checked = True
     try:
-        from sklearn.base import BaseEstimator
-        _sklearn_estimator_type = BaseEstimator
+        import sys
+        mod = sys.modules.get('sklearn.base')
+        if mod is not None:
+            _sklearn_estimator_type = mod.BaseEstimator
     except Exception:
         pass
     return _sklearn_estimator_type
@@ -1134,8 +1148,10 @@ def _get_pandas_groupby_type() -> Any:
         return _pandas_groupby_type
     _pandas_groupby_checked = True
     try:
-        from pandas.core.groupby import GroupBy
-        _pandas_groupby_type = GroupBy
+        import sys
+        mod = sys.modules.get('pandas.core.groupby')
+        if mod is not None:
+            _pandas_groupby_type = mod.GroupBy
     except Exception:
         pass
     return _pandas_groupby_type
@@ -1185,8 +1201,9 @@ def _get_pandas_index_type() -> Any:
         return _pandas_index_type
     _pandas_index_checked = True
     try:
-        import pandas
-        _pandas_index_type = pandas.Index
+        import sys
+        if 'pandas' in sys.modules:
+            _pandas_index_type = sys.modules['pandas'].Index
     except Exception:
         pass
     return _pandas_index_type
@@ -1256,8 +1273,9 @@ def _get_numpy_ndarray_type() -> Any:
         return _numpy_ndarray_type
     _numpy_checked = True
     try:
-        import numpy
-        _numpy_ndarray_type = numpy.ndarray
+        import sys
+        if 'numpy' in sys.modules:
+            _numpy_ndarray_type = sys.modules['numpy'].ndarray
     except Exception:
         pass
     return _numpy_ndarray_type
@@ -1276,8 +1294,10 @@ def _get_hf_dataset_type() -> Any:
         return _hf_dataset_type
     _hf_dataset_checked = True
     try:
-        from datasets import Dataset
-        _hf_dataset_type = Dataset
+        import sys
+        mod = sys.modules.get('datasets')
+        if mod is not None:
+            _hf_dataset_type = mod.Dataset
     except Exception:
         pass
     return _hf_dataset_type
@@ -1294,8 +1314,10 @@ def _get_hf_dataset_dict_type() -> Any:
         return _hf_dataset_dict_type
     _hf_dataset_dict_checked = True
     try:
-        from datasets import DatasetDict
-        _hf_dataset_dict_type = DatasetDict
+        import sys
+        mod = sys.modules.get('datasets')
+        if mod is not None:
+            _hf_dataset_dict_type = mod.DatasetDict
     except Exception:
         pass
     return _hf_dataset_dict_type

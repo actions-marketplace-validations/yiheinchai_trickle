@@ -10,13 +10,14 @@ As a key point for the agent first approach, i want you to use trickle when deve
 </higher directive>
 
 <focus point>
-25 MCP tools. Flamegraph generation shipped (trickle flamegraph + get_flamegraph MCP tool).
-Interactive HTML flamegraphs with hotspot analysis from call traces.
+25 MCP tools. Fixed Python decorated functions not being captured — Flask/FastAPI route
+handlers now fully observable. Tested on Flask blog app with pytest: 10 functions, 69 queries,
+N+1 patterns detected. Also shipped flamegraph generation.
 
 Next priorities:
-1. Test on real-world open-source projects (Django/Flask with pytest, React/Next.js)
-2. Improve Python pytest integration (pytest runs in same process, so patching should work well)
-3. Distributed tracing improvements (cross-service flamegraphs)
+1. Test on a real open-source Django project from GitHub
+2. Distributed tracing improvements (cross-service flamegraphs)
+3. Improve MCP tool descriptions and add guided agent workflows
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

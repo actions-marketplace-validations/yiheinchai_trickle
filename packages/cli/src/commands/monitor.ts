@@ -69,10 +69,12 @@ function analyzeQueries(trickleDir: string, slowThreshold: number): Alert[] {
   }
 
   // Detect N+1 pattern: same query executed many times
+  // Detect N+1 pattern: same query executed many times (skip DDL/PRAGMA)
   const queryCounts = new Map<string, number>();
+  const skipPatterns = /^(PRAGMA|CREATE |ALTER |DROP |INSERT INTO|BEGIN|COMMIT|ROLLBACK)/i;
   for (const q of queries) {
     const key = q.query?.substring(0, 100);
-    if (key) queryCounts.set(key, (queryCounts.get(key) || 0) + 1);
+    if (key && !skipPatterns.test(key)) queryCounts.set(key, (queryCounts.get(key) || 0) + 1);
   }
   for (const [query, count] of queryCounts) {
     if (count >= 5) {

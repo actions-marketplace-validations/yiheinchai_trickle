@@ -18,6 +18,7 @@ import ast
 import dataclasses
 import json
 import os
+import time as _time_mod
 import sys
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -25,7 +26,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 _installed = False
 _entry_file_setup_done = False  # tracks whether install() has run entry-file setup
 _assignment_map: Dict[str, Dict[int, List[str]]] = {}  # filename -> {line_no -> [var_names]}
-_cache: Set[str] = set()
+_cache: Dict[str, tuple] = {}  # cache_key -> (value_fingerprint, timestamp)
 _vars_file: Optional[str] = None
 _entry_file: Optional[str] = None
 _old_trace: Any = None
@@ -457,11 +458,31 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
 
         type_node = _infer_type(value, max_depth=3)
         type_hash = json.dumps(type_node, sort_keys=True)[:32]
-        cache_key = f"{file_path}:{line_no}:{var_name}:{type_hash}"
 
-        if cache_key in _cache:
-            return
-        _cache.add(cache_key)
+        # Value-aware dedup: re-send if value changed or 10s elapsed (for training loops)
+        cache_key = f"{file_path}:{line_no}:{var_name}"
+        try:
+            t = type(value)
+            if t in (int, float, bool, str) or value is None:
+                val_fp = str(value)[:60]
+            elif hasattr(value, "item") and hasattr(value, "numel") and value.numel() <= 1:
+                val_fp = str(value.item())  # scalar tensor
+            else:
+                val_fp = type_hash
+        except Exception:
+            val_fp = type_hash
+
+        now = _time_mod.time()
+        prev = _cache.get(cache_key)
+        if prev is not None:
+            prev_fp, prev_ts = prev
+            if prev_fp == val_fp and (now - prev_ts) < 10.0:
+                return
+        _cache[cache_key] = (val_fp, now)
+
+        # Debug: uncomment to trace dedup decisions
+        # import sys as _dbg_sys
+        # _dbg_sys.stderr.write(f"[trickle-dbg] EMIT {var_name}={val_fp} at L{line_no} (prev={prev})\n")
 
         # Build sample
         sample: Any = None

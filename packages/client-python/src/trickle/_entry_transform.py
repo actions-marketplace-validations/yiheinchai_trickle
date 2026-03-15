@@ -99,7 +99,7 @@ def _make_var_tracer(filepath: str, module_name: str) -> Any:
     """
     from .type_inference import infer_type
 
-    cache: Set[str] = set()
+    cache: Dict[str, tuple] = {}  # cache_key -> (value_fingerprint, timestamp)
     vars_file: Optional[str] = None
 
     def _tv(value: Any, var_name: str, line_no: int) -> None:
@@ -112,11 +112,24 @@ def _make_var_tracer(filepath: str, module_name: str) -> Any:
 
             type_node = infer_type(value, max_depth=3)
             type_hash = json.dumps(type_node, sort_keys=True)[:32]
-            cache_key = f"{filepath}:{line_no}:{var_name}:{type_hash}"
 
-            if cache_key in cache:
-                return
-            cache.add(cache_key)
+            # Value-aware dedup: re-send if value changed or 10s elapsed
+            cache_key = f"{filepath}:{line_no}:{var_name}"
+            t = type(value)
+            if t in (int, float, bool, str) or value is None:
+                val_fp = str(value)[:60]
+            elif hasattr(value, "item") and hasattr(value, "numel") and value.numel() <= 1:
+                val_fp = str(value.item())
+            else:
+                val_fp = type_hash
+            import time as _time_mod
+            now = _time_mod.time()
+            prev = cache.get(cache_key)
+            if prev is not None:
+                prev_fp, prev_ts = prev
+                if prev_fp == val_fp and (now - prev_ts) < 10.0:
+                    return
+            cache[cache_key] = (val_fp, now)
 
             # Build a small sample value for display
             sample = _sanitize(value, depth=2)
@@ -387,17 +400,29 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
 
     if trace_vars:
         lines.extend([
-            "# Variable tracer with tensor shape support",
-            "_trickle_tv_cache = set()",
+            "# Variable tracer with tensor shape support and value-aware dedup",
+            "_trickle_tv_cache = {}",
             "_trickle_tv_file = None",
+            "import time as _trickle_time",
             "def _trickle_tv(_val, _name, _line, _func=None):",
             "    global _trickle_tv_file",
             "    try:",
-            "        # Fast-path: check cache with type name only (avoids expensive infer_type)",
-            "        _tn = type(_val).__name__",
-            f"        _fast_ck = {filename!r} + ':' + str(_line) + ':' + _name + ':' + _tn",
-            "        if _fast_ck in _trickle_tv_cache:",
-            "            return",
+            "        # Value-aware dedup: re-send if value changed or 10s elapsed",
+            f"        _ck = {filename!r} + ':' + str(_line) + ':' + _name",
+            "        _t_type = type(_val)",
+            "        if _t_type in (int, float, bool, str) or _val is None:",
+            "            _vfp = str(_val)[:60]",
+            "        elif hasattr(_val, 'item') and hasattr(_val, 'numel') and _val.numel() <= 1:",
+            "            _vfp = str(_val.item())",
+            "        else:",
+            "            _vfp = type(_val).__name__",
+            "        _now = _trickle_time.time()",
+            "        _prev = _trickle_tv_cache.get(_ck)",
+            "        if _prev is not None:",
+            "            _pfp, _pts = _prev",
+            "            if _pfp == _vfp and (_now - _pts) < 10.0:",
+            "                return",
+            "        _trickle_tv_cache[_ck] = (_vfp, _now)",
             "        if _trickle_tv_file is None:",
             "            _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')",
             "            _trickle_os.makedirs(_d, exist_ok=True)",
@@ -405,12 +430,6 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "        from trickle.type_inference import infer_type",
             "        _t = infer_type(_val, max_depth=3)",
             "        _th = _trickle_json.dumps(_t, sort_keys=True)[:32]",
-            f"        _ck = {filename!r} + ':' + str(_line) + ':' + _name + ':' + _th",
-            "        if _ck in _trickle_tv_cache:",
-            "            _trickle_tv_cache.add(_fast_ck)",
-            "            return",
-            "        _trickle_tv_cache.add(_ck)",
-            "        _trickle_tv_cache.add(_fast_ck)",
             "        # Build sample",
             "        _s = None",
             "        if hasattr(_val, 'shape') and hasattr(_val, 'dtype'):",

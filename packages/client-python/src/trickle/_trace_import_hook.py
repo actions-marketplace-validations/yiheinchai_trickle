@@ -158,16 +158,28 @@ def _trickle_wrap(__fn, __name):
         return _wrap(__fn, name=__name, module={module_name!r})
     except Exception:
         return __fn
-_trickle_tv_cache = set()
+_trickle_tv_cache = {{}}
 _trickle_tv_file = None
+import time as _trickle_time
 def _trickle_tv(_val, _name, _line, _func=None):
     global _trickle_tv_file
     try:
-        # Fast-path: check cache with type name only (avoids expensive infer_type for repeated types)
-        _tn = type(_val).__name__
-        _fast_ck = {filename!r} + ':' + str(_line) + ':' + _name + ':' + _tn
-        if _fast_ck in _trickle_tv_cache:
-            return
+        # Value-aware dedup: re-send if value changed or 10s elapsed
+        _ck = {filename!r} + ':' + str(_line) + ':' + _name
+        _t_type = type(_val)
+        if _t_type in (int, float, bool, str) or _val is None:
+            _vfp = str(_val)[:60]
+        elif hasattr(_val, 'item') and hasattr(_val, 'numel') and _val.numel() <= 1:
+            _vfp = str(_val.item())
+        else:
+            _vfp = type(_val).__name__
+        _now = _trickle_time.time()
+        _prev = _trickle_tv_cache.get(_ck)
+        if _prev is not None:
+            _pfp, _pts = _prev
+            if _pfp == _vfp and (_now - _pts) < 10.0:
+                return
+        _trickle_tv_cache[_ck] = (_vfp, _now)
         if _trickle_tv_file is None:
             _d = _trickle_os.environ.get('TRICKLE_LOCAL_DIR') or _trickle_os.path.join(_trickle_os.getcwd(), '.trickle')
             _trickle_os.makedirs(_d, exist_ok=True)
@@ -175,12 +187,6 @@ def _trickle_tv(_val, _name, _line, _func=None):
         from trickle.type_inference import infer_type
         _t = infer_type(_val, max_depth=3)
         _th = _trickle_json.dumps(_t, sort_keys=True)[:32]
-        _ck = {filename!r} + ':' + str(_line) + ':' + _name + ':' + _th
-        if _ck in _trickle_tv_cache:
-            _trickle_tv_cache.add(_fast_ck)
-            return
-        _trickle_tv_cache.add(_ck)
-        _trickle_tv_cache.add(_fast_ck)
         _s = None
         if hasattr(_val, 'shape') and hasattr(_val, 'dtype'):
             _parts = [f'shape={{list(_val.shape)}}', f'dtype={{_val.dtype}}']

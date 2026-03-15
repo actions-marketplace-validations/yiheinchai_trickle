@@ -6,7 +6,13 @@ Create the best documentations to ever exist. Currently documentation is very ou
 </higher directive>
 
 <focus point>
+Shipped: Complete rewrite of AI agent usecase doc (8 use cases, 26 MCP tools, on-call loop
+workflow, real output examples). Updated tool counts across all docs. Enhanced trickle doctor
+with root causes and recommended actions.
 
+Next: Continue updating remaining usecase docs (backend-api, python-developer, fullstack,
+frontend, devops-ci, qa-engineer) to reference modern features (flamegraph, explain, test,
+summary, root causes).
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -158,6 +158,10 @@ def _trickle_wrap(__fn, __name):
         return _wrap(__fn, name=__name, module={module_name!r})
     except Exception:
         return __fn
+def _trickle_wrap_decorator(__name):
+    def _decorator(__fn):
+        return _trickle_wrap(__fn, __name)
+    return _decorator
 _trickle_tv_cache = {{}}
 _trickle_tv_count = {{}}
 _trickle_tv_file = None
@@ -296,20 +300,32 @@ def _transform_body(body: list, class_name: str = "") -> list:
                 for d in node.decorator_list
             ):
                 continue
-            # Wrap function: func = _trickle_wrap(func, 'ClassName.func' or 'func')
+            # Wrap function for observation.
             obs_name = f"{class_name}.{node.name}" if class_name else node.name
-            wrap_stmt = ast.Assign(
-                targets=[ast.Name(id=node.name, ctx=ast.Store())],
-                value=ast.Call(
-                    func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
-                    args=[
-                        ast.Name(id=node.name, ctx=ast.Load()),
-                        ast.Constant(value=obs_name),
-                    ],
+            if node.decorator_list:
+                # Has decorators (e.g. @app.route): insert _trickle_wrap as the
+                # INNERMOST decorator so it wraps BEFORE other decorators consume it.
+                # This ensures Flask/FastAPI/etc. get the wrapped function.
+                wrap_decorator = ast.Call(
+                    func=ast.Name(id="_trickle_wrap_decorator", ctx=ast.Load()),
+                    args=[ast.Constant(value=obs_name)],
                     keywords=[],
-                ),
-            )
-            new_body.append(wrap_stmt)
+                )
+                node.decorator_list.append(wrap_decorator)
+            else:
+                # No decorators: use post-hoc assignment (simpler, avoids scope issues)
+                wrap_stmt = ast.Assign(
+                    targets=[ast.Name(id=node.name, ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
+                        args=[
+                            ast.Name(id=node.name, ctx=ast.Load()),
+                            ast.Constant(value=obs_name),
+                        ],
+                        keywords=[],
+                    ),
+                )
+                new_body.append(wrap_stmt)
             continue
 
         if isinstance(node, ast.ClassDef):

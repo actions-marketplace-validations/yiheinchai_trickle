@@ -587,6 +587,16 @@ const TOOLS = [
     },
   },
   {
+    name: "save_baseline",
+    description: "Save current runtime metrics as a baseline for before/after comparison. Call this BEFORE making changes. Then after fixing the code and re-running, call compare_with_baseline to see what improved or regressed.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "compare_with_baseline",
+    description: "Compare current runtime metrics against a saved baseline. Shows what improved, regressed, or stayed the same — alerts, errors, N+1 queries, slow queries, function latency, memory. Returns a structured verdict: 'Fix verified', 'Regression detected', or 'No change'. Use after save_baseline + fix + re-run.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "run_tests",
     description: "Run tests with trickle observability and get structured results. Returns pass/fail for each test, and for failures: the error message, runtime variable values near the failure, database queries that ran, and the call trace. Auto-detects the test framework (jest, vitest, pytest, mocha). Much more useful than raw test output — gives agents actionable context for fixing failures.",
     inputSchema: {
@@ -703,6 +713,24 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "save_baseline": {
+            try {
+              const { saveBaselineJson } = require('./verify');
+              result = saveBaselineJson({ dir: findTrickleDir() });
+            } catch (e: any) {
+              result = { error: `Failed to save baseline: ${e.message}` };
+            }
+            break;
+          }
+          case "compare_with_baseline": {
+            try {
+              const { compareWithBaselineJson } = require('./verify');
+              result = compareWithBaselineJson({ dir: findTrickleDir() });
+            } catch (e: any) {
+              result = { error: `Failed to compare: ${e.message}` };
             }
             break;
           }

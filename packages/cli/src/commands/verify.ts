@@ -88,7 +88,7 @@ export function saveBaseline(opts: { dir?: string }): void {
   console.log('');
 }
 
-export function compareWithBaseline(opts: { dir?: string }): void {
+export function compareWithBaseline(opts: { dir?: string }): any {
   const trickleDir = opts.dir || path.join(process.cwd(), '.trickle');
   const baselinePath = path.join(trickleDir, 'baseline.json');
 
@@ -155,6 +155,14 @@ export function compareWithBaseline(opts: { dir?: string }): void {
     kind: 'verification',
     baseline,
     current,
+    comparisons: comparisons.map(c => ({
+      metric: c.label,
+      before: c.before,
+      after: c.after,
+      delta: c.after - c.before,
+      status: c.after === c.before ? 'unchanged' :
+        ((c.after - c.before < 0 && c.lowerBetter) || (c.after - c.before > 0 && !c.lowerBetter)) ? 'improved' : 'regressed',
+    })),
     improved,
     regressed,
     unchanged,
@@ -162,4 +170,94 @@ export function compareWithBaseline(opts: { dir?: string }): void {
     timestamp: Date.now(),
   };
   fs.writeFileSync(path.join(trickleDir, 'verify.json'), JSON.stringify(verifyResult, null, 2), 'utf-8');
+
+  return verifyResult;
+}
+
+/**
+ * Save baseline and return metrics (for MCP consumption).
+ */
+export function saveBaselineJson(opts: { dir?: string }): Metrics & { saved: boolean } {
+  const trickleDir = opts.dir || path.join(process.cwd(), '.trickle');
+  if (!fs.existsSync(trickleDir)) {
+    return { alertCount: 0, criticalCount: 0, warningCount: 0, errorCount: 0, slowQueryCount: 0, n1QueryCount: 0, maxFunctionMs: 0, memoryMb: 0, timestamp: Date.now(), saved: false };
+  }
+
+  // Run monitor silently
+  const origLog = console.log;
+  const origErr = console.error;
+  try {
+    console.log = () => {};
+    console.error = () => {};
+    const { runMonitor } = require('./monitor');
+    runMonitor({ dir: trickleDir });
+  } catch {} finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
+
+  const metrics = collectMetrics(trickleDir);
+  const baselinePath = path.join(trickleDir, 'baseline.json');
+  fs.writeFileSync(baselinePath, JSON.stringify(metrics, null, 2), 'utf-8');
+  return { ...metrics, saved: true };
+}
+
+/**
+ * Compare with baseline and return structured result (for MCP consumption).
+ */
+export function compareWithBaselineJson(opts: { dir?: string }): any {
+  const trickleDir = opts.dir || path.join(process.cwd(), '.trickle');
+  const baselinePath = path.join(trickleDir, 'baseline.json');
+
+  if (!fs.existsSync(baselinePath)) {
+    return { error: 'No baseline found. Use save_baseline first.' };
+  }
+
+  // Run monitor silently
+  const origLog = console.log;
+  const origErr = console.error;
+  try {
+    console.log = () => {};
+    console.error = () => {};
+    const { runMonitor } = require('./monitor');
+    runMonitor({ dir: trickleDir });
+  } catch {} finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
+
+  const baseline: Metrics = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
+  const current = collectMetrics(trickleDir);
+
+  const comparisons = [
+    { metric: 'Alerts', before: baseline.alertCount, after: current.alertCount, lowerBetter: true },
+    { metric: 'Critical', before: baseline.criticalCount, after: current.criticalCount, lowerBetter: true },
+    { metric: 'Errors', before: baseline.errorCount, after: current.errorCount, lowerBetter: true },
+    { metric: 'N+1 Queries', before: baseline.n1QueryCount, after: current.n1QueryCount, lowerBetter: true },
+    { metric: 'Slow Queries', before: baseline.slowQueryCount, after: current.slowQueryCount, lowerBetter: true },
+    { metric: 'Max Function (ms)', before: baseline.maxFunctionMs, after: current.maxFunctionMs, lowerBetter: true },
+    { metric: 'Memory (MB)', before: baseline.memoryMb, after: current.memoryMb, lowerBetter: true },
+  ].map(c => ({
+    ...c,
+    delta: c.after - c.before,
+    status: c.after === c.before ? 'unchanged' as const :
+      ((c.after - c.before < 0 && c.lowerBetter) || (c.after - c.before > 0 && !c.lowerBetter)) ? 'improved' as const : 'regressed' as const,
+  }));
+
+  const improved = comparisons.filter(c => c.status === 'improved').length;
+  const regressed = comparisons.filter(c => c.status === 'regressed').length;
+
+  const result = {
+    passed: regressed === 0 && improved > 0,
+    verdict: regressed === 0 && improved > 0 ? 'Fix verified' :
+      regressed > 0 ? 'Regression detected' : 'No change',
+    improved,
+    regressed,
+    comparisons,
+    baseline,
+    current,
+  };
+
+  fs.writeFileSync(path.join(trickleDir, 'verify.json'), JSON.stringify(result, null, 2), 'utf-8');
+  return result;
 }

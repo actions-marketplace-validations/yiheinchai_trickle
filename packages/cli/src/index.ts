@@ -489,12 +489,16 @@ program
   .option("--slow-query <ms>", "Slow query threshold in ms", "100")
   .option("--slow-function <ms>", "Slow function threshold in ms", "1000")
   .option("--memory <mb>", "Memory threshold in MB", "512")
+  .option("--webhook <url>", "Send alerts to a webhook URL (Slack-compatible)")
+  .option("--watch", "Continuously watch for data changes and re-analyze")
   .action(async (opts) => {
     const { runMonitor } = await import("./commands/monitor");
     runMonitor({
       slowQueryMs: parseInt(opts.slowQuery),
       slowFunctionMs: parseInt(opts.slowFunction),
       memoryThresholdMb: parseInt(opts.memory),
+      webhook: opts.webhook,
+      watch: opts.watch,
     });
   });
 

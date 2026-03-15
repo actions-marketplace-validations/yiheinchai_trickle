@@ -32,6 +32,8 @@ interface MonitorOptions {
   slowQueryMs?: number;
   slowFunctionMs?: number;
   memoryThresholdMb?: number;
+  webhook?: string;
+  watch?: boolean;
 }
 
 function findTrickleDir(dir?: string): string {
@@ -251,5 +253,62 @@ export function runMonitor(opts: MonitorOptions): Alert[] {
   console.log(chalk.gray(`  Alerts written to ${path.relative(process.cwd(), path.join(trickleDir, 'alerts.jsonl'))}`));
   console.log('');
 
+  // Send to webhook if configured
+  if (opts.webhook && allAlerts.length > 0) {
+    sendWebhook(opts.webhook, allAlerts).catch(() => {});
+  }
+
+  // Watch mode: re-analyze when data files change
+  if (opts.watch) {
+    console.log(chalk.gray('  Watching for changes...'));
+    const dataFiles = ['observations.jsonl', 'queries.jsonl', 'errors.jsonl', 'variables.jsonl', 'calltrace.jsonl', 'profile.jsonl'];
+    for (const f of dataFiles) {
+      const filePath = path.join(trickleDir, f);
+      if (fs.existsSync(filePath)) {
+        fs.watchFile(filePath, { interval: 2000 }, () => {
+          console.log(chalk.gray(`\n  [${new Date().toLocaleTimeString()}] ${f} changed — re-analyzing...`));
+          runMonitor({ ...opts, watch: false }); // Don't recurse watch
+        });
+      }
+    }
+  }
+
   return allAlerts;
+}
+
+async function sendWebhook(url: string, alerts: Alert[]): Promise<void> {
+  const critical = alerts.filter(a => a.severity === 'critical');
+  const warnings = alerts.filter(a => a.severity === 'warning');
+
+  // Format for Slack-compatible webhook
+  const text = [
+    `*trickle monitor*: ${critical.length} critical, ${warnings.length} warnings`,
+    ...alerts.slice(0, 10).map(a => {
+      const icon = a.severity === 'critical' ? '🔴' : a.severity === 'warning' ? '🟡' : 'ℹ️';
+      return `${icon} *${a.category}*: ${a.message}${a.suggestion ? `\n   → ${a.suggestion}` : ''}`;
+    }),
+  ].join('\n');
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text,
+        // Also include structured data for non-Slack webhooks
+        alerts: alerts.map(a => ({
+          severity: a.severity,
+          category: a.category,
+          message: a.message,
+          suggestion: a.suggestion,
+          details: a.details,
+        })),
+      }),
+    });
+    if (res.ok) {
+      console.log(chalk.green(`  ✓ Alerts sent to webhook`));
+    }
+  } catch (err: any) {
+    console.log(chalk.yellow(`  ⚠ Failed to send webhook: ${err.message}`));
+  }
 }

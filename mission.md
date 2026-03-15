@@ -24,10 +24,12 @@ Database tracing now complete across both languages:
 - JS: pg, mysql2, better-sqlite3, ioredis, mongoose
 - Python: sqlite3, psycopg2, pymysql, mysql.connector, redis, pymongo
 
+Done: Updated README with full agent observability stack, database tracing matrix, 9 MCP tools, architecture diagram.
+
 Next for agent TAM:
 1. Call graph / execution trace for debugging flow
 2. Test on real-world projects to validate agent debugging workflow
-3. Update README with full feature matrix
+3. Update ai-agent.md usecase with database + timing examples
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -338,6 +338,28 @@ export async function contextCommand(
     output.push("");
   }
 
+  // Show console output if available
+  const consoleFile = path.join(localDir, "console.jsonl");
+  if (fs.existsSync(consoleFile) && !opts.compact) {
+    const consoleLines: Array<{ level: string; message: string }> = [];
+    for (const line of fs.readFileSync(consoleFile, "utf-8").split("\n").filter(Boolean)) {
+      try { consoleLines.push(JSON.parse(line)); } catch {}
+    }
+    if (consoleLines.length > 0) {
+      output.push("## Console Output");
+      output.push("");
+      const shown = consoleLines.slice(-10); // Show last 10 lines
+      for (const c of shown) {
+        const prefix = c.level === "error" ? "stderr" : c.level === "warn" ? "warn" : "log";
+        output.push(`- \`[${prefix}]\` ${c.message.substring(0, 80)}`);
+      }
+      if (consoleLines.length > 10) {
+        output.push(`- *(${consoleLines.length - 10} more lines)*`);
+      }
+      output.push("");
+    }
+  }
+
   if (filteredVars.length === 0 && filteredFuncs.length === 0 && errors.length === 0) {
     output.push("No runtime data available for the specified target.");
     output.push("Run your app with trickle to capture runtime information.");

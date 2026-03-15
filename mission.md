@@ -8,7 +8,7 @@ Particularly, build for agents. Trickle should provide cached runtime informatio
 </general directive>
 
 <focus point>
-Full agent integration complete: `trickle init` now generates CLAUDE.md with instructions for AI agents to use `trickle context` for debugging. Agents read CLAUDE.md and know to run `trickle context src/api.ts:25` instead of adding console.log. Also built: `trickle context` (runtime context for agents), `trickle tool-schema` (LLM tool schemas), ai-developer.md and ai-agent.md use cases. Next: continue expanding TAM — consider database/ORM query tracing, event-driven message schemas, or performance profiling features.
+Added `--annotated` mode to trickle context — shows source code with runtime values as inline comments. Agents see both code AND values in one view: `const user = getUser(id);  // user = null`. Full agent stack: CLAUDE.md generation (trickle init), trickle context (plain/compact/annotated/json), trickle tool-schema (OpenAI/Anthropic/MCP). Continue expanding TAM — consider database/ORM query tracing, deeper agent hooks (auto-run on error), or expanding to new language ecosystems.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

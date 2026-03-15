@@ -29,11 +29,18 @@ export function runDoctor(opts: { json?: boolean }): void {
     return;
   }
 
-  // Run monitor for fresh alerts
+  // Run monitor silently for fresh alerts
+  const origLog = console.log;
+  const origErr = console.error;
   try {
+    console.log = () => {};
+    console.error = () => {};
     const { runMonitor } = require('./monitor');
     runMonitor({ dir: trickleDir });
-  } catch {}
+  } catch {} finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
 
   // Collect all data
   const alerts = readJsonl(path.join(trickleDir, 'alerts.jsonl'));
@@ -44,6 +51,7 @@ export function runDoctor(opts: { json?: boolean }): void {
   const calltrace = readJsonl(path.join(trickleDir, 'calltrace.jsonl'));
   const profile = readJsonl(path.join(trickleDir, 'profile.jsonl'));
   const console_out = readJsonl(path.join(trickleDir, 'console.jsonl'));
+  const logs = readJsonl(path.join(trickleDir, 'logs.jsonl'));
 
   let env: any = {};
   try {
@@ -100,7 +108,65 @@ export function runDoctor(opts: { json?: boolean }): void {
       message: a.message,
       suggestion: a.suggestion,
     })),
+    logs: {
+      total: logs.length,
+      errors: logs.filter((l: any) => ['error','critical','fatal'].includes((l.level||l.levelname||'').toLowerCase())).length,
+    },
+    rootCauses: [] as Array<{ severity: string; category: string; description: string; suggestedFix: string }>,
+    recommendedActions: [] as Array<{ priority: number; action: string; tool: string }>,
   };
+
+  // Derive root causes
+  const seenMsgs = new Set<string>();
+  for (const err of errors.slice(0, 5)) {
+    const msg = (err.message || '').substring(0, 100);
+    if (seenMsgs.has(msg)) continue;
+    seenMsgs.add(msg);
+    const isNull = msg.includes('NoneType') || msg.includes('undefined') || msg.includes('null');
+    report.rootCauses.push({
+      severity: 'critical',
+      category: isNull ? 'null_reference' : 'runtime_error',
+      description: `${err.type || 'Error'}: ${msg}`,
+      suggestedFix: isNull ? 'Add null check before accessing the value.' : `Fix the ${err.type || 'error'} at ${err.file || 'unknown'}:${err.line || '?'}.`,
+    });
+  }
+  // N+1 patterns
+  const queryCounts = new Map<string, number>();
+  for (const q of queries) {
+    const norm = (q.query || '').replace(/\s+/g, ' ').trim().replace(/'[^']*'/g, '?').replace(/\b\d+\b/g, '?');
+    queryCounts.set(norm, (queryCounts.get(norm) || 0) + 1);
+  }
+  for (const [q, count] of queryCounts) {
+    if (count >= 3) {
+      report.rootCauses.push({
+        severity: 'warning',
+        category: 'n_plus_one',
+        description: `N+1: "${q.substring(0, 60)}" repeated ${count} times`,
+        suggestedFix: 'Replace with a batch query using IN clause or JOIN.',
+      });
+    }
+  }
+  // Memory
+  if (endProfile && startProfile) {
+    const delta = Math.round(((endProfile.rssKb || 0) - (startProfile.rssKb || 0)) / 1024);
+    if (delta > 100) {
+      report.rootCauses.push({
+        severity: 'warning', category: 'memory_growth',
+        description: `Memory grew by ${delta}MB`,
+        suggestedFix: 'Check for memory leaks — objects accumulating in arrays/maps.',
+      });
+    }
+  }
+
+  // Recommended actions
+  if (errors.length > 0) report.recommendedActions.push({ priority: 1, action: `Debug ${errors.length} error(s)`, tool: 'get_errors' });
+  if (critical.length > 0) report.recommendedActions.push({ priority: 1, action: `Fix ${critical.length} critical alert(s)`, tool: 'get_alerts' });
+  report.recommendedActions.push({ priority: 2, action: 'Get full summary', tool: 'get_last_run_summary' });
+  if (calltrace.length > 5) report.recommendedActions.push({ priority: 3, action: 'Analyze performance', tool: 'get_flamegraph' });
+  if (!fs.existsSync(path.join(trickleDir, 'baseline.json')) && alerts.length > 0) {
+    report.recommendedActions.push({ priority: 3, action: 'Save baseline before fixing', tool: 'save_baseline' });
+  }
+  report.recommendedActions.sort((a, b) => a.priority - b.priority);
 
   if (opts.json) {
     console.log(JSON.stringify(report, null, 2));
@@ -147,6 +213,26 @@ export function runDoctor(opts: { json?: boolean }): void {
     console.log(`  ${chalk.bold('Slow Functions')}:`);
     for (const f of slowFunctions.slice(0, 3)) {
       console.log(`    ${f.functionName} (${f.module}) — ${f.durationMs?.toFixed(0)}ms`);
+    }
+    console.log('');
+  }
+
+  // Root causes
+  if (report.rootCauses.length > 0) {
+    console.log(`  ${chalk.bold('Root Causes')}:`);
+    for (const rc of report.rootCauses.slice(0, 5)) {
+      const icon = rc.severity === 'critical' ? chalk.red('✗') : chalk.yellow('⚠');
+      console.log(`    ${icon} ${rc.description}`);
+      console.log(chalk.gray(`      Fix: ${rc.suggestedFix}`));
+    }
+    console.log('');
+  }
+
+  // Recommended actions
+  if (report.recommendedActions.length > 0) {
+    console.log(`  ${chalk.bold('Recommended')}:`);
+    for (const a of report.recommendedActions.slice(0, 4)) {
+      console.log(chalk.cyan(`    → ${a.action}`));
     }
     console.log('');
   }

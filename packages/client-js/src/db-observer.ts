@@ -183,3 +183,101 @@ export function patchPg(pgModule: any, debug: boolean): void {
     console.log('[trickle/db] PostgreSQL query tracing enabled');
   }
 }
+
+/**
+ * Patch mysql2 to capture queries.
+ */
+export function patchMysql2(mysqlModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  // Patch Connection.prototype.query and .execute
+  const Connection = mysqlModule.Connection;
+  if (!Connection || !Connection.prototype) return;
+
+  for (const method of ['query', 'execute'] as const) {
+    const original = Connection.prototype[method];
+    if (!original || (original as any).__trickle_patched) continue;
+
+    Connection.prototype[method] = function patchedMethod(...args: any[]): any {
+      const startTime = performance.now();
+      let queryText = typeof args[0] === 'string' ? args[0] : args[0]?.sql || '';
+      const truncated = queryText.length > MAX_QUERY_LENGTH ? queryText.substring(0, MAX_QUERY_LENGTH) + '...' : queryText;
+
+      const result = original.apply(this, args);
+      if (result && typeof result.then === 'function') {
+        return result.then(
+          (res: any) => {
+            const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+            const rows = Array.isArray(res) ? res[0] : res;
+            writeQuery({
+              kind: 'query', query: truncated, durationMs,
+              rowCount: Array.isArray(rows) ? rows.length : 0,
+              columns: Array.isArray(rows) && rows[0] ? Object.keys(rows[0]) : undefined,
+              timestamp: Date.now(),
+            });
+            return res;
+          },
+          (err: any) => {
+            writeQuery({
+              kind: 'query', query: truncated,
+              durationMs: Math.round((performance.now() - startTime) * 100) / 100,
+              rowCount: 0, error: err.message?.substring(0, 200), timestamp: Date.now(),
+            });
+            throw err;
+          },
+        );
+      }
+      return result;
+    };
+    (Connection.prototype[method] as any).__trickle_patched = true;
+  }
+
+  if (debug) console.log('[trickle/db] MySQL query tracing enabled');
+}
+
+/**
+ * Patch better-sqlite3 to capture queries.
+ */
+export function patchBetterSqlite3(dbConstructor: any, debug: boolean): void {
+  debugMode = debug;
+
+  // better-sqlite3 returns a Database constructor — patch its prototype
+  const origPrepare = dbConstructor.prototype?.prepare;
+  if (!origPrepare || (origPrepare as any).__trickle_patched) return;
+
+  dbConstructor.prototype.prepare = function patchedPrepare(sql: string): any {
+    const stmt = origPrepare.call(this, sql);
+    const truncated = sql.length > MAX_QUERY_LENGTH ? sql.substring(0, MAX_QUERY_LENGTH) + '...' : sql;
+
+    // Patch run, get, all methods on the statement
+    for (const method of ['run', 'get', 'all'] as const) {
+      const origMethod = stmt[method];
+      if (!origMethod) continue;
+      stmt[method] = function (...args: any[]): any {
+        const startTime = performance.now();
+        try {
+          const result = origMethod.apply(this, args);
+          const durationMs = Math.round((performance.now() - startTime) * 100) / 100;
+          const rowCount = method === 'all' ? (Array.isArray(result) ? result.length : 0)
+            : method === 'get' ? (result ? 1 : 0)
+            : (result?.changes || 0);
+          writeQuery({
+            kind: 'query', query: truncated, durationMs, rowCount, timestamp: Date.now(),
+          });
+          return result;
+        } catch (err: any) {
+          writeQuery({
+            kind: 'query', query: truncated,
+            durationMs: Math.round((performance.now() - startTime) * 100) / 100,
+            rowCount: 0, error: err.message?.substring(0, 200), timestamp: Date.now(),
+          });
+          throw err;
+        }
+      };
+    }
+    return stmt;
+  };
+  (dbConstructor.prototype.prepare as any).__trickle_patched = true;
+
+  if (debug) console.log('[trickle/db] SQLite query tracing enabled');
+}

@@ -1113,13 +1113,27 @@ if (enabled) {
       } catch { /* fall through to normal processing */ }
     }
 
-    // ── PostgreSQL auto-detection: patch pg to capture SQL queries ──
+    // ── Database auto-detection: patch database drivers to capture SQL queries ──
     if (request === 'pg' && !expressPatched.has('pg')) {
       expressPatched.add('pg');
       try {
         const { patchPg } = require(path.join(__dirname, 'db-observer.js'));
         patchPg(exports, debug);
-      } catch { /* pg observer not critical */ }
+      } catch { /* not critical */ }
+    }
+    if ((request === 'mysql2' || request === 'mysql2/promise') && !expressPatched.has('mysql2')) {
+      expressPatched.add('mysql2');
+      try {
+        const { patchMysql2 } = require(path.join(__dirname, 'db-observer.js'));
+        patchMysql2(exports, debug);
+      } catch { /* not critical */ }
+    }
+    if (request === 'better-sqlite3' && !expressPatched.has('better-sqlite3')) {
+      expressPatched.add('better-sqlite3');
+      try {
+        const { patchBetterSqlite3 } = require(path.join(__dirname, 'db-observer.js'));
+        patchBetterSqlite3(exports, debug);
+      } catch { /* not critical */ }
     }
 
     // Resolve to absolute path for dedup — do this FIRST since bundlers like

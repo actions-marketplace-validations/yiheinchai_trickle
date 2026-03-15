@@ -34,6 +34,7 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
     let threwError = false;
     let caughtError: unknown;
     const trackers: Array<{ proxy: unknown; getAccessedPaths: () => Map<string, TypeNode> }> = [];
+    const startTime = performance.now();
 
     try {
       // Always pass ORIGINAL args to the function — never proxied ones.
@@ -43,9 +44,10 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
       threwError = true;
       caughtError = err;
 
-      // Capture error context
+      // Capture error context with timing
       try {
-        captureErrorPayload(functionKey, opts, args, trackers, err);
+        const durationMs = performance.now() - startTime;
+        captureErrorPayload(functionKey, opts, args, trackers, err, durationMs);
       } catch {
         // Never let our instrumentation interfere
       }
@@ -59,7 +61,8 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
       return result.then(
         (resolved: unknown) => {
           try {
-            capturePayload(functionKey, opts, args, trackers, resolved, true);
+            const durationMs = performance.now() - startTime;
+            capturePayload(functionKey, opts, args, trackers, resolved, true, durationMs);
           } catch {
             // Never let our instrumentation interfere
           }
@@ -67,7 +70,8 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
         },
         (err: unknown) => {
           try {
-            captureErrorPayload(functionKey, opts, args, trackers, err);
+            const durationMs = performance.now() - startTime;
+            captureErrorPayload(functionKey, opts, args, trackers, err, durationMs);
           } catch {
             // Never let our instrumentation interfere
           }
@@ -79,7 +83,8 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
 
     // Synchronous return
     try {
-      capturePayload(functionKey, opts, args, trackers, result);
+      const durationMs = performance.now() - startTime;
+      capturePayload(functionKey, opts, args, trackers, result, false, durationMs);
     } catch {
       // Never let our instrumentation interfere
     }
@@ -107,6 +112,7 @@ function capturePayload(
   trackers: Array<{ proxy: unknown; getAccessedPaths: () => Map<string, TypeNode> }>,
   returnValue: unknown,
   isAsync: boolean = false,
+  durationMs?: number,
 ): void {
   // Build args type as a tuple
   const argsType = buildArgsType(originalArgs, trackers, opts.maxDepth);
@@ -141,6 +147,10 @@ function capturePayload(
     payload.paramNames = opts.paramNames;
   }
 
+  if (durationMs !== undefined) {
+    payload.durationMs = Math.round(durationMs * 100) / 100;
+  }
+
   enqueue(payload);
 }
 
@@ -153,6 +163,7 @@ function captureErrorPayload(
   originalArgs: unknown[],
   trackers: Array<{ proxy: unknown; getAccessedPaths: () => Map<string, TypeNode> }>,
   error: unknown,
+  durationMs?: number,
 ): void {
   const argsType = buildArgsType(originalArgs, trackers, opts.maxDepth);
   const returnType: TypeNode = { kind: 'unknown' };

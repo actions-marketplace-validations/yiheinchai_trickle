@@ -22,6 +22,7 @@ export interface IngestPayload {
   paramNames?: string[];
   sampleInput?: unknown;
   sampleOutput?: unknown;
+  durationMs?: number;
   error?: {
     type: string;
     message: string;

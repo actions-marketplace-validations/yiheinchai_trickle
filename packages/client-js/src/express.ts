@@ -334,6 +334,22 @@ export function trickleMiddleware(
       return;
     }
 
+    // Wrap in request context for per-request correlation
+    try {
+      const { withRequestContext } = require('./request-context');
+      withRequestContext(req, () => {
+        _handleRequest(req, res, next, opts, debug);
+      });
+      return;
+    } catch {
+      // Fall through to non-context version
+    }
+
+    _handleRequest(req, res, next, opts, debug);
+  };
+}
+
+function _handleRequest(req: any, res: any, next: any, opts: any, debug: boolean): void {
     if (debug) {
       console.log(`[trickle/middleware] Intercepting ${req.method} ${req.originalUrl || req.url}`);
     }
@@ -396,5 +412,4 @@ export function trickleMiddleware(
     }
 
     next();
-  };
 }

@@ -21,6 +21,7 @@ interface CallEvent {
   timestamp: number;
   durationMs: number;
   error?: string;
+  requestId?: string;
 }
 
 let traceFile: string | null = null;
@@ -71,6 +72,13 @@ export function traceReturn(
   const parentId = callStack.length >= 2 ? callStack[callStack.length - 2] : 0;
   const depth = callStack.length - 1;
 
+  // Get request ID from async context (if inside an Express request)
+  let requestId: string | undefined;
+  try {
+    const { getRequestId } = require('./request-context');
+    requestId = getRequestId();
+  } catch {}
+
   writeEvent({
     kind: 'call',
     function: functionName,
@@ -81,6 +89,7 @@ export function traceReturn(
     timestamp: Date.now(),
     durationMs: Math.round(durationMs * 100) / 100,
     ...(error ? { error } : {}),
+    ...(requestId ? { requestId } : {}),
   });
 
   // Pop from stack

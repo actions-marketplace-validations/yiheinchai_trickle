@@ -21,6 +21,7 @@ interface QueryRecord {
   columns?: string[];
   error?: string;
   timestamp: number;
+  requestId?: string;
 }
 
 let queriesFile: string | null = null;
@@ -42,6 +43,12 @@ function getQueriesFile(): string {
 function writeQuery(record: QueryRecord): void {
   if (queryCount >= MAX_QUERIES) return;
   queryCount++;
+  // Add request ID from async context
+  try {
+    const { getRequestId } = require('./request-context');
+    const reqId = getRequestId();
+    if (reqId) record.requestId = reqId;
+  } catch {}
   try {
     fs.appendFileSync(getQueriesFile(), JSON.stringify(record) + '\n');
   } catch {}

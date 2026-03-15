@@ -798,10 +798,12 @@ function loadAllVariables() {
           // Handle React hook invocation records
           if (record.kind === 'react_hook') {
             const rh = record as ReactHookRecord;
-            if (!reactHookIndex.has(rh.file)) {
-              reactHookIndex.set(rh.file, new Map());
+            let rhPath = rh.file;
+            try { rhPath = fs.realpathSync(rhPath); } catch { /* keep original */ }
+            if (!reactHookIndex.has(rhPath)) {
+              reactHookIndex.set(rhPath, new Map());
             }
-            const lineMap = reactHookIndex.get(rh.file)!;
+            const lineMap = reactHookIndex.get(rhPath)!;
             const existing = lineMap.get(rh.line);
             if (!existing || rh.invokeCount > existing.invokeCount) {
               lineMap.set(rh.line, rh);
@@ -812,10 +814,12 @@ function loadAllVariables() {
           // Handle React useState update records
           if (record.kind === 'react_state') {
             const rs = record as ReactStateRecord;
-            if (!reactStateIndex.has(rs.file)) {
-              reactStateIndex.set(rs.file, new Map());
+            let rsPath = rs.file;
+            try { rsPath = fs.realpathSync(rsPath); } catch { /* keep original */ }
+            if (!reactStateIndex.has(rsPath)) {
+              reactStateIndex.set(rsPath, new Map());
             }
-            const lineMap = reactStateIndex.get(rs.file)!;
+            const lineMap = reactStateIndex.get(rsPath)!;
             const existing = lineMap.get(rs.line);
             if (!existing || rs.updateCount > existing.updateCount) {
               lineMap.set(rs.line, rs);
@@ -826,10 +830,12 @@ function loadAllVariables() {
           // Handle React render records
           if (record.kind === 'react_render') {
             const rr = record as ReactRenderRecord;
-            if (!reactRenderIndex.has(rr.file)) {
-              reactRenderIndex.set(rr.file, new Map());
+            let rrPath = rr.file;
+            try { rrPath = fs.realpathSync(rrPath); } catch { /* keep original */ }
+            if (!reactRenderIndex.has(rrPath)) {
+              reactRenderIndex.set(rrPath, new Map());
             }
-            const lineMap = reactRenderIndex.get(rr.file)!;
+            const lineMap = reactRenderIndex.get(rrPath)!;
             const existing = lineMap.get(rr.line);
             if (!existing || rr.renderCount > existing.renderCount) {
               lineMap.set(rr.line, rr);
@@ -1330,11 +1336,33 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           // For function params with annotation (x: Tensor), skip
           if (isFuncParam && afterVar.startsWith(':')) continue;
         } else {
-          // JS/TS: check for const/let/var
-          if (!/\b(const|let|var)\s+$/.test(beforeVar) && !/\bexport\s+(const|let|var)\s+$/.test(beforeVar)) continue;
+          // JS/TS patterns where we show inlay hints:
+          // 1. Declaration: `const x = ...`, `let x = ...`, `var x = ...`
+          // 2. Export declaration: `export const x = ...`
+          // 3. Reassignment: `x = ...`, `x += ...` (bare identifier at statement start)
+          // 4. For-loop variable: `for (const x of ...`, `for (let x in ...`
+          // 5. Function parameter: `function fn(x,` or `(x) =>`
+          // 6. Destructured binding: `const { x } = ...` or `const [x, ...`
+          // 7. Catch clause: `catch (err)`
+          const isDeclaration = /\b(const|let|var)\s+$/.test(beforeVar) || /\bexport\s+(const|let|var)\s+$/.test(beforeVar);
+          const isForLoopVar = /\bfor\s*\(\s*(const|let|var)\s+$/.test(beforeVar);
+          const isReassignment = /^\s*$/.test(beforeVar) && (afterVar.startsWith('=') && !afterVar.startsWith('==') && !afterVar.startsWith('=>'));
+          const isCompoundAssign = /^\s*$/.test(beforeVar) && /^(\+=|-=|\*=|\/=|%=|\*\*=|&&=|\|\|=|\?\?=|<<=|>>=|>>>=|&=|\|=|\^=)/.test(afterVar);
+          const isFuncParam = /\b(?:async\s+)?function\s+\w+\s*\(/.test(beforeVar) &&
+            (afterVar.startsWith(',') || afterVar.startsWith(')') || afterVar.startsWith(':') || afterVar.startsWith('='));
+          const isArrowParam = /\(\s*$/.test(beforeVar) &&
+            (afterVar.startsWith(',') || afterVar.startsWith(')') || afterVar.startsWith(':'));
+          const isDestructuredBinding = (/[{[,]\s*$/.test(beforeVar) || /\.\.\.\s*$/.test(beforeVar)) &&
+            (afterVar.startsWith(',') || afterVar.startsWith('}') || afterVar.startsWith(']') || afterVar.startsWith(':') || afterVar.startsWith('='));
+          const isCatchVar = /\bcatch\s*\(\s*$/.test(beforeVar);
 
-          // Check if there's already a type annotation
-          if (afterVar.startsWith(':') && !afterVar.startsWith(':=')) continue;
+          if (!isDeclaration && !isForLoopVar && !isReassignment && !isCompoundAssign &&
+              !isFuncParam && !isArrowParam && !isDestructuredBinding && !isCatchVar) continue;
+
+          // Check if there's already a type annotation (skip for declarations with `: Type`)
+          if (isDeclaration && afterVar.startsWith(':') && !afterVar.startsWith(':=')) continue;
+          // Skip function params that already have type annotation
+          if ((isFuncParam || isArrowParam) && afterVar.startsWith(':')) continue;
         }
 
         const obsLabels = getDimLabels(obs);
@@ -1348,7 +1376,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           } else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
             typeStr = String(obs.sample);
           } else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
-            typeStr = obs.sample ? 'True' : 'False';
+            typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
           } else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
             typeStr = `"${obs.sample}"`;
           }

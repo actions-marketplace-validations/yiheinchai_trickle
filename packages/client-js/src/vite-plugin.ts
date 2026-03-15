@@ -566,6 +566,31 @@ function findReassignments(source: string): Array<{ lineEnd: number; varName: st
  *   for (let i = 0; i < n; i++) { ... }        → trace i
  * Inserts trace calls at the start of the loop body.
  */
+/**
+ * Find catch clause variables and return insertions for tracing.
+ * Handles: catch (err) { ... } → trace err at start of catch body.
+ */
+function findCatchVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
+  const results: Array<{ bodyStart: number; varNames: string[]; lineNo: number }> = [];
+  const catchRegex = /\bcatch\s*\(\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*(?::\s*[^)]+?)?\s*\)\s*\{/g;
+  let match;
+
+  while ((match = catchRegex.exec(source)) !== null) {
+    const varName = match[1];
+    if (varName.startsWith('__trickle')) continue;
+
+    const bodyBrace = match.index + match[0].length - 1;
+    let lineNo = 1;
+    for (let i = 0; i < match.index; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+
+    results.push({ bodyStart: bodyBrace + 1, varNames: [varName], lineNo });
+  }
+
+  return results;
+}
+
 function findForLoopVars(source: string): Array<{ bodyStart: number; varNames: string[]; lineNo: number }> {
   const results: Array<{ bodyStart: number; varNames: string[]; lineNo: number }> = [];
 
@@ -1209,10 +1234,13 @@ export function transformEsmSource(
   // Find for-loop variable declarations for tracing
   const forLoopInsertions = traceVars ? findForLoopVars(source) : [];
 
+  // Find catch clause variables for tracing
+  const catchInsertions = traceVars ? findCatchVars(source) : [];
+
   // Find function parameter names for tracing
   const funcParamInsertions = traceVars ? findFunctionParams(source, isReactFile) : [];
 
-  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && funcParamInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
+  if (funcInsertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && bodyInsertions.length === 0 && hookInsertions.length === 0 && stateInsertions.length === 0 && conciseBodyInsertions.length === 0) return source;
 
   // Fix line numbers: Vite transforms (TypeScript stripping) may change line numbers.
   // Map transformed line numbers to original source line numbers.
@@ -1280,7 +1308,7 @@ export function transformEsmSource(
   }
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
-  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
+  const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
   const importLines: string[] = [
     `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
   ];
@@ -1350,7 +1378,7 @@ export function transformEsmSource(
   }
 
   // Add variable tracing if needed — inlined to avoid import resolution issues in Vite SSR.
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || funcParamInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0) {
     prefixLines.push(
       `if (!globalThis.__trickle_var_tracer) {`,
       `  const _cache = new Set();`,
@@ -1526,6 +1554,15 @@ export function transformEsmSource(
     allInsertions.push({
       position: lineEnd,
       code: `\n;try{__trickle_tv(${varName},${JSON.stringify(varName)},${lineNo})}catch(__e){}\n`,
+    });
+  }
+
+  // Catch clause insertions: insert trace at start of catch body
+  for (const { bodyStart, varNames, lineNo } of catchInsertions) {
+    const calls = varNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
+    allInsertions.push({
+      position: bodyStart,
+      code: `\ntry{${calls}}catch(__e2){}\n`,
     });
   }
 

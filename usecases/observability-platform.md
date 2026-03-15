@@ -121,7 +121,33 @@ Opens a dark-themed HTML dashboard at `http://localhost:4321` showing:
 
 Also serves a JSON API at `/api/data` for custom integrations.
 
-## Use Case 5: Production Deployment
+## Use Case 5: Custom Alerting Rules
+
+```bash
+# Create a rules file with default thresholds
+trickle rules init
+# → Creates .trickle/rules.json
+
+# Customize thresholds
+# Edit .trickle/rules.json:
+#   - Lower N+1 threshold to 3 (default: 5)
+#   - Set slow query critical at 200ms (default: 500ms)
+#   - Enable SELECT * detection
+#   - Enable total query count limit
+
+# Monitor respects your custom rules
+trickle monitor
+#   ✗ N+1 query pattern detected (threshold: 3)
+#   ⚠ 40 queries executed (limit: 20)
+#   ⚠ SELECT * detection: 2 queries match
+
+# View active rules
+trickle rules list
+```
+
+Available rule categories: `slow_query`, `n_plus_one`, `slow_function`, `memory`, `error`, `deep_call_stack`, `query_count`, `query_pattern` (regex).
+
+## Use Case 6: Production Deployment
 
 ```bash
 # Low overhead: sample 1% of calls, disable variable tracing

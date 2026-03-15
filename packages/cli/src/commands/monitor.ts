@@ -34,6 +34,189 @@ interface MonitorOptions {
   memoryThresholdMb?: number;
   webhook?: string;
   watch?: boolean;
+  rulesFile?: string;
+}
+
+// ── Rules engine ──
+
+interface Rule {
+  name: string;
+  category: string;
+  enabled: boolean;
+  severity?: 'critical' | 'warning' | 'info';
+  threshold?: Record<string, number>;
+  criticalThreshold?: Record<string, number>;
+  pattern?: string;
+  message?: string;
+}
+
+interface RulesConfig {
+  rules: Rule[];
+}
+
+const DEFAULT_RULES: RulesConfig = {
+  rules: [
+    {
+      name: "Slow queries",
+      category: "slow_query",
+      enabled: true,
+      threshold: { durationMs: 100 },
+      severity: "warning",
+      criticalThreshold: { durationMs: 500 },
+    },
+    {
+      name: "N+1 queries",
+      category: "n_plus_one",
+      enabled: true,
+      threshold: { count: 5 },
+      severity: "warning",
+      criticalThreshold: { count: 10 },
+    },
+    {
+      name: "Slow functions",
+      category: "slow_function",
+      enabled: true,
+      threshold: { durationMs: 1000 },
+      severity: "warning",
+      criticalThreshold: { durationMs: 5000 },
+    },
+    {
+      name: "Memory usage",
+      category: "memory",
+      enabled: true,
+      threshold: { maxMb: 512 },
+      severity: "warning",
+      criticalThreshold: { maxMb: 1024 },
+    },
+    {
+      name: "Errors",
+      category: "error",
+      enabled: true,
+      threshold: { count: 1 },
+      severity: "warning",
+      criticalThreshold: { count: 3 },
+    },
+    {
+      name: "Deep call stack",
+      category: "deep_call_stack",
+      enabled: true,
+      threshold: { maxDepth: 10 },
+      severity: "warning",
+      criticalThreshold: { maxDepth: 20 },
+    },
+    {
+      name: "Total query count",
+      category: "query_count",
+      enabled: false,
+      threshold: { maxQueries: 100 },
+      severity: "warning",
+      message: "Too many queries in a single run — consider batching or caching",
+    },
+    {
+      name: "SELECT * detection",
+      category: "query_pattern",
+      enabled: false,
+      pattern: "SELECT \\*",
+      severity: "info",
+      message: "Avoid SELECT * — select specific columns for better performance",
+    },
+  ],
+};
+
+function loadRules(trickleDir: string, rulesFile?: string): RulesConfig {
+  const filePath = rulesFile || path.join(trickleDir, 'rules.json');
+  try {
+    if (fs.existsSync(filePath)) {
+      const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      if (raw.rules && Array.isArray(raw.rules)) {
+        return raw;
+      }
+    }
+  } catch {}
+  return DEFAULT_RULES;
+}
+
+function getRuleThreshold(rules: RulesConfig, category: string, key: string, fallback: number): number {
+  const rule = rules.rules.find(r => r.category === category && r.enabled !== false);
+  if (rule?.threshold?.[key] !== undefined) return rule.threshold[key];
+  return fallback;
+}
+
+function getRuleCriticalThreshold(rules: RulesConfig, category: string, key: string, fallback: number): number {
+  const rule = rules.rules.find(r => r.category === category && r.enabled !== false);
+  if (rule?.criticalThreshold?.[key] !== undefined) return rule.criticalThreshold[key];
+  return fallback;
+}
+
+function isRuleEnabled(rules: RulesConfig, category: string): boolean {
+  const rule = rules.rules.find(r => r.category === category);
+  return rule ? rule.enabled !== false : true;
+}
+
+export function initRules(dir?: string): void {
+  const trickleDir = findTrickleDir(dir);
+  fs.mkdirSync(trickleDir, { recursive: true });
+  const filePath = path.join(trickleDir, 'rules.json');
+
+  if (fs.existsSync(filePath)) {
+    console.log(chalk.yellow(`  Rules file already exists: ${filePath}`));
+    console.log(chalk.gray('  Edit it to customize thresholds and enable/disable rules.'));
+    return;
+  }
+
+  fs.writeFileSync(filePath, JSON.stringify(DEFAULT_RULES, null, 2) + '\n', 'utf-8');
+  console.log('');
+  console.log(chalk.green(`  ✓ Created ${path.relative(process.cwd(), filePath)}`));
+  console.log('');
+  console.log(chalk.gray('  Customize thresholds by editing the file:'));
+  console.log(chalk.gray('    - slow_query.threshold.durationMs: 100ms (warning), 500ms (critical)'));
+  console.log(chalk.gray('    - n_plus_one.threshold.count: 5 (warning), 10 (critical)'));
+  console.log(chalk.gray('    - slow_function.threshold.durationMs: 1000ms'));
+  console.log(chalk.gray('    - memory.threshold.maxMb: 512MB'));
+  console.log(chalk.gray('    - Enable query_count or query_pattern rules for stricter checks'));
+  console.log('');
+  console.log(chalk.gray('  Run `trickle monitor` to apply rules, or `trickle rules list` to view them.'));
+  console.log('');
+}
+
+export function listRules(dir?: string): void {
+  const trickleDir = findTrickleDir(dir);
+  const rules = loadRules(trickleDir);
+  const hasCustomFile = fs.existsSync(path.join(trickleDir, 'rules.json'));
+
+  console.log('');
+  console.log(chalk.bold('  trickle rules'));
+  console.log(chalk.gray('  ' + '─'.repeat(50)));
+  console.log(chalk.gray(`  Source: ${hasCustomFile ? '.trickle/rules.json' : 'built-in defaults'}`));
+  console.log('');
+
+  for (const rule of rules.rules) {
+    const status = rule.enabled !== false ? chalk.green('✓') : chalk.gray('○');
+    const sev = rule.severity === 'critical' ? chalk.red(rule.severity) :
+      rule.severity === 'warning' ? chalk.yellow(rule.severity) :
+      chalk.blue(rule.severity || 'warning');
+
+    let thresholdStr = '';
+    if (rule.threshold) {
+      thresholdStr = Object.entries(rule.threshold).map(([k, v]) => `${k}=${v}`).join(', ');
+    }
+    if (rule.pattern) {
+      thresholdStr = `pattern: /${rule.pattern}/`;
+    }
+    if (rule.criticalThreshold) {
+      thresholdStr += ` | critical: ${Object.entries(rule.criticalThreshold).map(([k, v]) => `${k}=${v}`).join(', ')}`;
+    }
+
+    console.log(`  ${status} ${chalk.bold(rule.name)} [${sev}]`);
+    console.log(chalk.gray(`    ${rule.category} — ${thresholdStr}`));
+    if (rule.message) console.log(chalk.gray(`    "${rule.message}"`));
+  }
+
+  console.log('');
+  if (!hasCustomFile) {
+    console.log(chalk.gray('  Run `trickle rules init` to create a customizable rules file.'));
+    console.log('');
+  }
 }
 
 function findTrickleDir(dir?: string): string {
@@ -49,16 +232,19 @@ function readJsonl(filePath: string): unknown[] {
   return lines;
 }
 
-function analyzeQueries(trickleDir: string, slowThreshold: number): Alert[] {
+function analyzeQueries(trickleDir: string, slowThreshold: number, rules: RulesConfig): Alert[] {
   const alerts: Alert[] = [];
   const queries = readJsonl(path.join(trickleDir, 'queries.jsonl')) as any[];
 
-  const slowQueries = queries.filter(q => q.durationMs > slowThreshold);
-  if (slowQueries.length > 0) {
+  // Slow query detection
+  if (isRuleEnabled(rules, 'slow_query')) {
+    const threshold = getRuleThreshold(rules, 'slow_query', 'durationMs', slowThreshold);
+    const critThreshold = getRuleCriticalThreshold(rules, 'slow_query', 'durationMs', threshold * 5);
+    const slowQueries = queries.filter(q => q.durationMs > threshold);
     for (const q of slowQueries.slice(0, 5)) {
       alerts.push({
         kind: 'alert',
-        severity: q.durationMs > slowThreshold * 5 ? 'critical' : 'warning',
+        severity: q.durationMs > critThreshold ? 'critical' : 'warning',
         category: 'slow_query',
         message: `Slow ${q.driver || 'SQL'} query: ${q.durationMs.toFixed(1)}ms`,
         details: { query: q.query, durationMs: q.durationMs, driver: q.driver },
@@ -68,37 +254,78 @@ function analyzeQueries(trickleDir: string, slowThreshold: number): Alert[] {
     }
   }
 
-  // Detect N+1 pattern: same query executed many times
-  // Detect N+1 pattern: same query executed many times (skip DDL/PRAGMA)
-  const queryCounts = new Map<string, number>();
-  const skipPatterns = /^(PRAGMA|CREATE |ALTER |DROP |INSERT INTO|BEGIN|COMMIT|ROLLBACK)/i;
-  for (const q of queries) {
-    const key = q.query?.substring(0, 100);
-    if (key && !skipPatterns.test(key)) queryCounts.set(key, (queryCounts.get(key) || 0) + 1);
+  // N+1 pattern detection
+  if (isRuleEnabled(rules, 'n_plus_one')) {
+    const n1Threshold = getRuleThreshold(rules, 'n_plus_one', 'count', 5);
+    const n1CritThreshold = getRuleCriticalThreshold(rules, 'n_plus_one', 'count', 10);
+    const queryCounts = new Map<string, number>();
+    const skipPatterns = /^(PRAGMA|CREATE |ALTER |DROP |INSERT INTO|BEGIN|COMMIT|ROLLBACK)/i;
+    for (const q of queries) {
+      const key = q.query?.substring(0, 100);
+      if (key && !skipPatterns.test(key)) queryCounts.set(key, (queryCounts.get(key) || 0) + 1);
+    }
+    for (const [query, count] of queryCounts) {
+      if (count >= n1Threshold) {
+        alerts.push({
+          kind: 'alert',
+          severity: count >= n1CritThreshold ? 'critical' : 'warning',
+          category: 'n_plus_one',
+          message: `N+1 query pattern: "${query.substring(0, 60)}" executed ${count} times`,
+          details: { query, executionCount: count },
+          timestamp: Date.now(),
+          suggestion: `Use a JOIN or batch query instead of executing "${query.substring(0, 40)}" in a loop.`,
+        });
+      }
+    }
   }
-  for (const [query, count] of queryCounts) {
-    if (count >= 5) {
+
+  // Total query count check
+  if (isRuleEnabled(rules, 'query_count')) {
+    const maxQueries = getRuleThreshold(rules, 'query_count', 'maxQueries', 100);
+    if (queries.length > maxQueries) {
+      const rule = rules.rules.find(r => r.category === 'query_count');
       alerts.push({
         kind: 'alert',
-        severity: count >= 10 ? 'critical' : 'warning',
-        category: 'n_plus_one',
-        message: `N+1 query pattern: "${query.substring(0, 60)}" executed ${count} times`,
-        details: { query, executionCount: count },
+        severity: 'warning',
+        category: 'query_count',
+        message: `${queries.length} queries executed (limit: ${maxQueries})`,
+        details: { count: queries.length, limit: maxQueries },
         timestamp: Date.now(),
-        suggestion: `Use a JOIN or batch query instead of executing "${query.substring(0, 40)}" in a loop.`,
+        suggestion: rule?.message || 'Consider batching or caching queries to reduce total count.',
       });
     }
+  }
+
+  // Custom query pattern detection
+  const patternRules = rules.rules.filter(r => r.category === 'query_pattern' && r.enabled !== false && r.pattern);
+  for (const rule of patternRules) {
+    try {
+      const regex = new RegExp(rule.pattern!, 'i');
+      const matching = queries.filter(q => q.query && regex.test(q.query));
+      if (matching.length > 0) {
+        alerts.push({
+          kind: 'alert',
+          severity: rule.severity || 'info',
+          category: 'query_pattern',
+          message: `${rule.name}: ${matching.length} query(ies) match pattern /${rule.pattern}/`,
+          details: { pattern: rule.pattern, count: matching.length, sampleQuery: matching[0].query?.substring(0, 100) },
+          timestamp: Date.now(),
+          suggestion: rule.message || `Review queries matching /${rule.pattern}/`,
+        });
+      }
+    } catch {}
   }
 
   return alerts;
 }
 
-function analyzeErrors(trickleDir: string): Alert[] {
+function analyzeErrors(trickleDir: string, rules: RulesConfig): Alert[] {
+  if (!isRuleEnabled(rules, 'error')) return [];
   const alerts: Alert[] = [];
   const errors = readJsonl(path.join(trickleDir, 'errors.jsonl')) as any[];
+  const critThreshold = getRuleCriticalThreshold(rules, 'error', 'count', 3);
 
   if (errors.length > 0) {
-    // Group by error type
     const byType = new Map<string, any[]>();
     for (const e of errors) {
       const type = e.type || e.error || 'Unknown';
@@ -109,7 +336,7 @@ function analyzeErrors(trickleDir: string): Alert[] {
     for (const [type, errs] of byType) {
       alerts.push({
         kind: 'alert',
-        severity: errs.length >= 3 ? 'critical' : 'warning',
+        severity: errs.length >= critThreshold ? 'critical' : 'warning',
         category: 'error',
         message: `${type}: ${errs.length} occurrence(s)`,
         details: {
@@ -128,7 +355,8 @@ function analyzeErrors(trickleDir: string): Alert[] {
   return alerts;
 }
 
-function analyzeMemory(trickleDir: string, thresholdMb: number): Alert[] {
+function analyzeMemory(trickleDir: string, thresholdMb: number, rules: RulesConfig): Alert[] {
+  if (!isRuleEnabled(rules, 'memory')) return [];
   const alerts: Alert[] = [];
   const profile = readJsonl(path.join(trickleDir, 'profile.jsonl')) as any[];
 
@@ -140,10 +368,13 @@ function analyzeMemory(trickleDir: string, thresholdMb: number): Alert[] {
     const endMb = end.rssKb / 1024;
     const growthMb = endMb - startMb;
 
-    if (endMb > thresholdMb) {
+    const memThreshold = getRuleThreshold(rules, 'memory', 'maxMb', thresholdMb);
+    const memCritThreshold = getRuleCriticalThreshold(rules, 'memory', 'maxMb', memThreshold * 2);
+
+    if (endMb > memThreshold) {
       alerts.push({
         kind: 'alert',
-        severity: endMb > thresholdMb * 2 ? 'critical' : 'warning',
+        severity: endMb > memCritThreshold ? 'critical' : 'warning',
         category: 'memory',
         message: `High memory usage: ${endMb.toFixed(0)}MB RSS (grew ${growthMb.toFixed(0)}MB during execution)`,
         details: { startMb: Math.round(startMb), endMb: Math.round(endMb), growthMb: Math.round(growthMb) },
@@ -156,15 +387,19 @@ function analyzeMemory(trickleDir: string, thresholdMb: number): Alert[] {
   return alerts;
 }
 
-function analyzeFunctions(trickleDir: string, slowThreshold: number): Alert[] {
+function analyzeFunctions(trickleDir: string, slowThreshold: number, rules: RulesConfig): Alert[] {
+  if (!isRuleEnabled(rules, 'slow_function')) return [];
   const alerts: Alert[] = [];
   const observations = readJsonl(path.join(trickleDir, 'observations.jsonl')) as any[];
 
-  const slowFuncs = observations.filter(o => o.durationMs && o.durationMs > slowThreshold);
+  const fnThreshold = getRuleThreshold(rules, 'slow_function', 'durationMs', slowThreshold);
+  const fnCritThreshold = getRuleCriticalThreshold(rules, 'slow_function', 'durationMs', fnThreshold * 5);
+
+  const slowFuncs = observations.filter(o => o.durationMs && o.durationMs > fnThreshold);
   for (const fn of slowFuncs.slice(0, 5)) {
     alerts.push({
       kind: 'alert',
-      severity: fn.durationMs > slowThreshold * 5 ? 'critical' : 'warning',
+      severity: fn.durationMs > fnCritThreshold ? 'critical' : 'warning',
       category: 'slow_function',
       message: `Slow function: ${fn.functionName} took ${fn.durationMs.toFixed(1)}ms`,
       details: { function: fn.functionName, module: fn.module, durationMs: fn.durationMs },
@@ -176,16 +411,19 @@ function analyzeFunctions(trickleDir: string, slowThreshold: number): Alert[] {
   return alerts;
 }
 
-function analyzeCallTrace(trickleDir: string): Alert[] {
+function analyzeCallTrace(trickleDir: string, rules: RulesConfig): Alert[] {
+  if (!isRuleEnabled(rules, 'deep_call_stack')) return [];
   const alerts: Alert[] = [];
   const trace = readJsonl(path.join(trickleDir, 'calltrace.jsonl')) as any[];
 
-  // Detect deeply nested call stacks (depth > 10)
+  const depthThreshold = getRuleThreshold(rules, 'deep_call_stack', 'maxDepth', 10);
+  const depthCritThreshold = getRuleCriticalThreshold(rules, 'deep_call_stack', 'maxDepth', 20);
+
   const maxDepth = Math.max(0, ...trace.map((t: any) => t.depth || 0));
-  if (maxDepth > 10) {
+  if (maxDepth > depthThreshold) {
     alerts.push({
       kind: 'alert',
-      severity: maxDepth > 20 ? 'critical' : 'warning',
+      severity: maxDepth > depthCritThreshold ? 'critical' : 'warning',
       category: 'deep_call_stack',
       message: `Deep call stack detected: max depth ${maxDepth}`,
       details: { maxDepth },
@@ -204,16 +442,17 @@ export function runMonitor(opts: MonitorOptions): Alert[] {
     return [];
   }
 
+  const rules = loadRules(trickleDir, opts.rulesFile);
   const slowQueryMs = opts.slowQueryMs || 100;
   const slowFunctionMs = opts.slowFunctionMs || 1000;
   const memoryThresholdMb = opts.memoryThresholdMb || 512;
 
   const allAlerts: Alert[] = [
-    ...analyzeQueries(trickleDir, slowQueryMs),
-    ...analyzeErrors(trickleDir),
-    ...analyzeMemory(trickleDir, memoryThresholdMb),
-    ...analyzeFunctions(trickleDir, slowFunctionMs),
-    ...analyzeCallTrace(trickleDir),
+    ...analyzeQueries(trickleDir, slowQueryMs, rules),
+    ...analyzeErrors(trickleDir, rules),
+    ...analyzeMemory(trickleDir, memoryThresholdMb, rules),
+    ...analyzeFunctions(trickleDir, slowFunctionMs, rules),
+    ...analyzeCallTrace(trickleDir, rules),
   ];
 
   // Write alerts to file for agent consumption

@@ -491,6 +491,7 @@ program
   .option("--memory <mb>", "Memory threshold in MB", "512")
   .option("--webhook <url>", "Send alerts to a webhook URL (Slack-compatible)")
   .option("--watch", "Continuously watch for data changes and re-analyze")
+  .option("--rules <file>", "Path to custom rules file (default: .trickle/rules.json)")
   .action(async (opts) => {
     const { runMonitor } = await import("./commands/monitor");
     runMonitor({
@@ -499,8 +500,20 @@ program
       memoryThresholdMb: parseInt(opts.memory),
       webhook: opts.webhook,
       watch: opts.watch,
+      rulesFile: opts.rules,
     });
   });
+
+// trickle rules
+const rulesCmd = program.command("rules").description("Manage alerting rules — custom thresholds for monitoring");
+rulesCmd.command("init").description("Create a .trickle/rules.json with default rules").action(async () => {
+  const { initRules } = await import("./commands/monitor");
+  initRules();
+});
+rulesCmd.command("list").description("Show active alerting rules and thresholds").action(async () => {
+  const { listRules } = await import("./commands/monitor");
+  listRules();
+});
 
 // trickle status
 program

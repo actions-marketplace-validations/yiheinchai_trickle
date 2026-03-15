@@ -312,6 +312,8 @@ Search "trickle" in Extensions (Cmd+Shift+X), publisher `yiheinchai`. Shows inli
 | `trickle run <cmd>` | Run any command with auto-instrumentation |
 | `trickle monitor` | Detect anomalies: N+1 queries, slow functions, errors, memory |
 | `trickle monitor --watch --webhook <url>` | Continuous monitoring with Slack/webhook alerts |
+| `trickle rules init` | Create .trickle/rules.json with customizable alerting thresholds |
+| `trickle rules list` | Show active rules and thresholds |
 | `trickle heal` | Generate fix plans with context for agent auto-remediation |
 | `trickle verify --baseline` / `trickle verify` | Before/after metric comparison to verify fixes |
 | `trickle dashboard-local` | Self-contained HTML dashboard (no backend needed) |

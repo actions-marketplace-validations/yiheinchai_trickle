@@ -6,12 +6,12 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.158. 30 MCP tools. Shipped trickle cost — estimates cloud cost per function/query
-using Lambda pricing model with visual bar chart breakdown and monthly projection.
-Also shipped: waterfall, anomaly detection, per-request tracing, diff-runs, fix suggestions,
-OTLP export, Prometheus, Slack/Discord webhooks, GitHub PR comments.
+CLI 0.1.159. 30 MCP tools. Shipped trickle deps — module dependency graph with interactive
+HTML view and Mermaid diagram output for GitHub/docs. Also shipped cost estimation, waterfall,
+anomaly detection, per-request tracing, diff-runs, fix suggestions, OTLP, Prometheus,
+Slack/Discord, GitHub PR comments.
 
-Next: SLO burn rate alerting, cost MCP tool, dependency graph visualization.
+Next: SLO burn rate alerting, dependency graph MCP tool, test all new features on real projects.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

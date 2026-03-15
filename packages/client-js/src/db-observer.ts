@@ -534,6 +534,166 @@ export function patchKnex(knexModule: any, debug: boolean): void {
 }
 
 /**
+ * Patch TypeORM to capture queries via its Logger interface.
+ * TypeORM DataSource accepts a `logger` option. We wrap createConnection/DataSource
+ * to inject a custom logger that captures all queries.
+ */
+export function patchTypeORM(typeormModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  // Patch DataSource constructor (TypeORM 0.3+)
+  const DataSource = typeormModule.DataSource;
+  if (DataSource && !DataSource.__trickle_patched) {
+    const OrigDataSource = DataSource;
+
+    typeormModule.DataSource = function PatchedDataSource(options: any) {
+      // Inject custom logger
+      if (!options._trickle_injected) {
+        options._trickle_injected = true;
+        const origLogger = options.logger;
+
+        options.logger = {
+          logQuery(query: string, parameters?: any[]) {
+            writeQuery({
+              kind: 'query',
+              query: query.substring(0, MAX_QUERY_LENGTH),
+              params: parameters?.slice(0, 5),
+              durationMs: 0,
+              rowCount: 0,
+              timestamp: Date.now(),
+            });
+            if (origLogger && typeof origLogger === 'object' && 'logQuery' in origLogger) {
+              origLogger.logQuery(query, parameters);
+            }
+          },
+          logQueryError(error: string, query: string, parameters?: any[]) {
+            writeQuery({
+              kind: 'query',
+              query: query.substring(0, MAX_QUERY_LENGTH),
+              params: parameters?.slice(0, 5),
+              durationMs: 0,
+              rowCount: 0,
+              error: error.substring(0, 200),
+              timestamp: Date.now(),
+            });
+          },
+          logQuerySlow(time: number, query: string, parameters?: any[]) {
+            writeQuery({
+              kind: 'query',
+              query: query.substring(0, MAX_QUERY_LENGTH),
+              params: parameters?.slice(0, 5),
+              durationMs: time,
+              rowCount: 0,
+              timestamp: Date.now(),
+            });
+          },
+          logSchemaBuild() {},
+          logMigration() {},
+          log() {},
+        };
+      }
+
+      return new OrigDataSource(options);
+    };
+
+    // Copy statics
+    Object.setPrototypeOf(typeormModule.DataSource, OrigDataSource);
+    typeormModule.DataSource.prototype = OrigDataSource.prototype;
+    typeormModule.DataSource.__trickle_patched = true;
+  }
+
+  // Also patch createConnection (TypeORM 0.2)
+  if (typeormModule.createConnection && !(typeormModule.createConnection as any).__trickle_patched) {
+    const origCreate = typeormModule.createConnection;
+    typeormModule.createConnection = function patchedCreateConnection(options: any) {
+      if (options && typeof options === 'object' && !options.logging) {
+        options.logging = true;
+      }
+      return origCreate(options);
+    };
+    (typeormModule.createConnection as any).__trickle_patched = true;
+  }
+
+  if (debug) console.log('[trickle/db] TypeORM query tracing enabled');
+}
+
+/**
+ * Patch Sequelize to capture queries via its logging option.
+ * Sequelize accepts a `logging` function in its constructor options.
+ */
+export function patchSequelize(sequelizeModule: any, debug: boolean): void {
+  debugMode = debug;
+
+  const Sequelize = sequelizeModule.Sequelize || sequelizeModule.default || sequelizeModule;
+  if (!Sequelize || typeof Sequelize !== 'function' || (Sequelize as any).__trickle_patched) return;
+
+  const origConstructor = Sequelize;
+
+  const patchedSequelize = function (this: any, ...args: any[]) {
+    // Sequelize(uri, options) or Sequelize(database, user, pass, options)
+    let options: any;
+    if (args.length >= 4) {
+      options = args[3] = args[3] || {};
+    } else if (args.length >= 2 && typeof args[1] === 'object') {
+      options = args[1];
+    } else if (args.length === 1 && typeof args[0] === 'object') {
+      options = args[0];
+    } else {
+      options = {};
+      args.push(options);
+    }
+
+    // Wrap the logging function
+    const origLogging = options.logging;
+    options.logging = (sql: string, timing?: any) => {
+      const queryText = typeof sql === 'string' ? sql : String(sql);
+      // Sequelize prepends "Executed (default): " or "Executing (default): " to queries
+      const cleanQuery = queryText.replace(/^Execut(?:ed|ing) \([^)]*\):\s*/, '');
+      const durationMs = typeof timing === 'number' ? timing : 0;
+
+      writeQuery({
+        kind: 'query',
+        query: cleanQuery.substring(0, MAX_QUERY_LENGTH),
+        durationMs,
+        rowCount: 0,
+        timestamp: Date.now(),
+      });
+
+      // Call original logger
+      if (typeof origLogging === 'function') {
+        origLogging(sql, timing);
+      }
+    };
+    options.benchmark = true; // Enable timing in log
+
+    // Call original constructor
+    if (new.target) {
+      return new origConstructor(...args);
+    }
+    return origConstructor.apply(this, args);
+  };
+
+  // Copy prototype and statics
+  patchedSequelize.prototype = origConstructor.prototype;
+  Object.setPrototypeOf(patchedSequelize, origConstructor);
+  for (const key of Object.getOwnPropertyNames(origConstructor)) {
+    if (key !== 'prototype' && key !== 'length' && key !== 'name') {
+      try {
+        Object.defineProperty(patchedSequelize, key, Object.getOwnPropertyDescriptor(origConstructor, key)!);
+      } catch {}
+    }
+  }
+
+  // Replace in module exports
+  if (sequelizeModule.Sequelize) {
+    sequelizeModule.Sequelize = patchedSequelize;
+  }
+  (patchedSequelize as any).__trickle_patched = true;
+
+  if (debug) console.log('[trickle/db] Sequelize query tracing enabled');
+}
+
+/**
  * Patch mongoose to capture MongoDB operations.
  * Called from observe-register when mongoose is required.
  */

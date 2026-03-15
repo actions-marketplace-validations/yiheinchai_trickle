@@ -1215,6 +1215,24 @@ if (enabled) {
       } catch { /* not critical */ }
     }
 
+    // TypeORM
+    if (request === 'typeorm' && !expressPatched.has('typeorm')) {
+      expressPatched.add('typeorm');
+      try {
+        const { patchTypeORM } = require(path.join(__dirname, 'db-observer.js'));
+        patchTypeORM(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // Sequelize
+    if (request === 'sequelize' && !expressPatched.has('sequelize')) {
+      expressPatched.add('sequelize');
+      try {
+        const { patchSequelize } = require(path.join(__dirname, 'db-observer.js'));
+        patchSequelize(exports, debug);
+      } catch { /* not critical */ }
+    }
+
     // Redis (ioredis)
     if (request === 'ioredis' && !expressPatched.has('ioredis')) {
       expressPatched.add('ioredis');

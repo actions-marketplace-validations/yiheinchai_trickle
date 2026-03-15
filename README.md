@@ -214,7 +214,7 @@ trickle context src/api.ts --annotated   # source + runtime values
 | Functions | `trickle functions` | Signatures with parameter types + timing |
 | Call trace | `trickle context --trace` | Which function called which, execution flow |
 | Errors | `trickle context --errors` | Stack trace + nearby variable values |
-| DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts (Prisma, SQLAlchemy, Knex, Drizzle auto-patched) |
+| DB Queries | `trickle context --queries` | SQL/Redis/MongoDB with timing + row counts (Prisma, Sequelize, TypeORM, SQLAlchemy, Knex, Drizzle auto-patched) |
 | HTTP | `trickle context --http` | Fetch calls with status codes + response types |
 | Logs | `trickle context --logs` | Structured logging events with levels + context |
 | Console | `trickle context --console` | All stdout/stderr with timestamps |
@@ -272,7 +272,7 @@ trickle dashboard-local             # self-contained HTML dashboard
 trickle monitor --webhook <url>     # Slack/Discord alerts
 ```
 
-Zero config, zero code changes. Auto-detects databases (PostgreSQL, MySQL, SQLite, Redis, MongoDB), HTTP clients, and WebSocket connections. Production mode with configurable sampling.
+Zero config, zero code changes. Auto-detects databases (PostgreSQL, MySQL, SQLite, Redis, MongoDB) and ORMs (Prisma, Sequelize, TypeORM, SQLAlchemy, Knex, Drizzle), HTTP clients, and WebSocket connections. Production mode with configurable sampling.
 
 **[Full Observability Platform Guide →](usecases/observability-platform.md)**
 

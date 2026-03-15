@@ -2,16 +2,11 @@ Think of 1 item to work on ML engineer user case to improve the developer experi
 
 For now, i want you to specifically focus on:
 <general directive>
-the vision is to have trickle capture every variable in every file for React. so for example, when i run my react app, i want to seee inline hints (the value of each variable) in every file so i can see how the data flows and what is in the props.
-
-basically the same as the full multifile inline hints in python
+Improving the developer experience in real codebases, test diverse codebases from online and find painpoints and fix them
 </general directive>
 
 <focus point>
-All JS/TS + Python tracer paths comprehensive with live-updating values. React (Vite/Next.js/Remix), Node.js backend (Express), Python (scripts/notebooks/nanoGPT) all working. Use cases updated. Next areas:
-- Consider adding React DevTools-style component tree visualization using the captured render data
-- Explore tracing custom hook return values with richer type info
-- Consider adding Svelte/Vue support for broader frontend coverage
+Fixed numpy scalar display (np.float64 showed tensor metadata instead of actual values like 0.95). Tested on sklearn ML pipeline with 44 variables. Continue testing on diverse real-world codebases to find more pain points.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -643,6 +643,11 @@ const TOOLS = [
     },
   },
   {
+    name: "get_recommended_actions",
+    description: "Analyzes the current state of trickle data and recommends the next actions to take. Returns a prioritized list of what to do — which tools to call, what to investigate, and what to fix. Call this FIRST when you're unsure what to do.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "get_flamegraph",
     description: "Generate a performance flamegraph from call traces. Returns hotspots (functions sorted by time), a call tree, and folded stacks format. Use this to understand WHERE time is being spent in the application — essential for performance debugging.",
     inputSchema: { type: "object", properties: {} },
@@ -779,6 +784,139 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "get_recommended_actions": {
+            try {
+              const dir = findTrickleDir();
+              const actions: Array<{ priority: number; action: string; tool: string; reason: string }> = [];
+
+              // Check if data exists
+              const hasObs = fs.existsSync(path.join(dir, 'observations.jsonl'));
+              const hasVars = fs.existsSync(path.join(dir, 'variables.jsonl'));
+              const hasQueries = fs.existsSync(path.join(dir, 'queries.jsonl'));
+              const hasErrors = fs.existsSync(path.join(dir, 'errors.jsonl'));
+              const hasSummary = fs.existsSync(path.join(dir, 'summary.json'));
+              const hasBaseline = fs.existsSync(path.join(dir, 'baseline.json'));
+
+              if (!hasObs && !hasVars) {
+                actions.push({
+                  priority: 1,
+                  action: 'Run the application with trickle to capture runtime data',
+                  tool: 'refresh_runtime_data',
+                  reason: 'No runtime data found. You need to run the app first.',
+                });
+                result = { actions, status: 'no_data' };
+                break;
+              }
+
+              // Check freshness
+              let dataAgeMs = Infinity;
+              try {
+                const stat = fs.statSync(path.join(dir, hasObs ? 'observations.jsonl' : 'variables.jsonl'));
+                dataAgeMs = Date.now() - stat.mtimeMs;
+              } catch {}
+
+              if (dataAgeMs > 3600000) {
+                actions.push({
+                  priority: 1,
+                  action: 'Re-run the app — data is stale (over 1 hour old)',
+                  tool: 'refresh_runtime_data',
+                  reason: `Data is ${Math.round(dataAgeMs / 60000)} minutes old.`,
+                });
+              }
+
+              // Always recommend summary first
+              actions.push({
+                priority: 2,
+                action: 'Get a comprehensive overview of the last run',
+                tool: 'get_last_run_summary',
+                reason: 'One call gives you status, errors, queries, functions, alerts, and fix recommendations.',
+              });
+
+              // Check for alerts
+              let alertCount = 0;
+              let criticalCount = 0;
+              const alertsFile = path.join(dir, 'alerts.jsonl');
+              if (fs.existsSync(alertsFile)) {
+                const lines = fs.readFileSync(alertsFile, 'utf-8').split('\n').filter(Boolean);
+                alertCount = lines.length;
+                criticalCount = lines.filter(l => { try { return JSON.parse(l).severity === 'critical'; } catch { return false; } }).length;
+              }
+
+              if (criticalCount > 0) {
+                actions.push({
+                  priority: 1,
+                  action: `Investigate ${criticalCount} critical alert(s)`,
+                  tool: 'get_alerts',
+                  reason: 'Critical issues detected that need immediate attention.',
+                });
+              } else if (alertCount > 0) {
+                actions.push({
+                  priority: 3,
+                  action: `Review ${alertCount} alert(s) (N+1 queries, slow functions, etc.)`,
+                  tool: 'get_alerts',
+                  reason: 'Warnings detected — review for optimization opportunities.',
+                });
+              }
+
+              // Check for errors
+              if (hasErrors) {
+                const errorLines = fs.readFileSync(path.join(dir, 'errors.jsonl'), 'utf-8').split('\n').filter(Boolean);
+                if (errorLines.length > 0) {
+                  actions.push({
+                    priority: 1,
+                    action: `Debug ${errorLines.length} error(s)`,
+                    tool: 'get_errors',
+                    reason: 'Runtime errors detected. Use explain_file on the relevant source file for context.',
+                  });
+                }
+              }
+
+              // Suggest flamegraph if we have call traces
+              if (fs.existsSync(path.join(dir, 'calltrace.jsonl'))) {
+                const traceLines = fs.readFileSync(path.join(dir, 'calltrace.jsonl'), 'utf-8').split('\n').filter(Boolean).length;
+                if (traceLines > 5) {
+                  actions.push({
+                    priority: 4,
+                    action: 'Generate a performance flamegraph to find bottlenecks',
+                    tool: 'get_flamegraph',
+                    reason: `${traceLines} call trace events available for analysis.`,
+                  });
+                }
+              }
+
+              // Suggest baseline if not saved
+              if (!hasBaseline && alertCount > 0) {
+                actions.push({
+                  priority: 3,
+                  action: 'Save a baseline before making fixes',
+                  tool: 'save_baseline',
+                  reason: 'Save current metrics so you can verify improvements after fixing issues.',
+                });
+              }
+
+              // Suggest comparison if baseline exists
+              if (hasBaseline) {
+                actions.push({
+                  priority: 2,
+                  action: 'Compare current state against saved baseline',
+                  tool: 'compare_with_baseline',
+                  reason: 'A baseline exists — check if recent changes improved or regressed metrics.',
+                });
+              }
+
+              // Sort by priority
+              actions.sort((a, b) => a.priority - b.priority);
+
+              result = {
+                actions,
+                status: criticalCount > 0 ? 'critical' : alertCount > 0 ? 'needs_attention' : 'healthy',
+                dataAge: dataAgeMs < Infinity ? `${Math.round(dataAgeMs / 1000)}s ago` : 'unknown',
+              };
+            } catch (e: any) {
+              result = { error: `Failed to analyze state: ${e.message}` };
             }
             break;
           }

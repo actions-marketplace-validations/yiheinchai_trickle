@@ -511,10 +511,15 @@ function loadAllVariables() {
                     // Handle React hook invocation records
                     if (record.kind === 'react_hook') {
                         const rh = record;
-                        if (!reactHookIndex.has(rh.file)) {
-                            reactHookIndex.set(rh.file, new Map());
+                        let rhPath = rh.file;
+                        try {
+                            rhPath = fs.realpathSync(rhPath);
                         }
-                        const lineMap = reactHookIndex.get(rh.file);
+                        catch { /* keep original */ }
+                        if (!reactHookIndex.has(rhPath)) {
+                            reactHookIndex.set(rhPath, new Map());
+                        }
+                        const lineMap = reactHookIndex.get(rhPath);
                         const existing = lineMap.get(rh.line);
                         if (!existing || rh.invokeCount > existing.invokeCount) {
                             lineMap.set(rh.line, rh);
@@ -524,10 +529,15 @@ function loadAllVariables() {
                     // Handle React useState update records
                     if (record.kind === 'react_state') {
                         const rs = record;
-                        if (!reactStateIndex.has(rs.file)) {
-                            reactStateIndex.set(rs.file, new Map());
+                        let rsPath = rs.file;
+                        try {
+                            rsPath = fs.realpathSync(rsPath);
                         }
-                        const lineMap = reactStateIndex.get(rs.file);
+                        catch { /* keep original */ }
+                        if (!reactStateIndex.has(rsPath)) {
+                            reactStateIndex.set(rsPath, new Map());
+                        }
+                        const lineMap = reactStateIndex.get(rsPath);
                         const existing = lineMap.get(rs.line);
                         if (!existing || rs.updateCount > existing.updateCount) {
                             lineMap.set(rs.line, rs);
@@ -537,10 +547,15 @@ function loadAllVariables() {
                     // Handle React render records
                     if (record.kind === 'react_render') {
                         const rr = record;
-                        if (!reactRenderIndex.has(rr.file)) {
-                            reactRenderIndex.set(rr.file, new Map());
+                        let rrPath = rr.file;
+                        try {
+                            rrPath = fs.realpathSync(rrPath);
                         }
-                        const lineMap = reactRenderIndex.get(rr.file);
+                        catch { /* keep original */ }
+                        if (!reactRenderIndex.has(rrPath)) {
+                            reactRenderIndex.set(rrPath, new Map());
+                        }
+                        const lineMap = reactRenderIndex.get(rrPath);
                         const existing = lineMap.get(rr.line);
                         if (!existing || rr.renderCount > existing.renderCount) {
                             lineMap.set(rr.line, rr);
@@ -573,7 +588,12 @@ function loadAllVariables() {
                     const obs = record;
                     if (obs.kind !== 'variable')
                         continue;
-                    const filePath = obs.file;
+                    // Resolve symlinks so paths match VSCode's document.uri.fsPath
+                    let filePath = obs.file;
+                    try {
+                        filePath = fs.realpathSync(filePath);
+                    }
+                    catch { /* keep original if file doesn't exist */ }
                     // Check if this is a notebook cell observation
                     // Format: "/path/to/notebook.ipynb#cell_N" or "__notebook__cell_N.py"
                     const cellMatch = filePath.match(/#cell_(\d+)$/) || filePath.match(/__notebook__cell_(\d+)\.py$/);
@@ -604,11 +624,18 @@ function loadAllVariables() {
                     if (!lineMap.has(obs.line)) {
                         lineMap.set(obs.line, []);
                     }
-                    // Deduplicate: replace existing observation with same varName (last wins)
-                    // This prevents stacking multiple values from loops (e.g. "num: 5: 6")
+                    // Deduplicate: replace existing observation with same varName (last wins for inline display)
+                    // But preserve previous samples for hover tooltip value history
                     const existingVars = lineMap.get(obs.line);
                     const existingVarIdx = existingVars.findIndex(o => o.varName === obs.varName);
                     if (existingVarIdx >= 0) {
+                        const prev = existingVars[existingVarIdx];
+                        const prevSamples = prev.previousSamples || [];
+                        // Keep up to 4 previous samples (so total history is 5 with current)
+                        if (prevSamples.length < 4) {
+                            prevSamples.push(prev.sample);
+                        }
+                        obs.previousSamples = prevSamples;
                         existingVars[existingVarIdx] = obs;
                     }
                     else {
@@ -1002,11 +1029,33 @@ class TrickleInlayHintsProvider {
                         continue;
                 }
                 else {
-                    // JS/TS: check for const/let/var
-                    if (!/\b(const|let|var)\s+$/.test(beforeVar) && !/\bexport\s+(const|let|var)\s+$/.test(beforeVar))
+                    // JS/TS patterns where we show inlay hints:
+                    // 1. Declaration: `const x = ...`, `let x = ...`, `var x = ...`
+                    // 2. Export declaration: `export const x = ...`
+                    // 3. Reassignment: `x = ...`, `x += ...` (bare identifier at statement start)
+                    // 4. For-loop variable: `for (const x of ...`, `for (let x in ...`
+                    // 5. Function parameter: `function fn(x,` or `(x) =>`
+                    // 6. Destructured binding: `const { x } = ...` or `const [x, ...`
+                    // 7. Catch clause: `catch (err)`
+                    const isDeclaration = /\b(const|let|var)\s+$/.test(beforeVar) || /\bexport\s+(const|let|var)\s+$/.test(beforeVar);
+                    const isForLoopVar = /\bfor\s*\(\s*(const|let|var)\s+$/.test(beforeVar);
+                    const isReassignment = /^\s*$/.test(beforeVar) && (afterVar.startsWith('=') && !afterVar.startsWith('==') && !afterVar.startsWith('=>'));
+                    const isCompoundAssign = /^\s*$/.test(beforeVar) && /^(\+=|-=|\*=|\/=|%=|\*\*=|&&=|\|\|=|\?\?=|<<=|>>=|>>>=|&=|\|=|\^=)/.test(afterVar);
+                    const isFuncParam = /\b(?:async\s+)?function\s+\w+\s*\(/.test(beforeVar) &&
+                        (afterVar.startsWith(',') || afterVar.startsWith(')') || afterVar.startsWith(':') || afterVar.startsWith('='));
+                    const isArrowParam = /\(\s*$/.test(beforeVar) &&
+                        (afterVar.startsWith(',') || afterVar.startsWith(')') || afterVar.startsWith(':'));
+                    const isDestructuredBinding = (/[{[,]\s*$/.test(beforeVar) || /\.\.\.\s*$/.test(beforeVar)) &&
+                        (afterVar.startsWith(',') || afterVar.startsWith('}') || afterVar.startsWith(']') || afterVar.startsWith(':') || afterVar.startsWith('='));
+                    const isCatchVar = /\bcatch\s*\(\s*$/.test(beforeVar);
+                    if (!isDeclaration && !isForLoopVar && !isReassignment && !isCompoundAssign &&
+                        !isFuncParam && !isArrowParam && !isDestructuredBinding && !isCatchVar)
                         continue;
-                    // Check if there's already a type annotation
-                    if (afterVar.startsWith(':') && !afterVar.startsWith(':='))
+                    // Check if there's already a type annotation (skip for declarations with `: Type`)
+                    if (isDeclaration && afterVar.startsWith(':') && !afterVar.startsWith(':='))
+                        continue;
+                    // Skip function params that already have type annotation
+                    if ((isFuncParam || isArrowParam) && afterVar.startsWith(':'))
                         continue;
                 }
                 const obsLabels = getDimLabels(obs);
@@ -1021,7 +1070,7 @@ class TrickleInlayHintsProvider {
                         typeStr = String(obs.sample);
                     }
                     else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
-                        typeStr = obs.sample ? 'True' : 'False';
+                        typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
                     }
                     else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
                         typeStr = `"${obs.sample}"`;
@@ -1093,7 +1142,15 @@ class TrickleInlayHintsProvider {
                     tooltipParts.push(formatCallFlow(obs.callFlow, obs.type, obsLabels));
                 }
                 if (config.get('showSampleValues', true) && obs.sample !== undefined) {
-                    tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+                    if (obs.previousSamples && obs.previousSamples.length > 0) {
+                        // Show value history for variables that had multiple values (e.g., loop iterations)
+                        const allValues = [...obs.previousSamples, obs.sample];
+                        const formatted = allValues.map(s => formatSample(s)).join(' → ');
+                        tooltipParts.push(`**Values** (${allValues.length} observed):\n\`\`\`\n${formatted}\n\`\`\``);
+                    }
+                    else {
+                        tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+                    }
                 }
                 if (tooltipParts.length > 0) {
                     hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));

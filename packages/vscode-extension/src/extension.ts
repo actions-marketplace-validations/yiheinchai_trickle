@@ -32,6 +32,8 @@ interface VariableObservation {
   gpu_memory_mb?: number;
   gpu_reserved_mb?: number;
   cpu_memory_mb?: number;
+  /** Previous sample values (for showing value history in hover tooltip) */
+  previousSamples?: unknown[];
 }
 
 interface TypeNode {
@@ -906,11 +908,18 @@ function loadAllVariables() {
           if (!lineMap.has(obs.line)) {
             lineMap.set(obs.line, []);
           }
-          // Deduplicate: replace existing observation with same varName (last wins)
-          // This prevents stacking multiple values from loops (e.g. "num: 5: 6")
+          // Deduplicate: replace existing observation with same varName (last wins for inline display)
+          // But preserve previous samples for hover tooltip value history
           const existingVars = lineMap.get(obs.line)!;
           const existingVarIdx = existingVars.findIndex(o => o.varName === obs.varName);
           if (existingVarIdx >= 0) {
+            const prev = existingVars[existingVarIdx];
+            const prevSamples = prev.previousSamples || [];
+            // Keep up to 4 previous samples (so total history is 5 with current)
+            if (prevSamples.length < 4) {
+              prevSamples.push(prev.sample);
+            }
+            obs.previousSamples = prevSamples;
             existingVars[existingVarIdx] = obs;
           } else {
             existingVars.push(obs);
@@ -1446,7 +1455,14 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           tooltipParts.push(formatCallFlow(obs.callFlow, obs.type, obsLabels));
         }
         if (config.get('showSampleValues', true) && obs.sample !== undefined) {
-          tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+          if (obs.previousSamples && obs.previousSamples.length > 0) {
+            // Show value history for variables that had multiple values (e.g., loop iterations)
+            const allValues = [...obs.previousSamples, obs.sample];
+            const formatted = allValues.map(s => formatSample(s)).join(' → ');
+            tooltipParts.push(`**Values** (${allValues.length} observed):\n\`\`\`\n${formatted}\n\`\`\``);
+          } else {
+            tooltipParts.push(`**Sample value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+          }
         }
         if (tooltipParts.length > 0) {
           hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));

@@ -40,7 +40,6 @@ import {
   findReassignments,
   findForLoopVars,
   findCatchVars,
-  findFunctionParams,
 } from './vite-plugin';
 
 const M = Module as any;
@@ -514,13 +513,14 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     }
   }
 
-  // Additional variable patterns: reassignments, for-loops, catch clauses, function params
+  // Additional variable patterns: reassignments, for-loops, catch clauses
+  // Note: function params are NOT traced here because observe-register already
+  // wraps functions with __trickle_wrap which captures param types via wrapFunction.
   const reassignInsertions = findReassignments(source);
   const forLoopInsertions = findForLoopVars(source);
   const catchInsertions = findCatchVars(source);
-  const funcParamInsertions = findFunctionParams(source, false);
 
-  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && funcParamInsertions.length === 0 && classInsertions.length === 0) return source;
+  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && classInsertions.length === 0) return source;
 
   // Resolve the path to the wrap helper (compiled JS)
   const wrapHelperPath = path.join(__dirname, 'wrap.js');
@@ -545,7 +545,7 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   ];
 
   // Add variable tracing helper if we have var insertions
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0) {
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0) {
     const traceVarPath = path.join(__dirname, 'trace-var.js');
     prefixLines.push(
       `var __trickle_tv_mod = require(${JSON.stringify(traceVarPath)});`,
@@ -606,15 +606,6 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     allInsertions.push({
       position: bodyStart,
       code: `\ntry{${calls}}catch(__e2){}\n`,
-    });
-  }
-
-  // Function parameter insertions
-  for (const { bodyStart, paramNames, lineNo } of funcParamInsertions) {
-    const calls = paramNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo})`).join(';');
-    allInsertions.push({
-      position: bodyStart,
-      code: `\ntry{${calls}}catch(__e){}\n`,
     });
   }
 

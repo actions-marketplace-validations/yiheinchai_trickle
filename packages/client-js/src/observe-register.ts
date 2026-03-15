@@ -638,6 +638,202 @@ function extractDestructuredNames(pattern: string): string[] {
   return names;
 }
 
+/**
+ * Extract parameter names from a parameter string (the text between parens).
+ * Handles: simple names, defaults (x = 5), type annotations (x: string),
+ * rest params (...args), and destructured params ({a, b} or [a, b]).
+ * Skips params starting with _ (convention for unused params).
+ */
+function extractParamNamesFromStr(paramStr: string): string[] {
+  if (!paramStr.trim()) return [];
+  // Split on commas at depth 0 (respecting nested parens, braces, brackets)
+  const params: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of paramStr) {
+    if (ch === '(' || ch === '{' || ch === '[') depth++;
+    else if (ch === ')' || ch === '}' || ch === ']') depth--;
+    else if (ch === ',' && depth === 0) {
+      params.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) params.push(current.trim());
+
+  const names: string[] = [];
+  for (const p of params) {
+    const trimmed = p.trim();
+    if (!trimmed) continue;
+    // Rest params: ...args -> trace 'args'
+    if (trimmed.startsWith('...')) {
+      const restName = trimmed.slice(3).split(/[\s:=]/)[0].trim();
+      if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(restName) && !restName.startsWith('_')) {
+        names.push(restName);
+      }
+      continue;
+    }
+    // Destructured params: { name, age } or [a, b] — skip (can't trace the whole object by a single name)
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) continue;
+    // Simple param: strip default value and type annotation
+    const name = trimmed.split('=')[0].trim().split(':')[0].trim();
+    if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name) && !name.startsWith('_')) {
+      names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Find all function bodies (declarations, expressions, arrow functions, methods)
+ * and return insertions to trace their parameters at the top of the body.
+ *
+ * Returns: Array of { bodyStart: position right after '{', paramNames: string[], lineNo: line of function }
+ */
+function findFunctionParamInsertions(source: string, lineOffset: number = 0): Array<{ bodyStart: number; paramNames: string[]; lineNo: number }> {
+  const results: Array<{ bodyStart: number; paramNames: string[]; lineNo: number }> = [];
+
+  // Match all patterns that start a function with a parameter list followed by a body:
+  // 1. function foo(...)    { ... }
+  // 2. function(...)        { ... }
+  // 3. (...)             => { ... }
+  // 4. async (...)       => { ... }
+  // 5. methodName(...)      { ... }  (inside class or object)
+  // 6. single param arrow:  x => { ... }
+  //
+  // Strategy: find every opening paren that is part of a function parameter list,
+  // then find the body brace. We use a regex to find candidate positions.
+
+  // Pattern A: function declarations and expressions
+  // Matches: [async] function [name] (
+  const funcPattern = /(?:async\s+)?function\s*(?:[a-zA-Z_$][a-zA-Z0-9_$]*)?\s*\(/g;
+  let m;
+  while ((m = funcPattern.exec(source)) !== null) {
+    const openParenIdx = source.indexOf('(', m.index + 8); // skip past 'function'
+    if (openParenIdx === -1) continue;
+    processFunction(source, openParenIdx, m.index, results, lineOffset);
+  }
+
+  // Pattern B: arrow functions with parens: (...) =>
+  // Look for ) followed by optional whitespace then =>
+  // We search for => and walk backwards to find the matching (
+  const arrowPattern = /\)\s*=>/g;
+  while ((m = arrowPattern.exec(source)) !== null) {
+    // Find the matching opening paren for the ) at m.index
+    const closeParenIdx = m.index;
+    const openParenIdx = findMatchingOpenParen(source, closeParenIdx);
+    if (openParenIdx === -1) continue;
+
+    // Make sure this isn't inside a string or comment (basic heuristic: check if 'function' keyword precedes)
+    // If 'function' precedes, Pattern A already handled it
+    const before = source.slice(Math.max(0, openParenIdx - 30), openParenIdx).trimEnd();
+    if (/function\s*(?:[a-zA-Z_$][a-zA-Z0-9_$]*)?\s*$/.test(before)) continue;
+
+    // Find the arrow and body
+    const arrowIdx = source.indexOf('=>', closeParenIdx + 1);
+    if (arrowIdx === -1) continue;
+    const afterArrow = arrowIdx + 2;
+    // Skip whitespace after =>
+    let bodyPos = afterArrow;
+    while (bodyPos < source.length && (source[bodyPos] === ' ' || source[bodyPos] === '\t' || source[bodyPos] === '\n' || source[bodyPos] === '\r')) bodyPos++;
+    // Only handle block bodies (with {), not expression bodies
+    if (bodyPos >= source.length || source[bodyPos] !== '{') continue;
+
+    // Extract params
+    const paramStr = source.slice(openParenIdx + 1, closeParenIdx);
+    const paramNames = extractParamNamesFromStr(paramStr);
+    if (paramNames.length === 0) continue;
+
+    // Calculate line number
+    let lineNo = 1;
+    for (let i = 0; i < openParenIdx; i++) {
+      if (source[i] === '\n') lineNo++;
+    }
+    lineNo = Math.max(1, lineNo - lineOffset);
+
+    results.push({ bodyStart: bodyPos + 1, paramNames, lineNo });
+  }
+
+  return results;
+}
+
+/**
+ * Process a function whose opening paren is at openParenIdx.
+ * Finds params, body brace, and adds to results.
+ */
+function processFunction(
+  source: string,
+  openParenIdx: number,
+  funcStartIdx: number,
+  results: Array<{ bodyStart: number; paramNames: string[]; lineNo: number }>,
+  lineOffset: number,
+): void {
+  // Find closing paren using findFunctionBodyBrace approach: it expects the position after '('
+  const afterOpenParen = openParenIdx + 1;
+  const openBrace = findFunctionBodyBrace(source, afterOpenParen);
+  if (openBrace === -1) return;
+
+  // Extract param string between ( and the closing )
+  // findFunctionBodyBrace skips parens then finds {, so we need to find the closing ) ourselves
+  let parenDepth = 1;
+  let closeParenIdx = afterOpenParen;
+  while (closeParenIdx < source.length && parenDepth > 0) {
+    const ch = source[closeParenIdx];
+    if (ch === '(') parenDepth++;
+    else if (ch === ')') { parenDepth--; if (parenDepth === 0) break; }
+    else if (ch === '"' || ch === "'" || ch === '`') {
+      const q = ch;
+      closeParenIdx++;
+      while (closeParenIdx < source.length && source[closeParenIdx] !== q) {
+        if (source[closeParenIdx] === '\\') closeParenIdx++;
+        closeParenIdx++;
+      }
+    }
+    closeParenIdx++;
+  }
+
+  const paramStr = source.slice(afterOpenParen, closeParenIdx);
+  const paramNames = extractParamNamesFromStr(paramStr);
+  if (paramNames.length === 0) return;
+
+  // Calculate line number of the function
+  let lineNo = 1;
+  for (let i = 0; i < funcStartIdx; i++) {
+    if (source[i] === '\n') lineNo++;
+  }
+  lineNo = Math.max(1, lineNo - lineOffset);
+
+  results.push({ bodyStart: openBrace + 1, paramNames, lineNo });
+}
+
+/**
+ * Find the matching opening paren for a closing paren at closeIdx.
+ * Walks backward respecting nesting, strings, etc. (simplified).
+ */
+function findMatchingOpenParen(source: string, closeIdx: number): number {
+  let depth = 1;
+  let pos = closeIdx - 1;
+  while (pos >= 0 && depth > 0) {
+    const ch = source[pos];
+    if (ch === ')') depth++;
+    else if (ch === '(') {
+      depth--;
+      if (depth === 0) return pos;
+    } else if (ch === '"' || ch === "'" || ch === '`') {
+      // Walk backward through string (simplified — won't handle all edge cases but good enough)
+      const q = ch;
+      pos--;
+      while (pos >= 0 && source[pos] !== q) {
+        if (pos > 0 && source[pos - 1] === '\\') pos--;
+        pos--;
+      }
+    }
+    pos--;
+  }
+  return -1;
+}
+
 function transformCjsSource(source: string, filename: string, moduleName: string, env: string, sourceMap?: SourceMapData | null): string {
   const funcRegex = /^[ \t]*(?:async\s+)?function\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\(/gm;
   const insertions: Array<{ position: number; name: string; paramNames: string[] }> = [];
@@ -817,8 +1013,6 @@ function transformCjsSource(source: string, filename: string, moduleName: string
   }
 
   // Additional variable patterns: reassignments, for-loops, catch clauses
-  // Note: function params are NOT traced here because observe-register already
-  // wraps functions with __trickle_wrap which captures param types via wrapFunction.
   // Apply source map remapping to these too.
   const reassignInsertions = findReassignments(source).map(ins => ({
     ...ins,
@@ -836,7 +1030,22 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     lineNo: remapLine(ins.lineNo),
   }));
 
-  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && classInsertions.length === 0) return source;
+  // Function parameter tracing: inject __trickle_tv() calls at the top of function bodies
+  // for each parameter. This covers function declarations, expressions, arrow functions,
+  // and method definitions (including Express-style callbacks like (req, res) => {}).
+  let funcParamInsertions: Array<{ bodyStart: number; paramNames: string[]; lineNo: number; sourceFile?: string }> = [];
+  if (varTraceEnabled) {
+    funcParamInsertions = findFunctionParamInsertions(source).map(ins => ({
+      ...ins,
+      sourceFile: getSourceFile(ins.lineNo),
+      lineNo: remapLine(ins.lineNo),
+    }));
+    if (debug && funcParamInsertions.length > 0) {
+      console.log(`[trickle/observe] Tracing ${funcParamInsertions.length} function param sites in ${moduleName}`);
+    }
+  }
+
+  if (insertions.length === 0 && varInsertions.length === 0 && destructInsertions.length === 0 && reassignInsertions.length === 0 && forLoopInsertions.length === 0 && catchInsertions.length === 0 && classInsertions.length === 0 && funcParamInsertions.length === 0) return source;
 
   // Resolve the path to the wrap helper (compiled JS)
   const wrapHelperPath = path.join(__dirname, 'wrap.js');
@@ -865,8 +1074,8 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     `};`,
   ];
 
-  // Add variable tracing helper if we have var insertions
-  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0) {
+  // Add variable tracing helper if we have var insertions or function param insertions
+  if (varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0) {
     const traceVarPath = path.join(__dirname, 'trace-var.js');
     // When source map is available, trace variables against the original source file
     const traceFilePath = sourceMap ? sourceMap.originalFile : filename;
@@ -943,6 +1152,16 @@ function transformCjsSource(source: string, filename: string, moduleName: string
     allInsertions.push({
       position: bodyStart,
       code: `\ntry{${calls}}catch(__e2){}\n`,
+    });
+  }
+
+  // Function parameter insertions — inject __trickle_tv() at top of function bodies
+  for (const { bodyStart, paramNames, lineNo, sourceFile } of funcParamInsertions) {
+    const sf = sfArgs(sourceFile);
+    const calls = paramNames.map(n => `__trickle_tv(${n},${JSON.stringify(n)},${lineNo}${sf})`).join(';');
+    allInsertions.push({
+      position: bodyStart,
+      code: `\ntry{${calls}}catch(__e3){}\n`,
     });
   }
 

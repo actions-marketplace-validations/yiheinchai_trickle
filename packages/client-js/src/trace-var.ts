@@ -167,7 +167,9 @@ function flushVarBuffer(): void {
  * More aggressive truncation than function samples since there are many more variables.
  */
 function sanitizeVarSample(value: unknown, depth: number = 3): unknown {
-  if (value === null || value === undefined) return value;
+  if (value === null) return null;
+  // JSON.stringify drops undefined values, so use null to preserve the field
+  if (value === undefined) return null;
 
   const t = typeof value;
   // Primitives are always safe to return at any depth
@@ -219,4 +221,61 @@ if (typeof process !== 'undefined' && process.on) {
   process.on('beforeExit', exitFlush);
   process.on('SIGTERM', exitFlush);
   process.on('SIGINT', exitFlush);
+
+  // Capture uncaught exceptions with variable context for agent debugging.
+  // Write error + nearby variable values to errors.jsonl before the process exits.
+  process.on('uncaughtException', (err: Error) => {
+    flushVarBuffer();
+    try {
+      const dir = varsFilePath
+        ? path.dirname(varsFilePath)
+        : process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+      try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+      const errorsFile = path.join(dir, 'errors.jsonl');
+
+      // Extract file and line from stack trace
+      const stackLines = (err.stack || '').split('\n');
+      let errorFile: string | undefined;
+      let errorLine: number | undefined;
+      for (const sl of stackLines.slice(1)) {
+        const m = sl.match(/\((.+):(\d+):\d+\)/) || sl.match(/at (.+):(\d+):\d+/);
+        if (m && !m[1].includes('node_modules') && !m[1].includes('node:') && !m[1].includes('trickle')) {
+          errorFile = m[1];
+          errorLine = parseInt(m[2]);
+          break;
+        }
+      }
+
+      // Find nearby variable values from the cache
+      const nearbyVars: Record<string, string> = {};
+      if (errorFile && errorLine) {
+        for (const [key, entry] of varCache) {
+          const parts = key.split(':');
+          const file = parts[0];
+          const line = parseInt(parts[1]);
+          const varName = parts.slice(2).join(':');
+          if (file === errorFile && Math.abs(line - errorLine) <= 10) {
+            nearbyVars[`L${parts[1]} ${varName}`] = entry.fp;
+          }
+        }
+      }
+
+      const record = {
+        kind: 'error',
+        error: err.message,
+        type: err.constructor.name,
+        file: errorFile,
+        line: errorLine,
+        stack: stackLines.slice(0, 6).join('\n'),
+        nearbyVariables: Object.keys(nearbyVars).length > 0 ? nearbyVars : undefined,
+        timestamp: new Date().toISOString(),
+      };
+      fs.appendFileSync(errorsFile, JSON.stringify(record) + '\n');
+    } catch {
+      // Never suppress the original error
+    }
+    // Print the original error and exit (don't re-throw to preserve original stack)
+    console.error(err.stack || err.message);
+    process.exit(1);
+  });
 }

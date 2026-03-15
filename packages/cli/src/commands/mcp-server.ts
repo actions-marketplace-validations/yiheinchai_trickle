@@ -283,12 +283,68 @@ function getDatabaseQueries(): unknown {
 function getCallTrace(): unknown {
   const file = path.join(findTrickleDir(), "calltrace.jsonl");
   if (!fs.existsSync(file)) return { trace: "No call trace captured. Run the app with trickle first." };
-  const events: unknown[] = [];
+  const events: any[] = [];
   for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
     try { events.push(JSON.parse(line)); } catch {}
   }
   if (events.length === 0) return { trace: "No call trace events recorded." };
-  return { trace: events };
+
+  // Build a tree structure from flat events
+  interface TreeNode {
+    function: string;
+    module: string;
+    callId: number;
+    durationMs?: number;
+    error?: string;
+    children: TreeNode[];
+  }
+
+  const byCallId = new Map<number, TreeNode>();
+  const roots: TreeNode[] = [];
+
+  // First pass: create all nodes
+  for (const ev of events) {
+    if (ev.kind !== 'call') continue;
+    const node: TreeNode = {
+      function: ev.function,
+      module: ev.module,
+      callId: ev.callId,
+      durationMs: ev.durationMs,
+      error: ev.error,
+      children: [],
+    };
+    byCallId.set(ev.callId, node);
+  }
+
+  // Second pass: build tree
+  for (const ev of events) {
+    if (ev.kind !== 'call') continue;
+    const node = byCallId.get(ev.callId);
+    if (!node) continue;
+    const parent = byCallId.get(ev.parentId);
+    if (parent) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+
+  // Generate a readable text representation
+  function renderTree(nodes: TreeNode[], indent: string = ''): string {
+    return nodes.map(n => {
+      const timing = n.durationMs ? ` (${n.durationMs}ms)` : '';
+      const err = n.error ? ` ✗ ${n.error}` : '';
+      const line = `${indent}${n.module}.${n.function}${timing}${err}`;
+      const childLines = n.children.length > 0 ? '\n' + renderTree(n.children, indent + '  ') : '';
+      return line + childLines;
+    }).join('\n');
+  }
+
+  return {
+    tree: roots,
+    readable: renderTree(roots),
+    totalCalls: events.filter((e: any) => e.kind === 'call').length,
+  };
 }
 
 function getWebSocketEvents(): unknown {

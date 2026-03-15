@@ -36,6 +36,14 @@ export interface ExplainResult {
     callees: Array<{ caller: string; callee: string; callCount: number }>;
   };
 
+  dataFlow: Array<{
+    function: string;
+    inputs: string;
+    output: string;
+    sampleInput?: unknown;
+    sampleOutput?: unknown;
+  }>;
+
   variables: Array<{
     name: string;
     line: number;
@@ -125,6 +133,7 @@ export function explain(targetFile: string, opts?: { dir?: string }): ExplainRes
     exists: fs.existsSync(absPath),
     functions: [],
     callGraph: { callers: [], callees: [] },
+    dataFlow: [],
     variables: [],
     queries: [],
     errors: [],
@@ -184,6 +193,19 @@ export function explain(targetFile: string, opts?: { dir?: string }): ExplainRes
       sampleInput: obs.sampleInput,
       sampleOutput: obs.sampleOutput,
     });
+
+    // Data flow: what types flow in and out
+    const inputTypes = params || 'none';
+    const outputType = compactType(obs.returnType);
+    if (inputTypes !== 'none' || outputType !== 'unknown') {
+      result.dataFlow.push({
+        function: obs.functionName,
+        inputs: inputTypes || 'none',
+        output: outputType,
+        sampleInput: obs.sampleInput,
+        sampleOutput: obs.sampleOutput,
+      });
+    }
   }
 
   // ── Call Graph ──
@@ -359,6 +381,7 @@ export function explain(targetFile: string, opts?: { dir?: string }): ExplainRes
   if (result.variables.length > 0) parts.push(`${result.variables.length} variables`);
   if (result.queries.length > 0) parts.push(`${result.queries.length} unique queries`);
   if (result.errors.length > 0) parts.push(`${result.errors.length} errors`);
+  if (result.dataFlow.length > 0) parts.push(`${result.dataFlow.length} data flows`);
   if (result.callGraph.callers.length > 0) parts.push(`${result.callGraph.callers.length} callers`);
   if (result.callGraph.callees.length > 0) parts.push(`${result.callGraph.callees.length} callees`);
   if (result.alerts.length > 0) parts.push(`${result.alerts.length} alerts`);
@@ -399,6 +422,19 @@ export function runExplain(opts: ExplainOptions): ExplainResult {
       const timing = f.durationMs ? chalk.gray(` (${f.durationMs}ms)`) : '';
       const count = f.callCount > 1 ? chalk.gray(` ×${f.callCount}`) : '';
       console.log(`  ${chalk.green('→')} ${f.signature}${timing}${count}`);
+    }
+  }
+
+  // Data flow
+  if (result.dataFlow.length > 0) {
+    console.log('');
+    console.log(chalk.bold('  Data Flow:'));
+    for (const df of result.dataFlow.slice(0, 10)) {
+      const sampleIn = df.sampleInput ? chalk.gray(` e.g. ${JSON.stringify(df.sampleInput)?.substring(0, 50)}`) : '';
+      const sampleOut = df.sampleOutput ? chalk.gray(` e.g. ${JSON.stringify(df.sampleOutput)?.substring(0, 50)}`) : '';
+      console.log(`    ${chalk.cyan(df.function)}: (${df.inputs}) → ${df.output}`);
+      if (sampleIn) console.log(chalk.gray(`      in: ${JSON.stringify(df.sampleInput)?.substring(0, 60)}`));
+      if (sampleOut) console.log(chalk.gray(`      out: ${JSON.stringify(df.sampleOutput)?.substring(0, 60)}`));
     }
   }
 

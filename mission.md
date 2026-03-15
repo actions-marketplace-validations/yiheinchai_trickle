@@ -8,7 +8,7 @@ if you think everything has already be accomplished, please compact conversation
 </general directive>
 
 <focus point>
-Tested and fixed transform on lodash.js (17K-line library): added regex literal handling, comma-separated multi-declaration skip, and empty-line continuation detection. Previously fixed commander.js (multi-line declarations, for-loop initializers, keyword filtering). Trickle now handles all major real-world JS patterns. Also: source map support (tsc/esbuild/webpack), class field fix, per-line sample limiting, webpack multi-source bundles. Continue testing on even more diverse codebases to find any remaining edge cases.
+Tested on Express.js, axios, moment.js, commander.js, lodash.js — all transform cleanly. Also tested Python ML pipeline (KNN classifier) and improved dataclass sample display (list/dict fields now show '[list: 200 items]' instead of None). JS transform is now robust against regex literals, comma-separated declarations, empty-line continuations, multi-line declarations, for-loop initializers, class fields, and webpack bundles. All major real-world patterns handled. Continue looking for new improvement areas — perhaps improving the VSCode extension display or exploring new use cases.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

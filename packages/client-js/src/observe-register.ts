@@ -37,6 +37,7 @@ import { WrapOptions } from './types';
 import { patchFetch } from './fetch-observer';
 import { instrumentExpress, trickleMiddleware } from './express';
 import { initVarTracer, traceVar } from './trace-var';
+import { initCallTrace } from './call-trace';
 import {
   findReassignments,
   findForLoopVars,
@@ -1003,6 +1004,9 @@ if (enabled) {
   if (process.env.TRICKLE_TRACE_VARS !== '0') {
     initVarTracer({ debug });
   }
+
+  // ── Hook 0b2: Initialize call trace ──
+  initCallTrace();
 
   // ── Hook 0c: Capture environment snapshot ──
   try {

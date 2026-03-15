@@ -505,33 +505,19 @@ function generateTsForFunction(fn: FunctionTypeData): string {
     lines.push("");
   }
 
-  // Extracted interfaces
-  const emitted = new Set<string>();
-  const extractedLines: string[] = [];
-  let cursor = 0;
-  while (cursor < extracted.length) {
-    const iface = extracted[cursor];
-    cursor++;
-    if (emitted.has(iface.name)) continue;
-    emitted.add(iface.name);
-    extractedLines.push(renderInterface(iface.name, iface.node, extracted));
-    extractedLines.push("");
-  }
-
   // Function declaration
   const funcIdent = baseName.charAt(0).toLowerCase() + baseName.slice(1);
   // Wrap return type in Promise<> for async functions
   const returnTypeStr = fn.isAsync ? `Promise<${outputName}>` : outputName;
 
-  const result: string[] = [];
-  if (extractedLines.length > 0) result.push(...extractedLines);
-  result.push(...lines);
+  // Generate overload declarations (or single declaration) first to populate extracted
+  const funcDecls: string[] = [];
 
   // Generate overloads if we have multiple distinct type patterns
   if (fn.variants && fn.variants.length >= 2) {
+    const seenOverloads = new Set<string>();
     for (const variant of fn.variants) {
-      const vExt: ExtractedInterface[] = [];
-      const vRet = typeNodeToTS(variant.returnType, vExt, baseName, undefined, 0);
+      const vRet = typeNodeToTS(variant.returnType, extracted, baseName + "Output", undefined, 0);
       const vRetStr = fn.isAsync ? `Promise<${vRet}>` : vRet;
       const vNames = variant.paramNames || fn.paramNames || [];
       let vArgEntries: Array<{ paramName: string; typeNode: TypeNode }> = [];
@@ -542,9 +528,13 @@ function generateTsForFunction(fn: FunctionTypeData): string {
         }));
       }
       const vParams = vArgEntries.map(e =>
-        `${e.paramName}: ${typeNodeToTS(e.typeNode, vExt, baseName, e.paramName, 0)}`
+        `${e.paramName}: ${typeNodeToTS(e.typeNode, extracted, baseName + "Input", e.paramName, 0)}`
       );
-      result.push(`export declare function ${funcIdent}(${vParams.join(", ")}): ${vRetStr};`);
+      const decl = `export declare function ${funcIdent}(${vParams.join(", ")}): ${vRetStr};`;
+      if (!seenOverloads.has(decl)) {
+        seenOverloads.add(decl);
+        funcDecls.push(decl);
+      }
     }
   } else {
     let funcDecl: string;
@@ -564,8 +554,26 @@ function generateTsForFunction(fn: FunctionTypeData): string {
       });
       funcDecl = `export declare function ${funcIdent}(${params.join(", ")}): ${returnTypeStr};`;
     }
-    result.push(funcDecl);
+    funcDecls.push(funcDecl);
   }
+
+  // Extracted interfaces (rendered after variants so variant-added interfaces are included)
+  const emitted = new Set<string>();
+  const extractedLines: string[] = [];
+  let cursor = 0;
+  while (cursor < extracted.length) {
+    const iface = extracted[cursor];
+    cursor++;
+    if (emitted.has(iface.name)) continue;
+    emitted.add(iface.name);
+    extractedLines.push(renderInterface(iface.name, iface.node, extracted));
+    extractedLines.push("");
+  }
+
+  const result: string[] = [];
+  if (extractedLines.length > 0) result.push(...extractedLines);
+  result.push(...lines);
+  result.push(...funcDecls);
   return result.join("\n");
 }
 

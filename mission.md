@@ -9,18 +9,13 @@ Particularly, build a complete observability platform, it will replace datadog, 
 </higher directive>
 
 <focus point>
-Observability platform complete. 10 data types, 15 MCP tools, 15+ auto-patched drivers across JS + Python. Updated README with full feature matrix.
+Observability platform: 11 data types, 16 MCP tools, 15+ auto-patched drivers. Full parity JS + Python.
 
-Pipeline: trickle run → monitor → heal → verify
-Features: dashboard, webhook alerts, watch mode, production sampling, distributed tracing
+Pipeline: run → monitor → heal → verify. Dashboard, webhook alerts, production sampling, distributed tracing, environment capture.
 
-Done: Updated docs (ai-agent.md, observability-platform.md, README). Fixed sqlite3 row_factory bug, PRAGMA false positives, query cap → 500.
+Validated on real APIs (Python + JS + TS). All bugs fixed.
 
-Validated on real 3-file API: 104 vars, 8 functions, 100+ queries, 8 alerts, 8 heal plans.
-
-Tested on TypeScript: works when compiled to JS (6 functions, 9 vars, clean .d.ts). tsx/ts-node ESM interop is a known Node.js loader limitation.
-
-Next: Cloud dashboard for team sharing, Go/Rust language support, improve tsx ESM interop
+Next: Cloud dashboard for team sharing, Go/Rust language support
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

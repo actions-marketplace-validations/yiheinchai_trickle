@@ -15,9 +15,11 @@ Pipeline: run → monitor → heal → verify. Dashboard, webhook alerts, produc
 
 Validated on real APIs (Python + JS + TS). All bugs fixed.
 
-Done: JS memory profiling, JS distributed tracing, trickle cloud (push/pull/share/status). Full JS/Python parity. CLI 0.1.102.
+Done: Full JS/Python parity (memory, traces, env). Cloud CLI. `trickle doctor` + `get_doctor` MCP tool. 17 MCP tools total. CLI 0.1.104.
 
-Next: Build cloud.trickle.dev backend service, Go/Rust language support
+Complete platform: 11 data types, 17 MCP tools, 15+ drivers, run → monitor → heal → verify → cloud.
+
+Next: Build cloud.trickle.dev backend, Go/Rust support, log aggregation
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

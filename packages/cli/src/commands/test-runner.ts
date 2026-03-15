@@ -618,10 +618,10 @@ export async function runTestCommand(opts: TestOptions): Promise<TestReport> {
   }
 
   // If no parsed failures but exit code is non-zero, create a generic failure
-  if (failures.length === 0 && exitCode !== 0) {
-    // Extract error from output
+  if (failures.length === 0 && exitCode !== 0 && parsed.summary.passed === 0) {
+    // Extract error from output (skip section headers like "=== FAILURES ===")
     const errorLines = combinedOutput.split('\n')
-      .filter(l => /error|fail|assert/i.test(l))
+      .filter(l => /error|fail|assert/i.test(l) && !l.match(/^[=\-─]{3,}/))
       .slice(0, 5)
       .join('\n');
     if (errorLines) {

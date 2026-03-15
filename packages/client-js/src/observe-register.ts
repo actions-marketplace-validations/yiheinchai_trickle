@@ -1004,6 +1004,34 @@ if (enabled) {
     initVarTracer({ debug });
   }
 
+  // ── Hook 0c: Capture environment snapshot ──
+  try {
+    const envDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
+    fs.mkdirSync(envDir, { recursive: true });
+    const SENSITIVE = ['KEY', 'SECRET', 'TOKEN', 'PASSWORD', 'AUTH', 'CREDENTIAL', 'PRIVATE'];
+    const isSensitive = (k: string) => SENSITIVE.some(s => k.toUpperCase().includes(s));
+    const redact = (k: string, v: string) => isSensitive(k) ? (v.length <= 4 ? '****' : v.slice(0, 2) + '*'.repeat(v.length - 4) + v.slice(-2)) : v;
+    const skip = new Set(['PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'LOGNAME', 'PWD', 'OLDPWD', 'SHLVL', 'TMPDIR']);
+    const trickleVars: Record<string, string> = {};
+    const appVars: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (!v || k.startsWith('_')) continue;
+      if (k.startsWith('TRICKLE_')) trickleVars[k] = v;
+      else if (!skip.has(k)) appVars[k] = redact(k, v);
+    }
+    const envSnapshot = {
+      kind: 'environment',
+      timestamp: Date.now(),
+      node: { version: process.version, platform: process.platform, arch: process.arch },
+      cwd: process.cwd(),
+      argv: process.argv.slice(0, 10),
+      trickle: trickleVars,
+      env: appVars,
+    };
+    fs.writeFileSync(path.join(envDir, 'environment.json'), JSON.stringify(envSnapshot, null, 2));
+  } catch {}
+
+
   // ── Hook 1: Module._compile — transform source to wrap function declarations ──
   // This catches ALL functions including entry file and non-exported helpers.
 

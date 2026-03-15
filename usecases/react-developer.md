@@ -152,11 +152,67 @@ module.exports = {
 };
 ```
 
+## Quick Setup with CLI
+
+Instead of manually editing config files, use `trickle init`:
+
+```bash
+npm install trickle-observe
+npx trickle init
+# → auto-detects Vite/Next.js/Remix, configures the plugin, and shows next steps
+npm run dev
+```
+
+## Use Case 4: Live-Updating Values
+
+Variables update in real-time as you interact with your app. Click a button and the inline hint for `count` changes from `0` to `1` to `2`:
+
+```tsx
+const [count, setCount] = useState(0);
+// count: 2  ← updates live as you click!
+```
+
+This works because the tracer uses value-aware dedup — when a variable's value changes, the new value is immediately captured and the VSCode extension shows the latest.
+
+## Use Case 5: JSX Expression Values
+
+See what expressions inside JSX evaluate to, without leaving the template:
+
+```tsx
+return (
+  <div>
+    <h1>{title}</h1>           {/* title: "My App" */}
+    <p>{user.email}</p>        {/* user.email: "alice@example.com" */}
+    <span>({count})</span>     {/* count: 42 */}
+    <p>{isAdmin ? 'Admin' : 'User'}</p>  {/* "Admin" */}
+  </div>
+);
+```
+
+Simple expressions (identifiers, property accesses, ternaries) are traced using the comma operator — the original JSX output is completely unchanged.
+
+## Setup (Remix)
+
+Remix v2 uses Vite, so the standard Vite plugin works:
+
+```typescript
+// vite.config.ts
+import { tricklePlugin } from 'trickle-observe/vite-plugin';
+
+export default defineConfig({
+  plugins: [remix(), tricklePlugin()],
+});
+```
+
+Remix loaders, actions, and components are all traced automatically.
+
 ## How It Works
 
-1. The Vite plugin transforms your source code at dev time, inserting lightweight tracing calls after every variable declaration
-2. When your React app runs in the browser, variable values are sent to the Vite dev server via WebSocket (HMR channel)
-3. The dev server writes the data to `.trickle/variables.jsonl`
-4. The VSCode extension reads this file and displays inline hints
+1. The Vite/Next.js plugin transforms your source code at dev time, inserting lightweight tracing calls after every variable declaration, reassignment, for-loop, function parameter, catch clause, and JSX expression
+2. When your React app runs in the browser:
+   - **Vite**: values are sent via WebSocket (HMR channel) to the dev server
+   - **Next.js**: values are sent via `fetch()` to an auto-started ingest server (port 4889)
+3. The server writes the data to `.trickle/variables.jsonl`
+4. The VSCode extension watches this file and updates inline hints in real-time
 
 No runtime overhead in production — the plugin only runs in dev mode.

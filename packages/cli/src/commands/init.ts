@@ -12,7 +12,7 @@ interface ProjectInfo {
   hasPackageJson: boolean;
   hasTsConfig: boolean;
   isPython: boolean;
-  framework: "express" | "next" | "vite" | "fastapi" | "flask" | "django" | null;
+  framework: "express" | "next" | "remix" | "vite" | "fastapi" | "flask" | "django" | null;
   entryFile: string | null;
   packageJson: Record<string, unknown> | null;
   tsConfig: Record<string, unknown> | null;
@@ -75,6 +75,7 @@ function detectProject(dir: string, forcePython: boolean): ProjectInfo {
       ...(info.packageJson.devDependencies as Record<string, string> | undefined),
     };
     if (deps.next) info.framework = "next";
+    else if (deps['@remix-run/react'] || deps['@remix-run/dev']) info.framework = "remix";
     else if (deps.vite) info.framework = "vite";
     else if (deps.express) info.framework = "express";
   }
@@ -549,7 +550,7 @@ export async function initCommand(opts: InitOptions): Promise<void> {
     }
   }
 
-  // Step 5: Update vitest/vite config with tricklePlugin
+  // Step 5: Update vitest/vite config with tricklePlugin (also handles Remix which uses Vite)
   if (!info.isPython && info.framework !== "next") {
     const vitestUpdated = updateVitestConfig(dir);
     if (vitestUpdated) {
@@ -586,8 +587,8 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   console.log(chalk.bold("  Next steps:"));
   console.log("");
 
-  if (info.framework === "vite" || info.framework === "next") {
-    // React/Vite/Next.js — just run the dev server
+  if (info.framework === "vite" || info.framework === "remix" || info.framework === "next") {
+    // React/Vite/Remix/Next.js — just run the dev server
     const devCmd = info.framework === "next" ? "next dev" : "npm run dev";
     console.log(chalk.white("  1. Install the VSCode extension:"));
     console.log(chalk.cyan("     code --install-extension yiheinchai.trickle-vscode"));

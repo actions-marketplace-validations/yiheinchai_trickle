@@ -632,8 +632,8 @@ function findJsxExpressions(source: string): Array<{ exprStart: number; exprEnd:
     // Skip if this looks like a template literal expression `${`
     if (charBefore === '$') continue;
 
-    // Skip if preceded by `(` or `,` (function arguments, not JSX)
-    if (charBefore === '(' || charBefore === ',') continue;
+    // Skip if preceded by `,` (function arguments, not JSX)
+    if (charBefore === ',') continue;
 
     // Must be in a JSX context: look backward for `>` or `}` (closing tag bracket or prev expression)
     // before hitting structural JS characters like `{`, `(`, `;`
@@ -643,7 +643,18 @@ function findJsxExpressions(source: string): Array<{ exprStart: number; exprEnd:
       const ch = source[scanPos];
       if (ch === '>') { inJsx = true; break; }
       if (ch === '}') { inJsx = true; break; } // After a previous JSX expression
-      if (ch === '{' || ch === '(' || ch === ';') break;
+      if (ch === '{' || ch === ';') break;
+      // `(` breaks scan in code context, but in JSX text `(` is normal
+      // Check: if `(` is preceded by `>` or text, it's JSX text
+      if (ch === '(') {
+        const before = source.slice(Math.max(0, scanPos - 20), scanPos).trim();
+        if (before.endsWith('>') || /[a-zA-Z0-9\s]$/.test(before)) {
+          // Could be JSX text like "Users ({count})" — keep scanning
+          scanPos--;
+          continue;
+        }
+        break;
+      }
       // `=` only breaks if NOT preceded by other text (could be JSX text like "count = 5")
       if (ch === '=' && scanPos > 0 && /\s/.test(source[scanPos - 1])) {
         // Check if this `=` is a JSX attribute assignment: look further back for tag

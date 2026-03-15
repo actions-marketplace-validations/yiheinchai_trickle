@@ -512,59 +512,74 @@ function createClaudeMd(dir: string, info: ProjectInfo): boolean {
     ? `trickle run python ${info.entryFile || "app.py"}`
     : `trickle run node ${info.entryFile || "app.js"}`;
 
+  const exampleFile = info.isPython
+    ? (info.entryFile || "app.py")
+    : (info.entryFile || "src/index.ts");
+
   const content = `# Project Instructions
 
-## Debugging with Runtime Data
+## Debugging with trickle (Runtime Observability)
 
-This project uses **trickle** for runtime type observability. When debugging issues,
-use the cached runtime data instead of adding console.log/print statements.
+This project uses **trickle** to cache runtime data. Instead of adding console.log/print
+statements, query the cached data directly. The \`.trickle/\` directory persists across sessions.
 
-### Quick Commands
+### Debugging Workflow
+
+When investigating a bug or understanding behavior:
+
+1. **Check if data is fresh**: \`trickle context --check\`
+2. **If stale, re-run**: \`${runCmd}\`
+3. **Check errors first**: \`trickle context --errors\`
+4. **Get context for the relevant file**: \`trickle context ${exampleFile}\`
+5. **Narrow to specific line**: \`trickle context ${exampleFile}:42\`
+
+### Essential Commands
 
 \`\`\`bash
-# See runtime variable values for a specific file
-trickle context src/api.ts
+# Runtime variable values (types + actual values)
+trickle context ${exampleFile}          # full file context
+trickle context ${exampleFile}:42       # near a specific line
+trickle context --compact                # minimal output (saves tokens)
+trickle context --json                   # structured JSON
 
-# See values near a specific line (useful for debugging errors)
-trickle context src/api.ts:42
+# Function signatures with timing
+trickle functions                        # all observed functions
+trickle types <function_name>            # detailed types for one function
 
-# Compact output (less tokens)
-trickle context --compact
+# Errors with variable context
+trickle context --errors                 # errors + nearby variable values
+trickle errors                           # list all captured errors
 
-# JSON output for programmatic use
-trickle context --json
+# Database queries
+trickle vars --file queries              # SQL queries, timing, row counts
 
-# See all observed function signatures
-trickle functions
+# HTTP requests
+trickle context --http                   # fetch/request calls with status codes
 
-# See variable types and values
-trickle vars
+# Variable values
+trickle vars                             # all variables with types and values
+trickle vars --file ${exampleFile}       # filter by file
 \`\`\`
 
-### When to Use
+### What trickle Captures (automatically)
 
-- **Before debugging**: Run \`trickle context <file>\` to see what values variables
-  actually had at runtime — no need to add print statements or re-run the code.
-- **Understanding data flow**: Run \`trickle context --compact\` to see how data
-  flows through the application across files.
-- **After errors**: Run \`trickle context --errors\` to see variable values near
-  where errors occurred.
+| Data | File | Description |
+|------|------|-------------|
+| Variables | \`variables.jsonl\` | Every variable assignment with type + sample value |
+| Functions | \`observations.jsonl\` | Function signatures, params, return types, timing |
+| Errors | \`errors.jsonl\` | Crashes with stack trace + nearby variable values |
+| DB Queries | \`queries.jsonl\` | SQL text, duration, row count, columns |
+| Console | \`console.jsonl\` | All stdout/stderr output with timestamps |
 
-### Refreshing Runtime Data
-
-If the runtime data is stale, re-run the app with trickle:
+### Refreshing Data
 
 \`\`\`bash
 ${runCmd}
 \`\`\`
 
-The \`.trickle/\` directory contains cached runtime observations that persist
-across sessions. Variable values, function types, console output, and error
-context are all available without running the app again.
+### MCP Server
 
-### MCP Server (for deeper integration)
-
-Add trickle as an MCP server for direct tool access:
+For direct tool access, add trickle as an MCP server in your Claude configuration:
 
 \`\`\`json
 {
@@ -577,9 +592,10 @@ Add trickle as an MCP server for direct tool access:
 }
 \`\`\`
 
-Tools: get_runtime_context, get_annotated_source, get_function_signatures,
-get_errors, get_console_output, get_http_requests, check_data_freshness,
-refresh_runtime_data.
+Available tools: \`get_runtime_context\`, \`get_annotated_source\`,
+\`get_function_signatures\`, \`get_errors\`, \`get_database_queries\`,
+\`get_console_output\`, \`get_http_requests\`, \`check_data_freshness\`,
+\`refresh_runtime_data\`.
 `;
 
   fs.writeFileSync(claudePath, content, "utf-8");
@@ -591,19 +607,22 @@ function generateTrickleSection(info: ProjectInfo): string {
     ? `trickle run python ${info.entryFile || "app.py"}`
     : `trickle run node ${info.entryFile || "app.js"}`;
 
-  return `## Debugging with Runtime Data (trickle)
+  return `## Debugging with trickle (Runtime Observability)
 
-This project uses **trickle** for runtime type observability. Use cached runtime data
-instead of adding console.log/print statements:
+Use cached runtime data instead of adding console.log/print statements:
 
 \`\`\`bash
-trickle context src/api.ts        # variable values for a file
-trickle context src/api.ts:42     # values near a specific line
-trickle context --compact          # minimal output
-trickle functions                  # observed function signatures
+trickle context --errors           # check errors first
+trickle context <file>             # variable values for a file
+trickle context <file>:42          # values near a specific line
+trickle context --compact          # minimal output (saves tokens)
+trickle functions                  # function signatures with timing
+trickle vars                       # all variable types and values
 \`\`\`
 
 Refresh data: \`${runCmd}\`
+
+Data in \`.trickle/\`: variables, functions, errors, database queries, console output, HTTP requests.
 `;
 }
 

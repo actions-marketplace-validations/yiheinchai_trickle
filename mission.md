@@ -11,14 +11,19 @@ As a key point for the agent first approach, i want you to use trickle when deve
 
 <focus point>
 Shipped recently:
-- 23 MCP tools — full autonomous on-call loop: detect → understand → baseline → fix → verify
-- Dogfooding fixes: explain shows Express routes, test runner clears old data
-- Fixed Python log capture broken with basicConfig (most Python apps) — now uses setLogRecordFactory
+- 23 MCP tools — full autonomous on-call loop via MCP
+- Dogfooding on Express+SQLite and FastAPI+SQLite confirmed everything works
+- explain now detects FastAPI/Express route handlers across any module name
+- Fixed Python log capture with basicConfig (setLogRecordFactory approach)
+
+Known limitation: `trickle run` only instruments the parent process — child processes
+(e.g., uvicorn workers spawned via subprocess) are not instrumented. Workaround: run
+the server in a thread instead of a subprocess.
 
 Next priorities:
-1. Continue dogfooding on real-world codebases (try larger projects, frameworks like Django/FastAPI/Next.js)
-2. Cross-file data flow tracing (follow data across modules in explain)
-3. Production monitoring: webhook alerts, continuous watch mode for on-call agents
+1. Cross-process instrumentation — propagate trickle hooks to child processes
+2. Cross-file data flow tracing in explain
+3. Production monitoring: webhook alerts, continuous watch mode
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

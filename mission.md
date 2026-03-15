@@ -18,7 +18,9 @@ Done: Updated docs (ai-agent.md, observability-platform.md, README). Fixed sqlit
 
 Validated on real 3-file API: 104 vars, 8 functions, 100+ queries, 8 alerts, 8 heal plans.
 
-Next: Cloud dashboard for team sharing, Go/Rust language support
+Tested on TypeScript: works when compiled to JS (6 functions, 9 vars, clean .d.ts). tsx/ts-node ESM interop is a known Node.js loader limitation.
+
+Next: Cloud dashboard for team sharing, Go/Rust language support, improve tsx ESM interop
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

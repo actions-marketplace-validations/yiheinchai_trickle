@@ -2,14 +2,11 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Improve trickle, you have free reign and use your own discretion
+Do market research, see what features are needed and pain points, and build those features to capture more TAM.
 </higher directive>
 
 <focus point>
-CLI 0.1.146. Added curated help output (Quick Start / Analyze / Fix sections at top of
---help). Django/unittest + Node.js test parsing. All bugs from real-world testing fixed.
-
-26 MCP tools, all docs complete. Tested on 11+ real projects. Platform is stable and mature.
+Just shipped: CLI 0.1.147 — inline issue summary after trickle run. Starting market research.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

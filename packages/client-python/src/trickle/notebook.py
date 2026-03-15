@@ -26,14 +26,14 @@ import ast
 import json
 import os
 import sys
-from typing import Any, Optional, Set
+from typing import Any, Dict, Optional, Set
 
 
 # ---------------------------------------------------------------------------
 # Shared tracer state (single instance per kernel)
 # ---------------------------------------------------------------------------
 
-_tv_cache: Set[str] = set()
+_tv_cache: Dict[str, tuple] = {}  # cache_key -> (value_fingerprint, timestamp)
 _tv_file: Optional[str] = None
 _cell_counter: int = 0
 _notebook_path: Optional[str] = None
@@ -74,13 +74,27 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
 
         type_node = infer_type(value, max_depth=3)
         type_hash = json.dumps(type_node, sort_keys=True)[:32]
-        cache_key = f"{cell_id}:{line_no}:{var_name}:{type_hash}"
 
-        if cache_key in _tv_cache:
-            # For scalar tensors, track value evolution across loop iterations
-            _try_scalar_agg(value, var_name, line_no, cell_id, func_name)
-            return
-        _tv_cache.add(cache_key)
+        # Value-aware dedup: re-send if value changed or 10s elapsed
+        cache_key = f"{cell_id}:{line_no}:{var_name}"
+        t = type(value)
+        if t in (int, float, bool, str) or value is None:
+            val_fp = str(value)[:60]
+        elif hasattr(value, "item") and hasattr(value, "numel") and value.numel() <= 1:
+            val_fp = str(value.item())
+        else:
+            val_fp = type_hash
+
+        import time as _time_mod
+        now = _time_mod.time()
+        prev = _tv_cache.get(cache_key)
+        if prev is not None:
+            prev_fp, prev_ts = prev
+            if prev_fp == val_fp and (now - prev_ts) < 10.0:
+                # Same value within 10s — still track scalar aggregation
+                _try_scalar_agg(value, var_name, line_no, cell_id, func_name)
+                return
+        _tv_cache[cache_key] = (val_fp, now)
 
         # Build sample
         sample: Any = None

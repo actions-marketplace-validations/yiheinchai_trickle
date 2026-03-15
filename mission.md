@@ -6,10 +6,9 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-Shipped: "Next steps" hints after every trickle run (summary, explain, flamegraph, test).
-First-time users now see exactly what to do after capturing data. CLI 0.1.140.
-
-26 MCP tools, all 18 usecase docs linked from README, all docs rewritten.
+CLI 0.1.141. Added context-aware suggestions to trickle status (suggests next command based
+on data state: errors → summary, stale → re-run, calltrace → flamegraph). Also shipped
+"Next steps" hints after trickle run. 26 MCP tools, all docs complete.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

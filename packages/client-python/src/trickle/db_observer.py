@@ -651,10 +651,17 @@ def patch_django(django_module: Any) -> None:
     except ImportError:
         return
 
+    import threading
+    _django_tls = threading.local()
+
     _orig_execute = CursorWrapper.execute
     _orig_executemany = CursorWrapper.executemany
 
     def _patched_execute(self: Any, sql: Any, params: Any = None) -> Any:
+        # Guard against re-entry (Django internally calls execute → _execute_with_wrappers → _execute)
+        if getattr(_django_tls, "_in_trickle", False):
+            return _orig_execute(self, sql, params)
+        _django_tls._in_trickle = True
         sql_str = str(sql) if sql else ""
         start = time.perf_counter()
         error_msg = None
@@ -665,6 +672,7 @@ def patch_django(django_module: Any) -> None:
             raise
         finally:
             duration = (time.perf_counter() - start) * 1000
+            _django_tls._in_trickle = False
             row_count = 0
             columns = None
             try:
@@ -691,6 +699,9 @@ def patch_django(django_module: Any) -> None:
             _write_query(record)
 
     def _patched_executemany(self: Any, sql: Any, param_list: Any) -> Any:
+        if getattr(_django_tls, "_in_trickle", False):
+            return _orig_executemany(self, sql, param_list)
+        _django_tls._in_trickle = True
         sql_str = str(sql) if sql else ""
         start = time.perf_counter()
         error_msg = None
@@ -701,6 +712,7 @@ def patch_django(django_module: Any) -> None:
             raise
         finally:
             duration = (time.perf_counter() - start) * 1000
+            _django_tls._in_trickle = False
             batch_size = 0
             try:
                 batch_size = len(list(param_list)) if param_list else 0

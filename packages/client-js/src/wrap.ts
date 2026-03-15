@@ -4,6 +4,7 @@ import { hashType } from './type-hash';
 import { createTracker } from './proxy-tracker';
 import { TypeCache } from './cache';
 import { enqueue } from './transport';
+import { traceCall, traceReturn } from './call-trace';
 
 const typeCache = new TypeCache();
 
@@ -35,6 +36,7 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
     let caughtError: unknown;
     const trackers: Array<{ proxy: unknown; getAccessedPaths: () => Map<string, TypeNode> }> = [];
     const startTime = performance.now();
+    const callId = traceCall(opts.functionName, opts.module);
 
     try {
       // Always pass ORIGINAL args to the function — never proxied ones.
@@ -48,6 +50,7 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
       try {
         const durationMs = performance.now() - startTime;
         captureErrorPayload(functionKey, opts, args, trackers, err, durationMs);
+        traceReturn(callId, opts.functionName, opts.module, durationMs, (err as Error)?.message);
       } catch {
         // Never let our instrumentation interfere
       }
@@ -63,6 +66,7 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
           try {
             const durationMs = performance.now() - startTime;
             capturePayload(functionKey, opts, args, trackers, resolved, true, durationMs);
+            traceReturn(callId, opts.functionName, opts.module, durationMs);
           } catch {
             // Never let our instrumentation interfere
           }
@@ -72,6 +76,7 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
           try {
             const durationMs = performance.now() - startTime;
             captureErrorPayload(functionKey, opts, args, trackers, err, durationMs);
+            traceReturn(callId, opts.functionName, opts.module, durationMs, (err as Error)?.message);
           } catch {
             // Never let our instrumentation interfere
           }
@@ -85,6 +90,7 @@ export function wrapFunction<T extends (...args: any[]) => any>(fn: T, opts: Wra
     try {
       const durationMs = performance.now() - startTime;
       capturePayload(functionKey, opts, args, trackers, result, false, durationMs);
+      traceReturn(callId, opts.functionName, opts.module, durationMs);
     } catch {
       // Never let our instrumentation interfere
     }

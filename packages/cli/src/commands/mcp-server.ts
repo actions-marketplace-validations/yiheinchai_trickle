@@ -280,6 +280,17 @@ function getDatabaseQueries(): unknown {
   return { queries: lines };
 }
 
+function getCallTrace(): unknown {
+  const file = path.join(findTrickleDir(), "calltrace.jsonl");
+  if (!fs.existsSync(file)) return { trace: "No call trace captured. Run the app with trickle first." };
+  const events: unknown[] = [];
+  for (const line of fs.readFileSync(file, "utf-8").split("\n").filter(Boolean)) {
+    try { events.push(JSON.parse(line)); } catch {}
+  }
+  if (events.length === 0) return { trace: "No call trace events recorded." };
+  return { trace: events };
+}
+
 function getConsoleOutput(): unknown {
   const file = path.join(findTrickleDir(), "console.jsonl");
   if (!fs.existsSync(file)) return { output: "No console output captured. Run the app with trickle first." };
@@ -415,7 +426,12 @@ const TOOLS = [
   },
   {
     name: "get_database_queries",
-    description: "Get captured SQL database queries with execution time, row counts, and column names. Works with PostgreSQL (pg driver).",
+    description: "Get captured database queries (SQL, Redis, MongoDB) with execution time, row counts, and column names. Supports pg, mysql2, better-sqlite3, ioredis, mongoose (JS) and sqlite3, psycopg2, pymysql, redis, pymongo (Python).",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_call_trace",
+    description: "Get the function call trace showing execution order, parent-child relationships, and timing. Use this to understand which functions called which and in what order — essential for debugging execution flow.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -476,6 +492,7 @@ function handleRequest(req: JsonRpcRequest): JsonRpcResponse {
           case "get_function_signatures": result = getFunctionSignatures(); break;
           case "get_errors": result = getErrors(); break;
           case "get_database_queries": result = getDatabaseQueries(); break;
+          case "get_call_trace": result = getCallTrace(); break;
           case "get_console_output": result = getConsoleOutput(); break;
           case "get_http_requests": result = getHttpRequests(); break;
           case "check_data_freshness": result = checkDataFreshness(); break;

@@ -376,6 +376,10 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            _trickle_emit_obs(__fn, __name, args, kwargs, _result, is_async=False, duration_ms=_dur)",
             "            return _result",
             "        return _sw",
+            "def _trickle_wrap_decorator(__name):",
+            "    def _decorator(__fn):",
+            "        return _trickle_wrap(__fn, __name)",
+            "    return _decorator",
             "def _trickle_emit_obs(__fn, __name, args, kwargs, result, is_async=False, duration_ms=None):",
             "    try:",
             "        from trickle.type_inference import infer_type",
@@ -441,6 +445,10 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             f"        return _wrap(__fn, name=__name, module={module_name!r})",
             "    except Exception:",
             "        return __fn",
+            "def _trickle_wrap_decorator(__name):",
+            "    def _decorator(__fn):",
+            "        return _trickle_wrap(__fn, __name)",
+            "    return _decorator",
         ])
 
     if trace_vars:
@@ -692,19 +700,31 @@ def _transform_body(body: list, trace_vars: bool = True, class_name: str = "") -
             # Use 'ClassName.method' format when inside a class
             obs_name = f"{class_name}.{node.name}" if class_name else node.name
 
-            # Insert: func_name = _trickle_wrap(func_name, 'obs_name')
-            wrap_stmt = ast.Assign(
-                targets=[ast.Name(id=node.name, ctx=ast.Store())],
-                value=ast.Call(
-                    func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
-                    args=[
-                        ast.Name(id=node.name, ctx=ast.Load()),
-                        ast.Constant(value=obs_name),
-                    ],
+            if node.decorator_list:
+                # For decorated functions (e.g. @app.route, @login_required),
+                # inject _trickle_wrap as the innermost decorator so it wraps
+                # the raw function BEFORE framework decorators apply.
+                # This ensures Flask/FastAPI/etc. register the wrapped version.
+                wrap_decorator = ast.Call(
+                    func=ast.Name(id="_trickle_wrap_decorator", ctx=ast.Load()),
+                    args=[ast.Constant(value=obs_name)],
                     keywords=[],
-                ),
-            )
-            new_body.append(wrap_stmt)
+                )
+                node.decorator_list.append(wrap_decorator)
+            else:
+                # No decorators: wrap after definition (original behavior)
+                wrap_stmt = ast.Assign(
+                    targets=[ast.Name(id=node.name, ctx=ast.Store())],
+                    value=ast.Call(
+                        func=ast.Name(id="_trickle_wrap", ctx=ast.Load()),
+                        args=[
+                            ast.Name(id=node.name, ctx=ast.Load()),
+                            ast.Constant(value=obs_name),
+                        ],
+                        keywords=[],
+                    ),
+                )
+                new_body.append(wrap_stmt)
             continue
 
         if isinstance(node, ast.ClassDef):

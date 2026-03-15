@@ -298,10 +298,24 @@ def install_log_observer() -> None:
 
     _get_log_file()
 
-    # Stdlib logging
+    # Stdlib logging — capture all log records via the root logger.
+    # We use logging.setLogRecordFactory to intercept records BEFORE they
+    # reach any handler, so we don't interfere with basicConfig or other
+    # handler setup the user may do.
     handler = TrickleLogHandler()
     handler.setLevel(logging.DEBUG)
-    logging.getLogger().addHandler(handler)
+
+    _original_factory = logging.getLogRecordFactory()
+
+    def _trickle_record_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+        record = _original_factory(*args, **kwargs)
+        try:
+            handler.emit(record)
+        except Exception:
+            pass
+        return record
+
+    logging.setLogRecordFactory(_trickle_record_factory)
 
     # Structlog (if imported)
     _patch_structlog()

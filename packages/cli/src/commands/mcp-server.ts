@@ -700,6 +700,16 @@ const TOOLS = [
     },
   },
   {
+    name: "diff_runs",
+    description: "Compare current runtime data against a saved snapshot. Shows new/removed functions, query changes, performance regressions, new/resolved errors. Call save_snapshot first, then make changes, re-run, and call diff_runs. Returns a verdict: improved/regressed/mixed/unchanged.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        save_snapshot: { type: "boolean", description: "If true, saves the current data as a snapshot instead of comparing" },
+      },
+    },
+  },
+  {
     name: "get_fix_suggestions",
     description: "Generate actual code fix suggestions for detected issues. Returns suggested SQL rewrites for N+1 queries, null check code for null reference errors, and optimization hints for slow functions. More actionable than get_heal_plans — gives you the actual code to write.",
     inputSchema: { type: "object", properties: {} },
@@ -846,6 +856,28 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               } catch (e: any) {
                 result = { error: "No runtime data found. Run the app with trickle first." };
               }
+            }
+            break;
+          }
+          case "diff_runs": {
+            try {
+              const { runDiffCommand, diffRuns } = require('./run-diff');
+              const dir = findTrickleDir();
+              const snapshotDir = path.join(dir, 'snapshot');
+
+              if (args.save_snapshot) {
+                const origLog = console.log;
+                console.log = () => {};
+                runDiffCommand({ snapshot: true });
+                console.log = origLog;
+                result = { saved: true, message: 'Snapshot saved. Make changes, re-run, then call diff_runs again.' };
+              } else if (fs.existsSync(snapshotDir)) {
+                result = diffRuns(snapshotDir, dir);
+              } else {
+                result = { error: 'No snapshot found. Call with save_snapshot: true first.' };
+              }
+            } catch (e: any) {
+              result = { error: `Failed to diff runs: ${e.message}` };
             }
             break;
           }

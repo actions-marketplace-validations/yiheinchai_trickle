@@ -2,13 +2,13 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <general directive>
-Improving the developer experience in real codebases, test diverse codebases from online and find painpoints and fix them
+Make a big push of increasing the feature set of trickle to expand the target audience and the TAM. Make sure to update the readme and usecases accordingly.
 
-if you think everything has already be accomplished, please compact conversation, and work on improving trickle by your discretions
+Particularly, build for agents. Trickle should provide cached runtime information for agents to be able to debug applications autonomously, and how a marked improvement in agentic performance.
 </general directive>
 
 <focus point>
-Added value history in VSCode hover tooltips — loop variables now show all observed values with arrows (e.g., "0 → 1 → 2 → 3 → 4") instead of just the last value. Also fixed None values showing as string "None" instead of JSON null in Python sample output. Previously: pytest source module tracing, dataclass display fixes, all JS/Python transforms robust. Continue exploring more improvements by testing on real codebases.
+Built two new commands for agent/AI workflows: (1) `trickle context` — outputs structured runtime context (variable values, function types, errors) for AI coding agents to debug without running code. Supports file:line targeting, compact mode, and JSON output. (2) `trickle tool-schema` — generates LLM tool calling schemas (OpenAI/Anthropic/MCP) from observed function types. Also added ai-developer.md use case. Next: integrate trickle context into CLAUDE.md instructions so agents automatically use it, and build deeper agent integration (e.g., auto-run trickle before debugging).
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

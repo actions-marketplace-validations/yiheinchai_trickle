@@ -6,12 +6,11 @@ Improve trickle, you have free reign and use your own discretion
 </higher directive>
 
 <focus point>
-CLI 0.1.144. Tested on httpbin (real open-source Flask project, 56 pytest tests) — found and
-fixed spurious "unknown failure" shown when all tests pass. Also tested on Create React App
-(1 test pass), json-server (found glob bug), express-typescript-boilerplate (found suite
-failure bug). All bugs found by real-world testing are now fixed.
+CLI 0.1.144. Validated Django ORM tracing on real Django project (5 tests, 289 queries, 6 logs,
+N+1 patterns detected in Django internals). Also tested on httpbin (56 pytest tests), CRA
+React, json-server, Express TS boilerplate. All bugs found have been fixed.
 
-26 MCP tools, all docs complete. Tested on 10+ real projects across JS/TS/Python.
+26 MCP tools, all docs complete. Tested on 11+ real projects across JS/TS/Python/Django.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

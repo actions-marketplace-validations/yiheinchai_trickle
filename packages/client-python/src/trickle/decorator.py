@@ -102,11 +102,23 @@ def _wrap(fn: Callable, *, name: Optional[str], module: Optional[str]) -> Callab
 
 
 def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kwargs: dict) -> Any:
-    # Re-entrancy guard: if already inside an observed call, run directly
+    from .call_trace import trace_call, trace_return
+
+    # Re-entrancy guard: if already inside an observed call, skip type observation
+    # but still record call trace for execution flow
     depth = getattr(_call_depth, "value", 0)
     if depth > 0:
-        return fn(*args, **kwargs)
+        call_id = trace_call(func_name, func_module)
+        start = time.perf_counter()
+        try:
+            result = fn(*args, **kwargs)
+            trace_return(call_id, func_name, func_module, (time.perf_counter() - start) * 1000)
+            return result
+        except Exception as exc:
+            trace_return(call_id, func_name, func_module, (time.perf_counter() - start) * 1000, str(exc)[:200])
+            raise
     _call_depth.value = depth + 1
+    call_id = trace_call(func_name, func_module)
     try:
         tracked_args, tracked_kwargs, all_paths_fns = _prepare_tracked(args, kwargs, fn)
 
@@ -119,10 +131,12 @@ def _invoke_sync(fn: Callable, func_name: str, func_module: str, args: tuple, kw
             duration_ms = (time.perf_counter() - start) * 1000
             error_exc = exc
             _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, error_exc, is_async=False, duration_ms=duration_ms)
+            trace_return(call_id, func_name, func_module, duration_ms, str(exc)[:200])
             raise
         else:
             duration_ms = (time.perf_counter() - start) * 1000
             _emit(fn, func_name, func_module, args, kwargs, result, all_paths_fns, None, is_async=False, duration_ms=duration_ms)
+            trace_return(call_id, func_name, func_module, duration_ms)
         return result
     finally:
         _call_depth.value = depth

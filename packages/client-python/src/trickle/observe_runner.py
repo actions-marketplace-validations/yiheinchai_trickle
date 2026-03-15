@@ -85,6 +85,10 @@ def main() -> None:
     from trickle.transport import configure as _configure_transport
     _configure_transport()
 
+    # Initialize call trace for execution flow recording
+    from trickle.call_trace import init_call_trace
+    init_call_trace()
+
     # Install hooks BEFORE loading user code.
     import os as _os2
     _trace_vars = _os2.environ.get("TRICKLE_TRACE_VARS", "1") not in ("0", "false")

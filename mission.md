@@ -10,21 +10,19 @@ the goal is to make it production ready, where real companies can start deployin
 </higher directive>
 
 <focus point>
-Cloud backend v3 shipped: full auto-push + fly.io deployment config.
+Production-ready cloud platform shipped.
 
-Features:
-- Auto-push: all data types (variables, calltrace, queries, errors, alerts)
-  automatically pushed to cloud after every `trickle run` — zero manual steps
-- Real-time streaming: observations stream during app execution every 5s
-- Dockerfile + fly.toml: ready for `fly deploy` to production
-- Shared dashboards: dark-themed HTML with alerts, errors, performance, queries
+Cloud: multi-tenant API, auto-push, real-time streaming, shared dashboards.
+Production: rate limiting, data retention (30d), request logging, error handling.
+Deployment: Dockerfile + fly.toml ready for `fly deploy`.
+Usecases: observability-platform.md updated with cloud workflow + Datadog comparison.
 
-Flow: trickle cloud login → trickle run <app> → all data auto-pushed → dashboard ready
+Flow: trickle cloud login → trickle run <app> → auto-push → share dashboard URL
 
 Next priorities:
-1. Deploy cloud.trickle.dev to fly.io (run `fly deploy`)
-2. Team management (invite members, RBAC, org-level projects)
-3. Production hardening (rate limiting, data retention, PostgreSQL)
+1. Deploy cloud.trickle.dev to fly.io
+2. Team management (invite members, RBAC)
+3. PostgreSQL migration (replace SQLite for cloud scale)
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -1309,35 +1309,49 @@ export function transformEsmSource(
 
   // Build prefix — ALL imports first (ESM requires imports before any statements)
   const needsTracing = varInsertions.length > 0 || destructInsertions.length > 0 || reassignInsertions.length > 0 || forLoopInsertions.length > 0 || catchInsertions.length > 0 || funcParamInsertions.length > 0 || bodyInsertions.length > 0 || hookInsertions.length > 0 || stateInsertions.length > 0 || conciseBodyInsertions.length > 0;
-  const importLines: string[] = [
-    `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
-  ];
-  if (needsTracing && isSSR) {
-    // SSR/Node.js — use file system for writing
+  const importLines: string[] = [];
+
+  if (isSSR) {
+    // SSR/Node.js — import trickle-observe for function wrapping + file system for writing
     importLines.push(
-      `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
-      `import { join as __trickle_join } from 'node:path';`,
+      `import { wrapFunction as __trickle_wrapFn, configure as __trickle_configure } from 'trickle-observe';`,
+    );
+    if (needsTracing) {
+      importLines.push(
+        `import { mkdirSync as __trickle_mkdirSync, appendFileSync as __trickle_appendFileSync } from 'node:fs';`,
+        `import { join as __trickle_join } from 'node:path';`,
+      );
+    }
+  }
+  // Browser mode: no imports needed — variable tracers are self-contained,
+  // function wrapping is a no-op, and transport uses import.meta.hot
+
+  const prefixLines = [...importLines];
+
+  if (isSSR) {
+    prefixLines.push(
+      `__trickle_configure({ backendUrl: ${JSON.stringify(backendUrl)}, batchIntervalMs: 2000, debug: ${debug}, enabled: true, environment: 'node' });`,
+      `function __trickle_wrap(fn, name, paramNames) {`,
+      `  const opts = {`,
+      `    functionName: name,`,
+      `    module: ${JSON.stringify(moduleName)},`,
+      `    trackArgs: true,`,
+      `    trackReturn: true,`,
+      `    sampleRate: 1,`,
+      `    maxDepth: 5,`,
+      `    environment: 'node',`,
+      `    enabled: true,`,
+      `  };`,
+      `  if (paramNames && paramNames.length) opts.paramNames = paramNames;`,
+      `  return __trickle_wrapFn(fn, opts);`,
+      `}`,
+    );
+  } else {
+    // Browser mode: __trickle_wrap is a no-op (function wrapping uses Node.js APIs)
+    prefixLines.push(
+      `function __trickle_wrap(fn) { return fn; }`,
     );
   }
-
-  const prefixLines = [
-    ...importLines,
-    `__trickle_configure({ backendUrl: ${JSON.stringify(backendUrl)}, batchIntervalMs: 2000, debug: ${debug}, enabled: true, environment: 'node' });`,
-    `function __trickle_wrap(fn, name, paramNames) {`,
-    `  const opts = {`,
-    `    functionName: name,`,
-    `    module: ${JSON.stringify(moduleName)},`,
-    `    trackArgs: true,`,
-    `    trackReturn: true,`,
-    `    sampleRate: 1,`,
-    `    maxDepth: 5,`,
-    `    environment: 'node',`,
-    `    enabled: true,`,
-    `  };`,
-    `  if (paramNames && paramNames.length) opts.paramNames = paramNames;`,
-    `  return __trickle_wrapFn(fn, opts);`,
-    `}`,
-  ];
 
   // Add unified __trickle_send() transport — browser uses HMR WebSocket, SSR uses fs
   if (needsTracing) {

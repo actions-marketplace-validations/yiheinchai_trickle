@@ -402,6 +402,15 @@ async function executeSingleRun(
     // Generate post-run summary for AI agents
     writeRunSummary({ exitCode, command: instrumentedCommand });
 
+    // Next steps hint
+    console.log("");
+    console.log(chalk.bold("  Next steps:"));
+    console.log(chalk.gray("    trickle summary        ") + "full analysis (errors, queries, root causes)");
+    console.log(chalk.gray("    trickle explain <file>  ") + "understand a file (functions, call graph, data flow)");
+    console.log(chalk.gray("    trickle flamegraph      ") + "performance hotspots");
+    console.log(chalk.gray("    trickle test            ") + "run tests with observability");
+    console.log("");
+
     return exitCode;
   }
 
@@ -504,6 +513,14 @@ async function executeSingleRun(
   }
 
   console.log(chalk.gray("  " + "─".repeat(50)));
+
+  // Next steps hint for first-time users
+  console.log("");
+  console.log(chalk.bold("  Next steps:"));
+  console.log(chalk.gray("    trickle summary        ") + "full analysis (errors, queries, root causes)");
+  console.log(chalk.gray("    trickle explain <file>  ") + "understand a file (functions, call graph, data flow)");
+  console.log(chalk.gray("    trickle flamegraph      ") + "performance hotspots");
+  console.log(chalk.gray("    trickle test            ") + "run tests with observability");
   console.log("");
 
   // Auto-push all data to cloud if configured

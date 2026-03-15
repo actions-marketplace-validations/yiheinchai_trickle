@@ -308,14 +308,16 @@ Your Code → trickle (import hooks / AST transform)
                 ↓
          .trickle/observations.jsonl  (function types + timing)
          .trickle/variables.jsonl     (variable assignments)
+         .trickle/calltrace.jsonl     (call graph + parent-child flow)
          .trickle/errors.jsonl        (crash context + nearby values)
          .trickle/queries.jsonl       (SQL, Redis, MongoDB queries)
+         .trickle/websocket.jsonl     (WebSocket messages)
          .trickle/console.jsonl       (stdout/stderr output)
                 ↓
     ┌───────────┼───────────┬──────────────┐
     ↓           ↓           ↓              ↓
  VSCode      CLI tools    AI Agents      MCP Server
- Extension   (codegen,    (trickle       (9 tools for
+ Extension   (codegen,    (trickle       (11 tools for
  (inline     stubs,       context,       Claude, Cursor,
   hints)     openapi)     CLAUDE.md)     Copilot)
 ```

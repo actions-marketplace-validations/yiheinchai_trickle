@@ -518,68 +518,40 @@ function createClaudeMd(dir: string, info: ProjectInfo): boolean {
 
   const content = `# Project Instructions
 
-## Debugging with trickle (Runtime Observability)
+## Runtime Observability with trickle
 
-This project uses **trickle** to cache runtime data. Instead of adding console.log/print
-statements, query the cached data directly. The \`.trickle/\` directory persists across sessions.
+This project uses **trickle** for runtime observability. Instead of adding console.log/print
+statements, use trickle to capture and query runtime data automatically.
 
-### Debugging Workflow
-
-When investigating a bug or understanding behavior:
-
-1. **Check if data is fresh**: \`trickle context --check\`
-2. **If stale, re-run**: \`${runCmd}\`
-3. **Check errors first**: \`trickle context --errors\`
-4. **Get context for the relevant file**: \`trickle context ${exampleFile}\`
-5. **Narrow to specific line**: \`trickle context ${exampleFile}:42\`
-
-### Essential Commands
+### Quick Start
 
 \`\`\`bash
-# Runtime variable values (types + actual values)
-trickle context ${exampleFile}          # full file context
-trickle context ${exampleFile}:42       # near a specific line
-trickle context --compact                # minimal output (saves tokens)
-trickle context --json                   # structured JSON
-
-# Function signatures with timing
-trickle functions                        # all observed functions
-trickle types <function_name>            # detailed types for one function
-
-# Errors with variable context
-trickle context --errors                 # errors + nearby variable values
-trickle errors                           # list all captured errors
-
-# Database queries
-trickle vars --file queries              # SQL queries, timing, row counts
-
-# HTTP requests
-trickle context --http                   # fetch/request calls with status codes
-
-# Variable values
-trickle vars                             # all variables with types and values
-trickle vars --file ${exampleFile}       # filter by file
-\`\`\`
-
-### What trickle Captures (automatically)
-
-| Data | File | Description |
-|------|------|-------------|
-| Variables | \`variables.jsonl\` | Every variable assignment with type + sample value |
-| Functions | \`observations.jsonl\` | Function signatures, params, return types, timing |
-| Errors | \`errors.jsonl\` | Crashes with stack trace + nearby variable values |
-| DB Queries | \`queries.jsonl\` | SQL text, duration, row count, columns |
-| Console | \`console.jsonl\` | All stdout/stderr output with timestamps |
-
-### Refreshing Data
-
-\`\`\`bash
+# Capture runtime data (zero code changes)
 ${runCmd}
+
+# Get a complete overview (errors, queries, alerts, root causes)
+trickle summary
+
+# Understand a specific file
+trickle explain ${exampleFile}
+
+# Run tests with observability
+trickle test
+
+# Performance analysis
+trickle flamegraph
 \`\`\`
 
-### MCP Server
+### Agent Debugging Workflow
 
-For direct tool access, add trickle as an MCP server in your Claude configuration:
+1. **Get overview**: \`trickle summary\` — status, errors, N+1 queries, root causes, fix recommendations
+2. **Understand a file**: \`trickle explain ${exampleFile}\` — functions, call graph, data flow, queries, variables
+3. **Debug errors**: \`trickle context --errors\` — errors with nearby variable values
+4. **Fix & verify**: \`trickle verify --baseline\` → fix code → \`${runCmd}\` → \`trickle verify\`
+
+### MCP Server (recommended for Claude Code)
+
+Add to \`.claude/settings.json\` or \`claude_desktop_config.json\`:
 
 \`\`\`json
 {
@@ -592,10 +564,30 @@ For direct tool access, add trickle as an MCP server in your Claude configuratio
 }
 \`\`\`
 
-Available tools: \`get_runtime_context\`, \`get_annotated_source\`,
-\`get_function_signatures\`, \`get_errors\`, \`get_database_queries\`,
-\`get_console_output\`, \`get_http_requests\`, \`check_data_freshness\`,
-\`refresh_runtime_data\`.
+Key MCP tools (26 total):
+
+| Tool | Use for |
+|------|---------|
+| \`get_recommended_actions\` | Start here — tells you exactly what to do next |
+| \`get_last_run_summary\` | Complete overview: errors, queries, alerts, root causes |
+| \`explain_file\` | Understand a file: functions, call graph, data flow, queries |
+| \`run_tests\` | Run tests with structured pass/fail + runtime context |
+| \`get_flamegraph\` | Performance hotspots sorted by execution time |
+| \`get_errors\` | Errors with variable values at the error location |
+| \`save_baseline\` / \`compare_with_baseline\` | Before/after comparison for fix verification |
+| \`get_new_alerts\` | Polling-based monitoring for new issues |
+| \`refresh_runtime_data\` | Re-run the app to capture fresh data |
+
+### What trickle Captures (automatically, zero config)
+
+- **Functions**: signatures, params, return types, timing, sample I/O
+- **Variables**: types + runtime values at each line
+- **Database queries**: SQL text, duration, row count (pg, mysql2, sqlite3, Prisma, SQLAlchemy, Django ORM)
+- **Errors**: with stack trace + nearby variable values
+- **Logs**: winston, pino, bunyan (JS); logging, loguru, structlog (Python)
+- **HTTP requests**: fetch/requests calls with status + latency
+- **Call traces**: execution flow with parent-child relationships
+- **Memory**: RSS + heap snapshots
 `;
 
   fs.writeFileSync(claudePath, content, "utf-8");
@@ -607,22 +599,18 @@ function generateTrickleSection(info: ProjectInfo): string {
     ? `trickle run python ${info.entryFile || "app.py"}`
     : `trickle run node ${info.entryFile || "app.js"}`;
 
-  return `## Debugging with trickle (Runtime Observability)
+  return `## Runtime Observability with trickle
 
-Use cached runtime data instead of adding console.log/print statements:
+Use \`trickle summary\` for a complete overview, \`trickle explain <file>\` to understand a file,
+and \`trickle test\` for tests with runtime context. Refresh data: \`${runCmd}\`
 
-\`\`\`bash
-trickle context --errors           # check errors first
-trickle context <file>             # variable values for a file
-trickle context <file>:42          # values near a specific line
-trickle context --compact          # minimal output (saves tokens)
-trickle functions                  # function signatures with timing
-trickle vars                       # all variable types and values
+MCP server config (for \`.claude/settings.json\`):
+\`\`\`json
+{ "mcpServers": { "trickle": { "command": "npx", "args": ["trickle-cli", "mcp-server"] } } }
 \`\`\`
 
-Refresh data: \`${runCmd}\`
-
-Data in \`.trickle/\`: variables, functions, errors, database queries, console output, HTTP requests.
+Key tools: \`get_recommended_actions\` (start here), \`get_last_run_summary\`, \`explain_file\`,
+\`run_tests\`, \`get_flamegraph\`, \`get_errors\`, \`save_baseline\`/\`compare_with_baseline\`.
 `;
 }
 
@@ -720,6 +708,37 @@ export async function initCommand(opts: InitOptions): Promise<void> {
   const claudeCreated = createClaudeMd(dir, info);
   if (claudeCreated) {
     console.log(`  ${chalk.green("+")} Created ${chalk.bold("CLAUDE.md")} — AI agent instructions for debugging with trickle`);
+  }
+
+  // Step 8b: Create .claude/settings.json with MCP server config
+  const claudeSettingsDir = path.join(dir, ".claude");
+  const claudeSettingsPath = path.join(claudeSettingsDir, "settings.json");
+  if (!fs.existsSync(claudeSettingsPath)) {
+    try {
+      if (!fs.existsSync(claudeSettingsDir)) fs.mkdirSync(claudeSettingsDir, { recursive: true });
+      const settings: any = {};
+      // Check if settings already exist and merge
+      if (fs.existsSync(claudeSettingsPath)) {
+        try { Object.assign(settings, JSON.parse(fs.readFileSync(claudeSettingsPath, "utf-8"))); } catch {}
+      }
+      if (!settings.mcpServers?.trickle) {
+        settings.mcpServers = settings.mcpServers || {};
+        settings.mcpServers.trickle = { command: "npx", args: ["trickle-cli", "mcp-server"] };
+        fs.writeFileSync(claudeSettingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
+        console.log(`  ${chalk.green("+")} Created ${chalk.bold(".claude/settings.json")} — MCP server config for Claude Code`);
+      }
+    } catch {}
+  } else {
+    // Check if trickle MCP is already configured
+    try {
+      const existing = JSON.parse(fs.readFileSync(claudeSettingsPath, "utf-8"));
+      if (!existing.mcpServers?.trickle) {
+        existing.mcpServers = existing.mcpServers || {};
+        existing.mcpServers.trickle = { command: "npx", args: ["trickle-cli", "mcp-server"] };
+        fs.writeFileSync(claudeSettingsPath, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+        console.log(`  ${chalk.green("~")} Updated ${chalk.bold(".claude/settings.json")} — added trickle MCP server`);
+      }
+    } catch {}
   }
 
   // Step 9: Print next steps

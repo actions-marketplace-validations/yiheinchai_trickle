@@ -104,6 +104,123 @@ export interface RunSummary {
     recommendation: string;
     confidence: string;
   }>;
+
+  rootCauses: Array<{
+    severity: 'critical' | 'warning' | 'info';
+    category: string;
+    description: string;
+    evidence: string;
+    suggestedFix: string;
+  }>;
+}
+
+/**
+ * Derive likely root causes from runtime data.
+ */
+function deriveRootCauses(
+  errors: RunSummary['errors'],
+  alerts: any[],
+  nPlusOnePatterns: RunSummary['queries']['nPlusOnePatterns'],
+  slowQueries: RunSummary['queries']['slowQueries'],
+  funcs: any[],
+  memory: RunSummary['memory'],
+  logs: any[],
+): RunSummary['rootCauses'] {
+  const causes: RunSummary['rootCauses'] = [];
+
+  // Analyze errors (deduplicate by message)
+  const seenErrors = new Set<string>();
+  for (const err of errors.slice(0, 5)) {
+    if (seenErrors.has(err.message || '')) continue;
+    seenErrors.add(err.message || '');
+    const msg = err.message || '';
+    const type = err.type || 'Error';
+
+    if (msg.includes('not defined') || msg.includes('is not a function')) {
+      causes.push({
+        severity: 'critical',
+        category: 'reference_error',
+        description: `${type}: ${msg.substring(0, 100)}`,
+        evidence: err.stack ? `at ${err.file || 'unknown'}:${err.line || '?'}` : msg,
+        suggestedFix: 'Check for typos in variable/function names, missing imports, or undefined references.',
+      });
+    } else if (msg.includes('NoneType') || msg.includes('undefined') || msg.includes('null')) {
+      causes.push({
+        severity: 'critical',
+        category: 'null_reference',
+        description: `Null/undefined access: ${msg.substring(0, 100)}`,
+        evidence: err.stack ? `at ${err.file || 'unknown'}:${err.line || '?'}` : msg,
+        suggestedFix: 'Add null check before accessing the value. Check if the database query/API call returned data.',
+      });
+    } else if (msg.includes('timeout') || msg.includes('ETIMEDOUT') || msg.includes('ECONNREFUSED')) {
+      causes.push({
+        severity: 'critical',
+        category: 'connection_error',
+        description: `Connection issue: ${msg.substring(0, 100)}`,
+        evidence: msg,
+        suggestedFix: 'Check if the target service is running, network connectivity, and timeout settings.',
+      });
+    } else if (type !== 'Error' || msg.length > 0) {
+      causes.push({
+        severity: 'critical',
+        category: 'runtime_error',
+        description: `${type}: ${msg.substring(0, 100)}`,
+        evidence: err.stack ? `at ${err.file || 'unknown'}:${err.line || '?'}` : msg,
+        suggestedFix: `Fix the ${type} in the code at the indicated location.`,
+      });
+    }
+  }
+
+  // Analyze N+1 patterns
+  for (const pattern of nPlusOnePatterns.slice(0, 2)) {
+    causes.push({
+      severity: 'warning',
+      category: 'n_plus_one',
+      description: `N+1 query: "${pattern.query.substring(0, 60)}" repeated ${pattern.count} times`,
+      evidence: `${pattern.count} identical queries detected — likely executed in a loop`,
+      suggestedFix: `Replace with a batch query using IN clause or JOIN. Example: SELECT * FROM table WHERE id IN (${Array(Math.min(pattern.count, 3)).fill('?').join(', ')})`,
+    });
+  }
+
+  // Analyze slow functions
+  const verySlowFuncs = funcs.filter(f => f.durationMs > 1000);
+  for (const f of verySlowFuncs.slice(0, 2)) {
+    causes.push({
+      severity: 'warning',
+      category: 'slow_function',
+      description: `${f.module}.${f.functionName} took ${f.durationMs.toFixed(0)}ms`,
+      evidence: `Function duration exceeds 1000ms threshold`,
+      suggestedFix: 'Profile this function. Check for blocking I/O, unnecessary computation, or missing caching.',
+    });
+  }
+
+  // Analyze memory
+  if (memory.delta && memory.delta > 100) {
+    causes.push({
+      severity: 'warning',
+      category: 'memory_growth',
+      description: `Memory grew by ${memory.delta}MB during execution (${memory.startMb}MB → ${memory.endMb}MB)`,
+      evidence: `RSS delta: +${memory.delta}MB`,
+      suggestedFix: 'Check for memory leaks — objects accumulating in arrays/maps, unclosed connections, or event listener accumulation.',
+    });
+  }
+
+  // Analyze error logs
+  const errorLogCount = logs.filter((l: any) => {
+    const lvl = (l.level || l.levelname || '').toLowerCase();
+    return lvl === 'error' || lvl === 'critical' || lvl === 'fatal';
+  }).length;
+  if (errorLogCount > 0 && errors.length === 0) {
+    causes.push({
+      severity: 'warning',
+      category: 'logged_errors',
+      description: `${errorLogCount} error-level log entries detected (errors caught but logged)`,
+      evidence: `Error logs without unhandled exceptions — errors are being swallowed`,
+      suggestedFix: 'Review error log messages for issues that may need fixing even though they are caught.',
+    });
+  }
+
+  return causes;
 }
 
 /**
@@ -347,6 +464,7 @@ export function generateRunSummary(opts: {
     memory,
     environment,
     healPlans,
+    rootCauses: deriveRootCauses(errorSummaries, alertsRaw, nPlusOnePatterns, slowQueries, uniqueFuncs, memory, logsRaw),
   };
 
   return summary;

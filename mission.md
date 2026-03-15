@@ -6,16 +6,13 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.162. 30 MCP tools. Shipped trickle changelog — auto-generates API changelog from
-type diffs with Markdown output for PR comments. Detects added/removed/changed functions
-and flags breaking changes (return type changes, parameter removal).
+CLI 0.1.163. 30 MCP tools. Integrated changelog + security scan into CI PR comments.
+When trickle ci runs in GitHub Actions, PR comments now include: observability summary,
+root causes, N+1 patterns, API changelog (breaking changes), and security findings.
 
-This session shipped 20+ features: changelog, security scanning, cost estimation, waterfall,
-deps graph, anomaly detection, per-request tracing, diff-runs, fix suggestions, OTLP export,
-Prometheus metrics, Slack/Discord webhooks, GitHub PR comments, flamegraph, guided workflows,
-root cause analysis, error context, inline run summary, curated help, Django/unittest parsing.
+This session shipped 25+ features across CLI, JS client, and Python client.
 
-Next: SLO burn rate, multi-service dependency map, changelog integration into trickle ci.
+Next: SLO burn rate alerting, multi-service dependency map, real-time streaming dashboard.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

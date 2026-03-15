@@ -14,7 +14,9 @@ Observability platform complete. 10 data types, 15 MCP tools, 15+ auto-patched d
 Pipeline: trickle run → monitor → heal → verify
 Features: dashboard, webhook alerts, watch mode, production sampling, distributed tracing
 
-Next: Cloud dashboard for team sharing, test on real production workloads
+Done: Updated ai-agent.md (15 MCP tools, auto-remediation loop), created observability-platform.md (Datadog replacement guide with comparison table), added Datadog section to README.
+
+Next: Cloud dashboard for team sharing, Go/Rust language support
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

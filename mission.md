@@ -8,10 +8,10 @@ basically the same as the full multifile inline hints in python
 </general directive>
 
 <focus point>
-All JS/TS tracer paths now share comprehensive pattern detection (declarations, destructuring, reassignments, for-loops, params, catch, JSX expressions) with live-updating values. Covers: Vite HMR, Next.js fetch, Remix, Node.js backend, React Native. Python tracers also updated (entry file, import hook, settrace, notebook). trickle init auto-detects frameworks. Next areas:
+All JS/TS + Python tracer paths comprehensive with live-updating values. Fixed critical Node.js backend bug (default param braces broke function detection). Express API tested: 37 vars captured across routes/middleware. Next areas:
 - Consider adding React DevTools-style component tree visualization using the captured render data
 - Explore tracing custom hook return values with richer type info
-- Test on more diverse real-world codebases (Express APIs, Fastify, tRPC) to find edge cases
+- Add a backend-developer use case document showing Express/Fastify inline hints
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

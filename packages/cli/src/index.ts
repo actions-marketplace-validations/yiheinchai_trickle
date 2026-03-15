@@ -39,6 +39,7 @@ import { varsCommand } from "./commands/vars";
 import { lambdaCommand } from "./commands/lambda";
 import { toolSchemaCommand } from "./commands/tool-schema";
 import { contextCommand } from "./commands/context";
+import { mcpServerCommand } from "./commands/mcp-server";
 import { rnCommand } from "./commands/rn";
 import { nextCommand } from "./commands/next";
 import { pythonCommand } from "./commands/python";
@@ -155,6 +156,14 @@ program
   .option("--watch", "Watch mode: re-generate when new types are observed")
   .action(async (functionName: string | undefined, opts) => {
     await codegenCommand(functionName, opts);
+  });
+
+// trickle mcp-server
+program
+  .command("mcp-server")
+  .description("Start MCP server for AI agent integration (stdio transport)")
+  .action(async () => {
+    await mcpServerCommand();
   });
 
 // trickle context

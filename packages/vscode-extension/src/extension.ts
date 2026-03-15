@@ -415,8 +415,8 @@ let optimizerIndex: Map<string, Map<number, OptimizerStepRecord>> = new Map();
 let dataloaderIndex: Map<string, Map<number, DataloaderBatchRecord>> = new Map();
 /** Training throughput: filePath -> lineNo -> TrainingThroughputRecord (latest) */
 let throughputIndex: Map<string, Map<number, TrainingThroughputRecord>> = new Map();
-/** Activation statistics: filePath -> lineNo -> ActivationStatsRecord (latest) */
-let activationIndex: Map<string, Map<number, ActivationStatsRecord>> = new Map();
+/** Activation statistics: filePath -> lineNo -> ActivationStatsRecord[] (latest per module_name) */
+let activationIndex: Map<string, Map<number, ActivationStatsRecord[]>> = new Map();
 /** Loss probe records: filePath -> lineNo -> LossProbeRecord (latest) */
 let lossProbeIndex: Map<string, Map<number, LossProbeRecord>> = new Map();
 /** Attention statistics: filePath -> lineNo -> AttentionStatsRecord (latest) */
@@ -946,8 +946,10 @@ function loadAllVariables() {
             }
             const lineMap = activationIndex.get(ac.file)!;
             const existing = lineMap.get(ac.line);
-            if (!existing || ac.timestamp > existing.timestamp) {
-              lineMap.set(ac.line, ac);
+            if (!existing) {
+              lineMap.set(ac.line, [ac]);
+            } else {
+              existing.push(ac);
             }
             continue;
           }
@@ -1390,6 +1392,178 @@ class TrickleHoverProvider implements vscode.HoverProvider {
 
     return new vscode.Hover(markdown, wordRange);
   }
+}
+
+/**
+ * Match activation stats records to nn.Sequential layer declaration lines.
+ *
+ * Given a forward-call line (e.g. `features = self.features(x)`) and the activation
+ * records that fired on that line, find the nn.Sequential(...) block that defines the
+ * layers and return a mapping from each layer declaration line to its activation record.
+ *
+ * Strategy:
+ * 1. Extract the attribute name from the forward call line (e.g. "features")
+ * 2. Find the `self.<attr> = nn.Sequential(` block in the document
+ * 3. Parse the layer declaration lines to get ordered (lineIndex, layerType) pairs
+ * 4. From all activation records, extract the last complete forward pass
+ *    (last N records by timestamp, where N = number of layers)
+ * 5. Match by type occurrence order: 1st Linear record -> 1st nn.Linear line, etc.
+ */
+function matchSequentialLayers(
+  document: vscode.TextDocument,
+  forwardCallLine: number,
+  leafRecords: ActivationStatsRecord[],
+): { layerLineNo: number; record: ActivationStatsRecord }[] {
+  const results: { layerLineNo: number; record: ActivationStatsRecord }[] = [];
+
+  // Extract the attribute name from the forward call line, e.g. "self.features(x)" -> "features"
+  const callLineText = document.lineAt(forwardCallLine - 1).text;
+  const attrMatch = /self\.(\w+)\s*\(/.exec(callLineText);
+  if (!attrMatch) return results;
+  const attrName = attrMatch[1];
+
+  // Search the document for the Sequential declaration: `self.<attr> = nn.Sequential(`
+  const seqPattern = new RegExp(`self\\.${escapeRegex(attrName)}\\s*=\\s*nn\\.Sequential\\s*\\(`);
+  let seqStartLine = -1;
+  const totalLines = document.lineCount;
+  for (let i = 0; i < totalLines; i++) {
+    if (seqPattern.test(document.lineAt(i).text)) {
+      seqStartLine = i;
+      break;
+    }
+  }
+  if (seqStartLine < 0) return results;
+
+  // Parse the layer lines inside the Sequential block.
+  // Each layer line matches nn.<LayerType>(...) — collect (lineIndex, layerType)
+  const layerLines: { lineIndex: number; layerType: string }[] = [];
+  const layerPattern = /nn\.(\w+)\s*\(/;
+
+  // Walk lines from seqStartLine+1 until we find the closing paren
+  let parenDepth = 0;
+  // Count parens on the opening line
+  for (const ch of document.lineAt(seqStartLine).text) {
+    if (ch === '(') parenDepth++;
+    if (ch === ')') parenDepth--;
+  }
+
+  for (let i = seqStartLine + 1; i < totalLines && parenDepth > 0; i++) {
+    const lineText = document.lineAt(i).text;
+    const layerMatch = layerPattern.exec(lineText);
+    if (layerMatch) {
+      layerLines.push({ lineIndex: i, layerType: layerMatch[1] });
+    }
+    for (const ch of lineText) {
+      if (ch === '(') parenDepth++;
+      if (ch === ')') parenDepth--;
+    }
+  }
+
+  if (layerLines.length === 0) return results;
+
+  const numLayers = layerLines.length;
+
+  // Build the expected type counts from the source
+  const expectedTypeCounts = new Map<string, number>();
+  for (const { layerType } of layerLines) {
+    expectedTypeCounts.set(layerType, (expectedTypeCounts.get(layerType) || 0) + 1);
+  }
+
+  // Sort all records by timestamp to find the last complete forward pass
+  const sortedAll = [...leafRecords].sort((a, b) => a.timestamp - b.timestamp);
+
+  // Extract the last N records (one forward pass) where N = numLayers
+  // We take the last `numLayers` records and verify the type counts match
+  let lastPassRecords: ActivationStatsRecord[] | null = null;
+
+  if (sortedAll.length >= numLayers) {
+    const candidate = sortedAll.slice(-numLayers);
+    // Verify type counts match
+    const candidateTypeCounts = new Map<string, number>();
+    for (const r of candidate) {
+      candidateTypeCounts.set(r.module_name, (candidateTypeCounts.get(r.module_name) || 0) + 1);
+    }
+    let countsMatch = true;
+    for (const [type, count] of expectedTypeCounts) {
+      if ((candidateTypeCounts.get(type) || 0) !== count) {
+        countsMatch = false;
+        break;
+      }
+    }
+    if (countsMatch && candidateTypeCounts.size === expectedTypeCounts.size) {
+      lastPassRecords = candidate;
+    }
+  }
+
+  // If we couldn't extract a clean last pass, fall back to using
+  // the latest record per (module_name, occurrence_index)
+  if (!lastPassRecords) {
+    // Group records by module_name, keep latest N per type where N = expected count
+    const typeGroups = new Map<string, ActivationStatsRecord[]>();
+    for (const r of sortedAll) {
+      if (!typeGroups.has(r.module_name)) {
+        typeGroups.set(r.module_name, []);
+      }
+      typeGroups.get(r.module_name)!.push(r);
+    }
+
+    // For each type, take the last expectedCount records (sorted by timestamp)
+    lastPassRecords = [];
+    for (const { layerType } of layerLines) {
+      const group = typeGroups.get(layerType);
+      if (!group) return results; // Can't match — bail
+    }
+
+    // Build by occurrence order: for each type, pick the last N records
+    const typePickCounters = new Map<string, number>();
+    const typeLatest = new Map<string, ActivationStatsRecord[]>();
+    for (const [type, count] of expectedTypeCounts) {
+      const group = typeGroups.get(type);
+      if (!group || group.length < count) return results;
+      // Take the last `count` records for this type
+      typeLatest.set(type, group.slice(-count));
+      typePickCounters.set(type, 0);
+    }
+
+    // Now assign to layer lines by type occurrence
+    for (const { lineIndex, layerType } of layerLines) {
+      const pickIdx = typePickCounters.get(layerType) || 0;
+      const latest = typeLatest.get(layerType)!;
+      if (pickIdx < latest.length) {
+        results.push({
+          layerLineNo: lineIndex + 1,
+          record: latest[pickIdx],
+        });
+      }
+      typePickCounters.set(layerType, pickIdx + 1);
+    }
+    return results;
+  }
+
+  // We have a clean last-pass set of records. Match by type occurrence order.
+  // Group them by type, preserving timestamp order within each type.
+  const typeToRecords = new Map<string, ActivationStatsRecord[]>();
+  for (const r of lastPassRecords) {
+    if (!typeToRecords.has(r.module_name)) {
+      typeToRecords.set(r.module_name, []);
+    }
+    typeToRecords.get(r.module_name)!.push(r);
+  }
+
+  const typeCounters = new Map<string, number>();
+  for (const { lineIndex, layerType } of layerLines) {
+    const count = typeCounters.get(layerType) || 0;
+    const records = typeToRecords.get(layerType);
+    if (records && count < records.length) {
+      results.push({
+        layerLineNo: lineIndex + 1,
+        record: records[count],
+      });
+    }
+    typeCounters.set(layerType, count + 1);
+  }
+
+  return results;
 }
 
 /** Inline hints (inlay hints) — show type after variable declarations */
@@ -2084,29 +2258,134 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
     }
 
     // Add activation statistics inlay hints at nn.Module forward call lines
+    // AND distribute per-layer stats to nn.Sequential declaration lines
     if (document.uri.scheme === 'file') {
       const filePath = document.uri.fsPath;
       const actLines = activationIndex.get(filePath);
       if (actLines) {
-        for (const [lineNo, ac] of actLines) {
+        // Helper to format a number compactly
+        const fmtNum = (n: number): string => {
+          const a = Math.abs(n);
+          if (a >= 100) return n.toFixed(1);
+          if (a >= 10) return n.toFixed(2);
+          if (a >= 1) return n.toFixed(3);
+          return n.toFixed(4);
+        };
+
+        // Helper to format a signed mean with +/- prefix
+        const fmtMean = (n: number): string => {
+          const s = fmtNum(n);
+          return n >= 0 ? `+${s}` : s;
+        };
+
+        // Helper to build a compact label for a single activation record
+        const buildActivationLabel = (ac: ActivationStatsRecord, includeShape: boolean): string => {
+          const shapeStr = includeShape ? `[${ac.shape.join(',')}] ` : '';
+          let lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} \u03c3=${fmtNum(ac.std)}`;
+
+          if (ac.exploding) {
+            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} \u03c3=${fmtNum(ac.std)} explode!`;
+          } else if (ac.vanishing) {
+            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} \u03c3=${fmtNum(ac.std)} vanish!`;
+          } else if (ac.zero_frac !== undefined && ac.zero_frac > 0.3) {
+            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} dead:${Math.round(ac.zero_frac * 100)}%`;
+          } else if (ac.sat_frac !== undefined && ac.sat_frac > 0.3) {
+            lbl = `${shapeStr}\u03bc=${fmtMean(ac.mean)} sat:${Math.round(ac.sat_frac * 100)}%`;
+          }
+          return lbl;
+        };
+
+        // Helper to build a tooltip for a single activation record
+        const buildActivationTooltip = (ac: ActivationStatsRecord): vscode.MarkdownString => {
+          const tooltipLines = [
+            `**Module:** \`${ac.module_name}\``,
+            `**Shape:** \`[${ac.shape.join(', ')}]\``,
+            `**Mean:** \`${ac.mean}\``,
+            `**Std:** \`${ac.std}\``,
+            `**Min:** \`${ac.min}\` \u00b7 **Max:** \`${ac.max}\``,
+          ];
+          if (ac.zero_frac !== undefined && ac.zero_frac > 0) {
+            tooltipLines.push(`**Zero fraction:** \`${(ac.zero_frac * 100).toFixed(1)}%\` ${ac.zero_frac > 0.5 ? '\u26a0 dead neurons detected' : ''}`);
+          }
+          if (ac.sat_frac !== undefined) {
+            tooltipLines.push(`**Saturation (|x|>0.9):** \`${(ac.sat_frac * 100).toFixed(1)}%\` ${ac.sat_frac > 0.5 ? '\u26a0 saturated' : ''}`);
+          }
+          if (ac.vanishing) tooltipLines.push('\u26a0 **Vanishing activations** (std < 1e-5)');
+          if (ac.exploding) tooltipLines.push('\u26a0 **Exploding activations** (|max| > 1e3)');
+          tooltipLines.push(`*Sampled at call #${ac.call_count} by trickle*`);
+          const md = new vscode.MarkdownString(
+            `### \u25c6 Activation Stats\n\n` + tooltipLines.join('\n\n'),
+          );
+          md.isTrusted = true;
+          return md;
+        };
+
+        // Container module names to skip when matching to Sequential layers
+        const CONTAINER_MODULES = new Set(['Sequential', 'ModuleList', 'ModuleDict']);
+
+        // Track which lines already received Sequential-distributed hints
+        const sequentialHintLines = new Set<number>();
+
+        for (const [lineNo, records] of actLines) {
           if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
 
-          // Format a compact stats label
-          const fmtNum = (n: number): string => {
-            const a = Math.abs(n);
-            if (a >= 100) return n.toFixed(1);
-            if (a >= 10) return n.toFixed(2);
-            if (a >= 1) return n.toFixed(3);
-            return n.toFixed(4);
-          };
+          // Filter out container modules for per-layer stats
+          const leafRecords = records.filter(r => !CONTAINER_MODULES.has(r.module_name));
 
-          let label = ` ◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)}`;
+          // Check if there are multiple distinct layer types — candidate for Sequential distribution
+          if (leafRecords.length > 1) {
+            // Try to find an nn.Sequential block whose layers map to these activations.
+            // Scan upward from the activation line to find the Sequential declaration and its layer lines.
+            const sequentialMatches = matchSequentialLayers(document, lineNo, leafRecords);
+            if (sequentialMatches.length > 0) {
+              for (const { layerLineNo, record } of sequentialMatches) {
+                if (layerLineNo - 1 < range.start.line || layerLineNo - 1 > range.end.line) continue;
+                sequentialHintLines.add(layerLineNo);
+                try {
+                  const layerLine = document.lineAt(layerLineNo - 1);
+                  const position = new vscode.Position(layerLineNo - 1, layerLine.text.trimEnd().length);
+                  const label = ` \u2192 ${buildActivationLabel(record, true)}`;
+                  const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                  hint.paddingLeft = true;
+                  hint.tooltip = buildActivationTooltip(record);
+                  hints.push(hint);
+                } catch {
+                  // Skip if line out of range
+                }
+              }
+              // Still show a summary hint on the forward-call line itself
+              // using the container Sequential record if present
+              const seqRecords = records.filter(r => r.module_name === 'Sequential');
+              const seqRecord = seqRecords.length > 0
+                ? seqRecords.reduce((a, b) => a.timestamp > b.timestamp ? a : b)
+                : undefined;
+              if (seqRecord) {
+                try {
+                  const line = document.lineAt(lineNo - 1);
+                  const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+                  const label = ` \u25c6 \u03bc=${fmtMean(seqRecord.mean)} \u03c3=${fmtNum(seqRecord.std)}`;
+                  const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+                  hint.paddingLeft = true;
+                  hint.tooltip = buildActivationTooltip(seqRecord);
+                  hints.push(hint);
+                } catch { /* skip */ }
+              }
+              continue; // Don't show the fallback single-record hint
+            }
+          }
 
-          // Anomaly flags
+          // Fallback: show a single hint on the forward-call line (original behavior)
+          // Use the record with the highest call_count (most representative)
+          const ac = leafRecords.length > 0
+            ? leafRecords.reduce((a, b) => a.call_count > b.call_count ? a : b)
+            : records[0];
+          if (!ac) continue;
+
+          let label = ` \u25c6 \u03bc=${fmtNum(ac.mean)} \u03c3=${fmtNum(ac.std)}`;
           if (ac.exploding) {
-            label = ` ⚡◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)} [explode]`;
+            label = ` \u26a1\u25c6 \u03bc=${fmtNum(ac.mean)} \u03c3=${fmtNum(ac.std)} [explode]`;
           } else if (ac.vanishing) {
-            label = ` ↓◆ μ=${fmtNum(ac.mean)} σ=${fmtNum(ac.std)} [vanish]`;
+            label = ` \u2193\u25c6 \u03bc=${fmtNum(ac.mean)} \u03c3=${fmtNum(ac.std)} [vanish]`;
           } else if (ac.zero_frac !== undefined && ac.zero_frac > 0.5) {
             label += ` [dead:${Math.round(ac.zero_frac * 100)}%]`;
           } else if (ac.sat_frac !== undefined && ac.sat_frac > 0.5) {
@@ -2118,30 +2397,7 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
             const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
             const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
             hint.paddingLeft = true;
-
-            const tooltipLines = [
-              `**Module:** \`${ac.module_name}\``,
-              `**Shape:** \`[${ac.shape.join(', ')}]\``,
-              `**Mean:** \`${ac.mean}\``,
-              `**Std:** \`${ac.std}\``,
-              `**Min:** \`${ac.min}\` · **Max:** \`${ac.max}\``,
-            ];
-            if (ac.zero_frac !== undefined && ac.zero_frac > 0) {
-              tooltipLines.push(`**Zero fraction:** \`${(ac.zero_frac * 100).toFixed(1)}%\` ${ac.zero_frac > 0.5 ? '⚠ dead neurons detected' : ''}`);
-            }
-            if (ac.sat_frac !== undefined) {
-              tooltipLines.push(`**Saturation (|x|>0.9):** \`${(ac.sat_frac * 100).toFixed(1)}%\` ${ac.sat_frac > 0.5 ? '⚠ saturated' : ''}`);
-            }
-            if (ac.vanishing) tooltipLines.push('⚠ **Vanishing activations** (std < 1e-5)');
-            if (ac.exploding) tooltipLines.push('⚠ **Exploding activations** (|max| > 1e3)');
-            tooltipLines.push(`*Sampled at call #${ac.call_count} by trickle*`);
-
-            const md = new vscode.MarkdownString(
-              `### ◆ Activation Stats\n\n` + tooltipLines.join('\n\n'),
-            );
-            md.isTrusted = true;
-            hint.tooltip = md;
-
+            hint.tooltip = buildActivationTooltip(ac);
             hints.push(hint);
           } catch {
             // Skip if line is out of range

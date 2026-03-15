@@ -6,14 +6,13 @@ Do market research, see what features are needed and pain points, and build thos
 </higher directive>
 
 <focus point>
-CLI 0.1.154. 28 MCP tools. Shipped diff_runs MCP tool — agents can save snapshots and compare
-runtime behavior between runs. Investigated per-request tracing — needs request correlation
-IDs in middleware (architectural change, not yet built).
+JS client 0.2.115. Shipped per-request correlation IDs via AsyncLocalStorage — Express
+middleware propagates requestId through call traces and DB queries. Foundation for
+Jaeger-like per-request tracing with trickle's richer data.
 
-Recent TAM features shipped: diff-runs, fix suggestions, OTLP export, Prometheus, Slack/Discord,
-GitHub PR comments, flamegraph, root cause analysis, inline issue summary.
+28 MCP tools. Recent: diff-runs, fix suggestions, OTLP, Prometheus, Slack/Discord, GitHub PR.
 
-Next: per-request correlation IDs in Express/Flask middleware, anomaly detection baselines.
+Next: MCP tool to filter by requestId, Python request correlation, anomaly detection.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

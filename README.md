@@ -159,7 +159,14 @@ trickle run npm test
 trickle check --against baseline.json
 ```
 
-**[Full DevOps Guide →](usecases/devops-ci.md)**
+Or use the new one-command CI integration:
+```yaml
+# GitHub Actions
+- run: npx trickle ci "python -m pytest tests/"
+# Detects N+1 queries, slow functions, errors → annotations on PR
+```
+
+**[Full DevOps Guide →](usecases/devops-ci.md)** | **[Example Workflow →](.github/workflows/trickle-example.yml)**
 
 ---
 

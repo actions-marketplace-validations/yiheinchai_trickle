@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 _queries_file: Optional[str] = None
 _debug = os.environ.get("TRICKLE_DEBUG", "").lower() in ("1", "true", "yes")
 _MAX_QUERY_LENGTH = 500
-_MAX_QUERIES = 100
+_MAX_QUERIES = 500
 _query_count = 0
 
 

@@ -26,7 +26,7 @@ interface QueryRecord {
 let queriesFile: string | null = null;
 let debugMode = false;
 const MAX_QUERY_LENGTH = 500;
-const MAX_QUERIES = 100;
+const MAX_QUERIES = 500;
 let queryCount = 0;
 
 function getQueriesFile(): string {

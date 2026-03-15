@@ -17,6 +17,8 @@ interface LoaderOptions {
   exclude?: string[];
   debug?: boolean;
   traceVars?: boolean;
+  isServer?: boolean;
+  ingestPort?: number;
 }
 
 // webpack loader — `this` is the LoaderContext (must not be an arrow function)
@@ -40,13 +42,16 @@ export default function trickleNextLoader(this: { resourcePath: string; getOptio
   const backendUrl = options.backendUrl ?? process.env.TRICKLE_BACKEND_URL ?? 'http://localhost:4888';
   const debug = options.debug ?? (process.env.TRICKLE_DEBUG === '1');
   const traceVars = options.traceVars ?? true;
+  const isServer = options.isServer ?? true;
+  const ingestPort = options.ingestPort ?? 4889;
   const moduleName = path.basename(resourcePath).replace(/\.[jt]sx?$/, '');
 
   try {
-    // Next.js SSR renders all components on the server, so use SSR mode (node:fs)
-    const transformed = transformEsmSource(source, resourcePath, moduleName, backendUrl, debug, traceVars, source, true);
+    // Server: use node:fs for writing. Client: use fetch() to ingest server.
+    const ingestUrl = isServer ? null : `http://localhost:${ingestPort}/__trickle_vars`;
+    const transformed = transformEsmSource(source, resourcePath, moduleName, backendUrl, debug, traceVars, source, isServer, ingestUrl);
     if (debug && transformed !== source) {
-      console.log(`[trickle/next] Instrumented ${resourcePath}`);
+      console.log(`[trickle/next] Instrumented ${resourcePath} [${isServer ? 'server' : 'client'}]`);
     }
     return transformed;
   } catch {

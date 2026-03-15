@@ -889,6 +889,8 @@ export function transformEsmSource(
   traceVars: boolean,
   originalSource?: string | null,
   isSSR?: boolean,
+  /** URL for fetch-based browser transport (Next.js client). When set and isSSR=false, uses fetch() instead of import.meta.hot */
+  ingestUrl?: string | null,
 ): string {
   // Detect React files for component render tracking
   const isReactFile = /\.(tsx|jsx)$/.test(filename);
@@ -1370,6 +1372,24 @@ export function transformEsmSource(
         `  } catch(e) {}`,
         `}`,
       );
+    } else if (ingestUrl) {
+      // Browser mode with fetch transport (Next.js client)
+      prefixLines.push(
+        `const __trickle_sendBuf = [];`,
+        `let __trickle_sendTimer = null;`,
+        `function __trickle_flush() {`,
+        `  if (__trickle_sendBuf.length === 0) return;`,
+        `  const lines = __trickle_sendBuf.join('\\n') + '\\n';`,
+        `  __trickle_sendBuf.length = 0;`,
+        `  try { fetch(${JSON.stringify(ingestUrl)}, { method: 'POST', body: lines, headers: { 'Content-Type': 'text/plain' } }).catch(function(){}); } catch(e) {}`,
+        `}`,
+        `function __trickle_send(line) {`,
+        `  __trickle_sendBuf.push(line);`,
+        `  if (!__trickle_sendTimer) {`,
+        `    __trickle_sendTimer = setTimeout(function() { __trickle_sendTimer = null; __trickle_flush(); }, 300);`,
+        `  }`,
+        `}`,
+      );
     } else {
       // Browser mode — buffer and send via Vite HMR WebSocket
       prefixLines.push(
@@ -1384,7 +1404,7 @@ export function transformEsmSource(
         `function __trickle_send(line) {`,
         `  __trickle_sendBuf.push(line);`,
         `  if (!__trickle_sendTimer) {`,
-        `    __trickle_sendTimer = setTimeout(() => { __trickle_sendTimer = null; __trickle_flush(); }, 300);`,
+        `    __trickle_sendTimer = setTimeout(function() { __trickle_sendTimer = null; __trickle_flush(); }, 300);`,
         `  }`,
         `}`,
       );
@@ -1643,7 +1663,16 @@ export function transformEsmSource(
     result = result.slice(0, position) + code + result.slice(position);
   }
 
-  return prefix + result;
+  // Preserve 'use client' / 'use server' directives — they must be the first expression
+  // in the file (before any imports or code). Extract them from result and prepend before prefix.
+  let directive = '';
+  const directiveMatch = result.match(/^(\s*(?:'use client'|"use client"|'use server'|"use server")\s*;?\s*\n?)/);
+  if (directiveMatch) {
+    directive = directiveMatch[1];
+    result = result.slice(directiveMatch[0].length);
+  }
+
+  return directive + prefix + result;
 }
 
 export default tricklePlugin;

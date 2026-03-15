@@ -193,6 +193,12 @@ class _TracedSqliteConnection:
     def __getattr__(self, name: str) -> Any:
         return getattr(object.__getattribute__(self, "_conn"), name)
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "_conn":
+            object.__setattr__(self, name, value)
+        else:
+            setattr(object.__getattribute__(self, "_conn"), name, value)
+
     def __enter__(self) -> "_TracedSqliteConnection":
         object.__getattribute__(self, "_conn").__enter__()
         return self

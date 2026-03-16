@@ -1,6 +1,10 @@
 # trickle
 
-**Zero-code runtime observability for JavaScript, Python, and AI agents.** See what your code actually does — functions, variables, LLM calls, agent workflows, database queries, errors, performance — with zero code changes. Free, local-first, works with every framework.
+**AI writes 41% of your code. Do you know what it actually does?**
+
+Run any JavaScript or Python app with `trickle run` — zero code changes — and instantly see every function's real types, generate a test suite, create typed API clients, and catch bugs before they ship. No OpenAPI spec required. No framework lock-in. Works with Express, Fastify, Koa, Hono, FastAPI, Flask, Django, and plain scripts.
+
+> *Amazon Q's AI code caused 6.3M lost orders. The gap between "code that compiles" and "code that works" is where bugs hide. Trickle closes that gap.*
 
 ## Getting Started (2 minutes)
 
@@ -102,6 +106,24 @@ The agent can now use `why`, `get_llm_calls`, `get_agent_trace`, `get_cost_repor
 ## Who is this for?
 
 Pick your role for a detailed guide with use cases.
+
+### Vibe Coders / AI-Assisted Developers
+
+> *"AI generated 500 lines. It compiles. But what does it actually do?"*
+
+Run the AI-generated code with trickle, then instantly get types, tests, and API docs for everything it built:
+
+```bash
+trickle run node app.js                  # observe everything
+trickle explain src/app.js               # understand what it does
+trickle test --generate --unit -o tests/ # generate test suite
+trickle codegen --client                 # generate typed API client
+trickle security                         # scan for vulnerabilities
+```
+
+**[Full Vibe Coding Guide →](usecases/vibe-coding.md)**
+
+---
 
 ### ML Engineers / Data Scientists
 

@@ -10,7 +10,7 @@ CLI 0.1.200, client-js 0.2.122, client-python 0.2.35, VSCode 0.1.68. 38 MCP tool
 
 Next chapter: "grow" — reliability, distribution, community:
 
-1. **Real-world agent testing** — DONE: Tested on real LangChain (tools+chains, 14 agent events), real Express+OpenAI (6 functions, LLM call captured, all commands work), real Express blog API (378 vars, 70 functions). Fixed: LangChain CallbackManager circular import (deferred patching), on_chain_start None crash, pydantic .so conflict. All analysis commands verified: llm, cost-report, security, summarize, eval, why.
+1. **Real-world agent testing** — DONE: Tested on real LangChain (14 agent events), Express+OpenAI (LLM call captured), Express blog API (378 vars, 70 functions), AND karpathy's minGPT (416 tensor variables with shapes/dtypes/memory, 500 call traces, 12 function types). Fixed: LangChain circular import, on_chain_start None crash, pydantic conflict. Zero bugs on minGPT — tensor shapes captured perfectly (Tensor[64,6] int64 3.0KB).
 
 2. **Awesome-list submissions** — Submit trickle to: awesome-ai-agents-2026 (25k+ stars, updated monthly), awesome-agents (curated OSS agent tools), Awesome Claude (MCP ecosystem), awesome-llm-agents. These are high-leverage, low-effort distribution. Each list drives sustained discovery. Write a clear, compelling one-liner for each submission that highlights "zero-code, local-first, free" positioning.
 

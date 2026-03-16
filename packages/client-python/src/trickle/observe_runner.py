@@ -176,6 +176,13 @@ def main() -> None:
     except Exception:
         pass  # Never block the user's app
 
+    # Patch Mem0 for agent memory observability
+    try:
+        from trickle.memory_observer import patch_memory
+        patch_memory(debug=_debug)
+    except Exception:
+        pass  # Never block the user's app
+
     # Patch LangChain/CrewAI agent frameworks for workflow tracing
     try:
         from trickle.agent_observer import patch_agents

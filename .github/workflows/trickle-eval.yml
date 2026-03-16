@@ -62,7 +62,11 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Install trickle
-        run: npm install -g trickle-cli
+        run: |
+          npm install -g trickle-cli
+          if echo "${{ inputs.command }}" | grep -qi python; then
+            pip install trickle-observe
+          fi
 
       - name: Install project dependencies
         run: |

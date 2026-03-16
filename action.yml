@@ -35,7 +35,11 @@ runs:
   steps:
     - name: Install trickle
       shell: bash
-      run: npm install -g trickle-cli
+      run: |
+        npm install -g trickle-cli
+        if echo "${{ inputs.command }}" | grep -qi python; then
+          pip install trickle-observe
+        fi
 
     - name: Run with trickle
       shell: bash

@@ -643,10 +643,125 @@ def _print_shape_changes() -> None:
 
 def _post_run_cell_hook(result: Any = None) -> None:
     """IPython post_run_cell callback — print shape changes and scalar tracking."""
+    if result is not None and hasattr(result, 'error_in_exec') and result.error_in_exec is not None:
+        _capture_error_snapshot(result.error_in_exec)
     _print_shape_changes()
     _write_scalar_agg_records()
     _print_scalar_agg_summary()
     _scalar_agg.clear()
+
+
+def _build_sample(value: Any) -> Any:
+    """Build a JSON-serializable sample from a value (shared by trace and error snapshot)."""
+    if hasattr(value, "shape") and hasattr(value, "dtype"):
+        shape = value.shape
+        if hasattr(shape, '__len__') and len(shape) == 0:
+            return value.item() if hasattr(value, "item") else float(value)
+        parts = [f"shape={list(shape)}", f"dtype={value.dtype}"]
+        if hasattr(value, "device"):
+            parts.append(f"device={value.device}")
+        return f'{type(value).__name__}({", ".join(parts)})'
+    if isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, str):
+        return value[:200]
+    if isinstance(value, (list, tuple)):
+        try:
+            items = []
+            for item in value[:30]:
+                if item is None or isinstance(item, (bool, int, float)):
+                    items.append(item)
+                elif isinstance(item, str):
+                    items.append(item[:80])
+                else:
+                    items.append(str(item)[:80])
+            if len(value) > 30:
+                items.append(f"... ({len(value)} total)")
+            return items
+        except Exception:
+            return str(value)[:200]
+    if isinstance(value, dict):
+        try:
+            d = {}
+            for k, v in list(value.items())[:20]:
+                if isinstance(k, str):
+                    if v is None or isinstance(v, (bool, int, float)):
+                        d[k] = v
+                    elif isinstance(v, str):
+                        d[k] = v[:80]
+                    else:
+                        d[k] = str(v)[:80]
+            return d if d else str(value)[:200]
+        except Exception:
+            return str(value)[:200]
+    return str(value)[:200]
+
+
+def _capture_error_snapshot(exc: BaseException) -> None:
+    """Capture all frame locals at the error site and write as error_snapshot records.
+
+    When a cell raises an exception, this walks the traceback to find the
+    user-code frame, then captures every local variable with full type
+    inference and sample values — so the VSCode extension can show them
+    as inline hints in 'error mode'.
+    """
+    try:
+        from .type_inference import infer_type
+
+        tb = exc.__traceback__
+        if tb is None:
+            return
+
+        # Walk to the innermost user-code frame (skip IPython internals)
+        user_frame = None
+        user_lineno = 0
+        while tb is not None:
+            fn = tb.tb_frame.f_code.co_filename
+            skip = (
+                fn.startswith("<") or "site-packages" in fn
+                or "/lib/python" in fn or "\\lib\\python" in fn
+            )
+            if not skip:
+                user_frame = tb.tb_frame
+                user_lineno = tb.tb_lineno
+            tb = tb.tb_next
+
+        if user_frame is None:
+            return
+
+        cell_id = _make_cell_id(_cell_counter)
+        error_msg = f"{type(exc).__name__}: {exc}"
+
+        records: list = []
+        for name, val in list(user_frame.f_locals.items()):
+            if name.startswith("_"):
+                continue
+            try:
+                type_node = infer_type(val, max_depth=3)
+                sample = _build_sample(val)
+                records.append({
+                    "kind": "error_snapshot",
+                    "varName": name,
+                    "line": user_lineno,
+                    "module": f"cell_{_cell_counter}",
+                    "file": cell_id,
+                    "cellIndex": _cell_counter,
+                    "type": type_node,
+                    "typeHash": json.dumps(type_node, sort_keys=True)[:32],
+                    "sample": sample,
+                    "error": error_msg,
+                    "errorLine": user_lineno,
+                })
+            except Exception:
+                pass
+
+        if records:
+            vars_file = _get_vars_file()
+            with open(vars_file, "a") as f:
+                for r in records:
+                    f.write(json.dumps(r) + "\n")
+    except Exception:
+        pass  # Never break user code
 
 
 class _TrickleASTTransformer:

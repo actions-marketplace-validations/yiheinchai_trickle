@@ -59,14 +59,16 @@
           "enum": [
             "auto",
             "sample",
-            "type"
+            "type",
+            "error"
           ],
           "enumDescriptions": [
             "Show sample values for primitives, types for complex structures (default)",
             "Always show sample/value data inline when available",
-            "Always show the runtime type inline"
+            "Always show the runtime type inline",
+            "Show variable values captured at the last error (post-mortem debug view)"
           ],
-          "description": "What to display in inline hints: auto (smart), sample (prefer values), or type (prefer types)"
+          "description": "What to display in inline hints: auto (smart), sample (prefer values), type (prefer types), or error (post-mortem)"
         }
       }
     }

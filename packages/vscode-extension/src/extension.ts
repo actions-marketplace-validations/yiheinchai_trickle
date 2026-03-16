@@ -429,9 +429,14 @@ let reactHookIndex: Map<string, Map<number, ReactHookRecord>> = new Map();
 let reactStateIndex: Map<string, Map<number, ReactStateRecord>> = new Map();
 /** Crash-site local vars: filePath -> lineNo -> CrashLocalVar[] */
 let crashVarIndex: Map<string, Map<number, CrashLocalVar[]>> = new Map();
+/** Error snapshot observations: same structure as varIndex but captured at crash time */
+let errorSnapshotIndex: Map<string, Map<number, VariableObservation[]>> = new Map();
+/** The error message from the most recent error snapshot */
+let lastErrorMessage: string | undefined;
 let fileWatcher: vscode.FileSystemWatcher | undefined;
 let errorFileWatcher: vscode.FileSystemWatcher | undefined;
 let statusBarItem: vscode.StatusBarItem;
+let modeStatusBarItem: vscode.StatusBarItem;
 let inlineHintsProvider: vscode.Disposable | undefined;
 let diagnosticCollection: vscode.DiagnosticCollection;
 /** Fires to tell VSCode to re-query inlay hints after data changes. */
@@ -587,6 +592,11 @@ export function activate(context: vscode.ExtensionContext) {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   statusBarItem.command = 'trickle.refreshVariables';
   context.subscriptions.push(statusBarItem);
+
+  modeStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -1);
+  modeStatusBarItem.command = 'trickle.cycleInlineHintMode';
+  context.subscriptions.push(modeStatusBarItem);
+  updateModeStatusBar();
 
   // Create diagnostic collection for error reporting
   diagnosticCollection = vscode.languages.createDiagnosticCollection('trickle');
@@ -809,6 +819,8 @@ export function activate(context: vscode.ExtensionContext) {
         }
         varIndex.clear();
         notebookCellIndex.clear();
+        errorSnapshotIndex.clear();
+        lastErrorMessage = undefined;
         diagnosticCollection.clear();
         clearTrickleDirCache();
         updateStatusBar();
@@ -832,15 +844,18 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Cycle inline hint mode: auto → sample → type → auto
+  // Cycle inline hint mode: auto → sample → type → (error if available) → auto
   context.subscriptions.push(
     vscode.commands.registerCommand('trickle.cycleInlineHintMode', async () => {
       const config = vscode.workspace.getConfiguration('trickle');
       const current = config.get<string>('inlineHintMode', 'auto');
-      const order = ['auto', 'sample', 'type'];
+      const order = errorSnapshotIndex.size > 0
+        ? ['auto', 'sample', 'type', 'error']
+        : ['auto', 'sample', 'type'];
       const next = order[(order.indexOf(current) + 1) % order.length];
       await config.update('inlineHintMode', next, vscode.ConfigurationTarget.Global);
       refreshInlineHints();
+      updateModeStatusBar();
       vscode.window.showInformationMessage(`Trickle: Inline hint mode → ${next}`);
     }),
   );
@@ -853,6 +868,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
       if (e.affectsConfiguration('trickle.inlineHintMode')) {
         refreshInlineHints();
+        updateModeStatusBar();
       }
     }),
   );
@@ -932,6 +948,27 @@ function updateStatusBar() {
   } else {
     statusBarItem.hide();
   }
+  updateModeStatusBar();
+}
+
+function updateModeStatusBar() {
+  const config = vscode.workspace.getConfiguration('trickle');
+  const mode = config.get<string>('inlineHintMode', 'auto');
+  const icons: Record<string, string> = {
+    auto: '$(symbol-misc)',
+    sample: '$(symbol-value)',
+    type: '$(symbol-type-parameter)',
+    error: '$(error)',
+  };
+  const icon = icons[mode] || '$(symbol-misc)';
+  const hasErrors = errorSnapshotIndex.size > 0;
+  modeStatusBarItem.text = `${icon} ${mode}`;
+  modeStatusBarItem.tooltip = `Trickle hint mode: ${mode}\nClick to cycle (auto → sample → type${hasErrors ? ' → error' : ''})`;
+  if (countVars() > 0 || hasErrors) {
+    modeStatusBarItem.show();
+  } else {
+    modeStatusBarItem.hide();
+  }
 }
 
 function loadAllVariables() {
@@ -944,6 +981,8 @@ function loadAllVariables() {
 
   varIndex.clear();
   notebookCellIndex.clear();
+  errorSnapshotIndex.clear();
+  lastErrorMessage = undefined;
   dimLabelIndex.clear();
   latestProgress = null;
   gradientIndex.clear();
@@ -1169,6 +1208,36 @@ function loadAllVariables() {
               dimLabelIndex.set(dl.file, new Map());
             }
             dimLabelIndex.get(dl.file)!.set(key, dl);
+            continue;
+          }
+
+          // Handle error snapshot records (captured at crash time)
+          if (record.kind === 'error_snapshot') {
+            const snap = record as VariableObservation;
+            snap.kind = 'variable'; // normalize for reuse in hint rendering
+            let snapPath = snap.file;
+            try { snapPath = fs.realpathSync(snapPath); } catch { /* keep original */ }
+
+            // Index into errorSnapshotIndex (same structure as varIndex)
+            const targetIndex = snapPath.match(/#cell_(\d+)$/) || snapPath.match(/__notebook__cell_(\d+)\.py$/)
+              ? errorSnapshotIndex : errorSnapshotIndex;
+            if (!targetIndex.has(snapPath)) {
+              targetIndex.set(snapPath, new Map());
+            }
+            const snapLineMap = targetIndex.get(snapPath)!;
+            // Error snapshots have all vars at the error line — spread them to their original trace lines too
+            const errorLine = (record as any).errorLine || snap.line;
+            if (!snapLineMap.has(errorLine)) {
+              snapLineMap.set(errorLine, []);
+            }
+            const snapExisting = snapLineMap.get(errorLine)!;
+            const snapIdx = snapExisting.findIndex(o => o.varName === snap.varName);
+            if (snapIdx >= 0) {
+              snapExisting[snapIdx] = snap;
+            } else {
+              snapExisting.push(snap);
+            }
+            lastErrorMessage = (record as any).error || lastErrorMessage;
             continue;
           }
 
@@ -1781,6 +1850,13 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
   ): vscode.InlayHint[] {
     const config = vscode.workspace.getConfiguration('trickle');
     if (!config.get('enabled', true) || !config.get('inlineHints', true)) return [];
+
+    const hintMode = config.get<string>('inlineHintMode', 'auto');
+
+    // Error mode: show error snapshot values instead of normal observations
+    if (hintMode === 'error' && errorSnapshotIndex.size > 0) {
+      return this._provideErrorHints(document, range, config);
+    }
 
     const lineMap = getLineMapForDocument(document);
     if (!lineMap) return [];
@@ -2828,6 +2904,82 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
           } catch {
             // Skip if line is out of range
           }
+        }
+      }
+    }
+
+    return hints;
+  }
+
+  /** Render inline hints from error snapshot data (post-mortem debug view). */
+  private _provideErrorHints(
+    document: vscode.TextDocument,
+    range: vscode.Range,
+    config: vscode.WorkspaceConfiguration,
+  ): vscode.InlayHint[] {
+    const hints: vscode.InlayHint[] = [];
+
+    // Find error snapshot observations for this document
+    // For notebooks, match by cell index in the file path
+    let snapLineMap: Map<number, VariableObservation[]> | undefined;
+    const docPath = document.uri.fsPath;
+
+    // Try direct match first
+    snapLineMap = errorSnapshotIndex.get(docPath);
+
+    // For notebooks, try matching by cell identifier
+    if (!snapLineMap) {
+      for (const [key, lineMap] of errorSnapshotIndex) {
+        if (key.includes('#cell_') || key.includes('__notebook__cell_')) {
+          // Match notebook cells by checking if the document is a notebook
+          if (document.uri.scheme === 'vscode-notebook-cell' || document.languageId === 'python') {
+            snapLineMap = lineMap;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!snapLineMap) return hints;
+
+    // Error snapshots store all vars at the error line — show them on the error line
+    for (const [lineNo, observations] of snapLineMap) {
+      if (lineNo - 1 < range.start.line || lineNo - 1 > range.end.line) continue;
+
+      for (const obs of observations) {
+        try {
+          const line = document.lineAt(lineNo - 1);
+          const position = new vscode.Position(lineNo - 1, line.text.trimEnd().length);
+
+          // Format: show variable name = sample value
+          let valueStr: string;
+          if (obs.sample !== undefined && obs.sample !== null) {
+            const inline = formatSampleInline(obs.sample);
+            valueStr = inline || typeNodeToStringCompact(obs.type, undefined, obs.sample);
+          } else {
+            valueStr = typeNodeToStringCompact(obs.type, undefined, undefined);
+          }
+
+          const label = ` ${obs.varName} = ${valueStr}`;
+          const hint = new vscode.InlayHint(position, label, vscode.InlayHintKind.Parameter);
+          hint.paddingLeft = true;
+
+          // Tooltip with full sample and error context
+          const tooltipParts: string[] = [];
+          tooltipParts.push(`**Error mode** — values at crash time`);
+          if (lastErrorMessage) {
+            tooltipParts.push(`**Error:** \`${lastErrorMessage}\``);
+          }
+          const obsLabels = getDimLabels(obs);
+          tooltipParts.push(`**Type:** \`${typeNodeToString(obs.type, 3, obsLabels)}\``);
+          if (obs.sample !== undefined) {
+            tooltipParts.push(`**Value:**\n\`\`\`json\n${formatSample(obs.sample)}\n\`\`\``);
+          }
+          hint.tooltip = new vscode.MarkdownString(tooltipParts.join('\n\n'));
+
+          hints.push(hint);
+        } catch {
+          // Skip if line is out of range
         }
       }
     }

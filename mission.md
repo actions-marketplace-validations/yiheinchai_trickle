@@ -16,7 +16,7 @@ Priorities — deepen the local-first moat that Braintrust can't replicate:
 
 3. **Mistral + Cohere LLM auto-instrumentation** — Mistral v1.0 SDK just shipped (breaking changes, new syntax); Cohere API V2 aligned with industry patterns. Both growing in enterprise. Follow the same monkey-patch pattern. This maintains trickle's provider breadth advantage — Braintrust auto-instruments 4 languages but not necessarily all providers.
 
-4. **Structured output validation** — Structured output is now table stakes across all LLM providers (OpenAI, Anthropic, Gemini, Mistral, Cohere all support JSON mode). Detect when LLM returns malformed JSON or schema mismatches. Surface as a warning in `trickle monitor` and add a `structuredOutputScore` dimension to `trickle eval`. This catches the silent failure pattern that 66% of developers complain about ("almost right but not quite").
+4. **Structured output validation** — SHIPPED: `trickle monitor` detects malformed JSON in LLM outputs. Identifies responses that look like JSON (start with `{`/`[` or wrapped in ```json) but don't parse. Surfaces as warning with actionable suggestion to use structured output mode. Catches the "almost right" silent failure pattern.
 
 5. **`trickle playback`** — SHIPPED: Chronological step-by-step replay of agent execution. Merges agents.jsonl + llm.jsonl + mcp.jsonl into a unified timeline with timestamps, durations, costs, input/output previews. Shows tool retries, LLM errors, cost accumulation. Local-first: instant from JSONL files.
 </focus point>

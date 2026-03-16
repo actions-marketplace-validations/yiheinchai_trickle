@@ -481,6 +481,37 @@ function analyzeLlmCalls(trickleDir: string): Alert[] {
     });
   }
 
+  // 4. Structured output validation — detect malformed JSON in LLM outputs
+  let malformedCount = 0;
+  const malformedExamples: string[] = [];
+  for (const c of calls) {
+    const output = c.outputPreview || '';
+    if (!output || c.error) continue;
+    // Detect if output looks like it was supposed to be JSON but isn't valid
+    const trimmed = output.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('```json')) {
+      let jsonStr = trimmed;
+      if (jsonStr.startsWith('```json')) jsonStr = jsonStr.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+      try {
+        JSON.parse(jsonStr);
+      } catch {
+        malformedCount++;
+        if (malformedExamples.length < 3) {
+          malformedExamples.push(`${c.model}: "${trimmed.substring(0, 60)}..."`);
+        }
+      }
+    }
+  }
+  if (malformedCount > 0) {
+    alerts.push({
+      kind: 'alert', severity: 'warning', category: 'llm_malformed_json',
+      message: `${malformedCount} LLM response(s) contain malformed JSON`,
+      details: { count: malformedCount, examples: malformedExamples },
+      timestamp: Date.now(),
+      suggestion: `LLM returned JSON-like output that doesn't parse. Use structured output mode (response_format: {type: "json_object"}) or add output validation.`,
+    });
+  }
+
   return alerts;
 }
 

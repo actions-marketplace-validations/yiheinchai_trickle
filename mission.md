@@ -12,7 +12,7 @@ The "see everything" layer is complete. Priority now shifts to "catch every mist
 
 1. **Trace-based agent evaluation** — 89% of teams have observability but only 52% have evals (LangChain State of Agents). Build `trickle eval` that scores agent runs using traces already captured: tool selection accuracy (did the agent pick the right tool?), output relevance (did the response address the query?), cost efficiency (tokens spent vs value delivered). Use LLM-as-judge on captured traces — no separate eval pipeline needed. LangWatch just open-sourced this pattern; trickle should have it natively and locally.
 
-2. **Agent run replay and diff** — `agent-replay` (local SQLite CLI) is gaining traction. Trickle already captures full agent traces. Add `trickle diff` to compare two runs side-by-side: show exactly where agent behavior diverged (different tool selected, different LLM response, different cost). Critical for regression testing when models update. Harvard research shows reliability requires multi-run testing on identical tasks.
+2. **Agent run replay and diff** — SHIPPED: `trickle diff-runs` now compares LLM calls (cost delta, model changes), agent events (step count, tool additions/removals, error changes), and incorporates these into the verdict. Snapshots include llm.jsonl, agents.jsonl, mcp.jsonl. Enables regression testing when models update.
 
 3. **Per-agent cost roll-up** — SHIPPED: `trickle cost-report` now includes "By Agent/Workflow" section that attributes LLM costs to active agents by correlating LLM call timestamps with agent activity windows from agents.jsonl. Shows cost, call count, and token usage per agent/crew. JSON output includes `byAgent` for CI integration.
 

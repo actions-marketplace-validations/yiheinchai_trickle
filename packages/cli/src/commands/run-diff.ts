@@ -48,6 +48,26 @@ export interface RunDiff {
     newAlerts: string[];
     resolvedAlerts: string[];
   };
+  llm: {
+    beforeCalls: number;
+    afterCalls: number;
+    beforeCost: number;
+    afterCost: number;
+    costDelta: number;
+    beforeTokens: number;
+    afterTokens: number;
+    modelChanges: string[];
+  };
+  agents: {
+    beforeSteps: number;
+    afterSteps: number;
+    beforeTools: string[];
+    afterTools: string[];
+    newTools: string[];
+    removedTools: string[];
+    beforeErrors: number;
+    afterErrors: number;
+  };
   verdict: 'improved' | 'regressed' | 'unchanged' | 'mixed';
 }
 
@@ -72,7 +92,23 @@ function collectRunData(dir: string) {
   const errorMessages = new Set(errors.map((e: any) => (e.message || '').substring(0, 100)));
   const alertMessages = new Set(alerts.map((a: any) => (a.message || '').substring(0, 100)));
 
-  return { funcMap, queryPatterns, errorMessages, alertMessages, queryCount: queries.length, errorCount: errors.length, alertCount: alerts.length };
+  // LLM data
+  const llmCalls = readJsonl(path.join(dir, 'llm.jsonl'));
+  const llmCost = llmCalls.reduce((s: number, c: any) => s + (c.estimatedCostUsd || 0), 0);
+  const llmTokens = llmCalls.reduce((s: number, c: any) => s + (c.totalTokens || 0), 0);
+  const llmModels = new Set(llmCalls.map((c: any) => `${c.provider}/${c.model}`));
+
+  // Agent data
+  const agentEvents = readJsonl(path.join(dir, 'agents.jsonl'));
+  const agentTools = new Set(agentEvents.filter((e: any) => e.event === 'tool_start' || e.event === 'tool_end').map((e: any) => e.tool || ''));
+  const agentErrors = agentEvents.filter((e: any) => e.event?.includes('error'));
+
+  return {
+    funcMap, queryPatterns, errorMessages, alertMessages,
+    queryCount: queries.length, errorCount: errors.length, alertCount: alerts.length,
+    llmCalls: llmCalls.length, llmCost, llmTokens, llmModels,
+    agentEvents: agentEvents.length, agentTools, agentErrors: agentErrors.length,
+  };
 }
 
 export function diffRuns(beforeDir: string, afterDir: string): RunDiff {
@@ -112,9 +148,27 @@ export function diffRuns(beforeDir: string, afterDir: string): RunDiff {
   const newAlerts = [...after.alertMessages].filter(a => !before.alertMessages.has(a));
   const resolvedAlerts = [...before.alertMessages].filter(a => !after.alertMessages.has(a));
 
+  // LLM comparison
+  const costDelta = after.llmCost - before.llmCost;
+  const afterModels = [...after.llmModels];
+  const beforeModels = [...before.llmModels];
+  const modelChanges: string[] = [];
+  for (const m of afterModels) if (!before.llmModels.has(m)) modelChanges.push(`+ ${m}`);
+  for (const m of beforeModels) if (!after.llmModels.has(m)) modelChanges.push(`- ${m}`);
+
+  // Agent comparison
+  const afterTools = [...after.agentTools];
+  const beforeTools = [...before.agentTools];
+  const newAgentTools = afterTools.filter(t => !before.agentTools.has(t));
+  const removedAgentTools = beforeTools.filter(t => !after.agentTools.has(t));
+
   // Verdict
-  const improvements = resolvedErrors.length + resolvedAlerts.length + fasterBy.length + (nPlusOneAfter < nPlusOneBefore ? 1 : 0);
-  const regressions = newErrors.length + newAlerts.length + slowerBy.length + (nPlusOneAfter > nPlusOneBefore ? 1 : 0);
+  const improvements = resolvedErrors.length + resolvedAlerts.length + fasterBy.length +
+    (nPlusOneAfter < nPlusOneBefore ? 1 : 0) + (costDelta < -0.001 ? 1 : 0) +
+    (after.agentErrors < before.agentErrors ? 1 : 0);
+  const regressions = newErrors.length + newAlerts.length + slowerBy.length +
+    (nPlusOneAfter > nPlusOneBefore ? 1 : 0) + (costDelta > before.llmCost * 0.2 ? 1 : 0) +
+    (after.agentErrors > before.agentErrors ? 1 : 0);
   const verdict: RunDiff['verdict'] = improvements > 0 && regressions === 0 ? 'improved' :
     regressions > 0 && improvements === 0 ? 'regressed' :
     improvements > 0 && regressions > 0 ? 'mixed' : 'unchanged';
@@ -124,6 +178,19 @@ export function diffRuns(beforeDir: string, afterDir: string): RunDiff {
     queries: { beforeTotal: before.queryCount, afterTotal: after.queryCount, newPatterns: newPatterns.slice(0, 5), removedPatterns: removedPatterns.slice(0, 5), nPlusOneBefore, nPlusOneAfter },
     errors: { beforeCount: before.errorCount, afterCount: after.errorCount, newErrors, resolvedErrors },
     alerts: { beforeCount: before.alertCount, afterCount: after.alertCount, newAlerts, resolvedAlerts },
+    llm: {
+      beforeCalls: before.llmCalls, afterCalls: after.llmCalls,
+      beforeCost: Math.round(before.llmCost * 10000) / 10000, afterCost: Math.round(after.llmCost * 10000) / 10000,
+      costDelta: Math.round(costDelta * 10000) / 10000,
+      beforeTokens: before.llmTokens, afterTokens: after.llmTokens,
+      modelChanges,
+    },
+    agents: {
+      beforeSteps: before.agentEvents, afterSteps: after.agentEvents,
+      beforeTools, afterTools,
+      newTools: newAgentTools, removedTools: removedAgentTools,
+      beforeErrors: before.agentErrors, afterErrors: after.agentErrors,
+    },
     verdict,
   };
 }
@@ -146,7 +213,7 @@ export function runDiffCommand(opts: DiffOptions): void {
       return;
     }
     if (!fs.existsSync(snapshotDir)) fs.mkdirSync(snapshotDir, { recursive: true });
-    for (const f of ['observations.jsonl', 'queries.jsonl', 'errors.jsonl', 'alerts.jsonl', 'calltrace.jsonl']) {
+    for (const f of ['observations.jsonl', 'queries.jsonl', 'errors.jsonl', 'alerts.jsonl', 'calltrace.jsonl', 'llm.jsonl', 'agents.jsonl', 'mcp.jsonl']) {
       const src = path.join(trickleDir, f);
       if (fs.existsSync(src)) fs.copyFileSync(src, path.join(snapshotDir, f));
     }
@@ -198,6 +265,26 @@ export function runDiffCommand(opts: DiffOptions): void {
   console.log(`  Errors: ${diff.errors.beforeCount} → ${diff.errors.afterCount}`);
   if (diff.errors.newErrors.length > 0) console.log(chalk.red(`  New errors: ${diff.errors.newErrors.join(', ').substring(0, 80)}`));
   if (diff.errors.resolvedErrors.length > 0) console.log(chalk.green(`  Resolved: ${diff.errors.resolvedErrors.join(', ').substring(0, 80)}`));
+
+  // LLM diff
+  if (diff.llm.beforeCalls > 0 || diff.llm.afterCalls > 0) {
+    console.log(`  LLM calls: ${diff.llm.beforeCalls} → ${diff.llm.afterCalls}`);
+    const costColor = diff.llm.costDelta > 0 ? chalk.red : diff.llm.costDelta < 0 ? chalk.green : chalk.gray;
+    const costSign = diff.llm.costDelta > 0 ? '+' : '';
+    console.log(`  LLM cost: $${diff.llm.beforeCost} → $${diff.llm.afterCost} (${costColor(costSign + '$' + diff.llm.costDelta.toFixed(4))})`);
+    if (diff.llm.modelChanges.length > 0) console.log(chalk.cyan(`  Model changes: ${diff.llm.modelChanges.join(', ')}`));
+  }
+
+  // Agent diff
+  if (diff.agents.beforeSteps > 0 || diff.agents.afterSteps > 0) {
+    console.log(`  Agent steps: ${diff.agents.beforeSteps} → ${diff.agents.afterSteps}`);
+    if (diff.agents.newTools.length > 0) console.log(chalk.green(`  + New tools: ${diff.agents.newTools.join(', ')}`));
+    if (diff.agents.removedTools.length > 0) console.log(chalk.red(`  - Removed tools: ${diff.agents.removedTools.join(', ')}`));
+    if (diff.agents.beforeErrors !== diff.agents.afterErrors) {
+      const errColor = diff.agents.afterErrors > diff.agents.beforeErrors ? chalk.red : chalk.green;
+      console.log(errColor(`  Agent errors: ${diff.agents.beforeErrors} → ${diff.agents.afterErrors}`));
+    }
+  }
 
   console.log(chalk.gray('  ' + '─'.repeat(50)));
   console.log('');

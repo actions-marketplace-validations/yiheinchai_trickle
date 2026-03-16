@@ -123,6 +123,19 @@ export function patchFetch(environment: string, debugMode: boolean): void {
 }
 
 /**
+ * Replace literal IDs in URL paths with placeholders to avoid cardinality explosion.
+ *   "/users/abc123/tasks/456" → "/users/:id/tasks/:id"
+ *   "/items/550e8400-e29b-41d4-a716-446655440000" → "/items/:uuid"
+ */
+function normalizePath(pathname: string): string {
+  return pathname
+    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:uuid')
+    .replace(/\/[0-9a-f]{24}(?=\/|$)/gi, '/:id')
+    .replace(/\/[0-9a-f]{8,}(?=\/|$)/gi, '/:id')
+    .replace(/\/\d+(?=\/|$)/g, '/:id');
+}
+
+/**
  * Parse a URL into a clean function name and module name.
  *   "https://api.example.com/v1/users?limit=10"
  *   → functionName: "GET /v1/users", module: "api.example.com"
@@ -130,13 +143,12 @@ export function patchFetch(environment: string, debugMode: boolean): void {
 function parseUrl(method: string, rawUrl: string): { functionName: string; module: string } {
   try {
     const parsed = new URL(rawUrl);
-    const pathname = parsed.pathname || '/';
+    const pathname = normalizePath(parsed.pathname || '/');
     return {
       functionName: `${method} ${pathname}`,
       module: parsed.hostname || 'http',
     };
   } catch {
-    // Relative URL or invalid — use as-is
     return {
       functionName: `${method} ${rawUrl}`,
       module: 'http',

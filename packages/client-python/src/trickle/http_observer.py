@@ -20,6 +20,7 @@ responses are ignored and the original response is never modified.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Dict, Optional, Set
 from urllib.parse import urlparse
 
@@ -210,6 +211,25 @@ def _capture_httpx_response(
 # Shared capture logic
 # ---------------------------------------------------------------------------
 
+_ID_PATTERNS = [
+    (re.compile(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I), "/:uuid"),  # UUID
+    (re.compile(r"/[0-9a-f]{24}(?=/|$)", re.I), "/:id"),  # MongoDB ObjectId (24 hex chars)
+    (re.compile(r"/[0-9a-f]{8,}(?=/|$)", re.I), "/:id"),  # Generic hex ID (8+ chars)
+    (re.compile(r"/\d+(?=/|$)"), "/:id"),  # Numeric ID
+]
+
+
+def _normalize_path(pathname: str) -> str:
+    """Replace literal IDs in URL paths with placeholders to avoid cardinality explosion.
+
+    ``/users/abc123/tasks/456`` → ``/users/:id/tasks/:id``
+    ``/items/550e8400-e29b-41d4-a716-446655440000`` → ``/items/:uuid``
+    """
+    for pattern, replacement in _ID_PATTERNS:
+        pathname = pattern.sub(replacement, pathname)
+    return pathname
+
+
 def _parse_url(method: str, raw_url: str) -> Dict[str, str]:
     """Parse a URL into a clean function name and module name.
 
@@ -218,7 +238,7 @@ def _parse_url(method: str, raw_url: str) -> Dict[str, str]:
     """
     try:
         parsed = urlparse(raw_url)
-        pathname = parsed.path or "/"
+        pathname = _normalize_path(parsed.path or "/")
         return {
             "functionName": f"{method} {pathname}",
             "module": parsed.hostname or "http",

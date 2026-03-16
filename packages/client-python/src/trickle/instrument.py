@@ -106,6 +106,21 @@ def _emit_route(
 # ---------------------------------------------------------------------------
 
 
+def _get_fastapi_route_name(request: Any, fallback: str) -> str:
+    """Extract parameterized route template from FastAPI/Starlette request scope.
+
+    After routing, request.scope['route'].path contains the template
+    (e.g. '/users/{user_id}') instead of the literal path ('/users/abc123').
+    """
+    try:
+        route = request.scope.get("route")
+        if route and hasattr(route, "path"):
+            return f"{request.method} {route.path}"
+    except Exception:
+        pass
+    return fallback
+
+
 def instrument_fastapi(app: Any) -> None:
     """Instrument a FastAPI app.
 
@@ -154,8 +169,14 @@ def instrument_fastapi(app: Any) -> None:
                 response = await call_next(request)
             except Exception as exc:
                 error_exc = exc
+                # Try to get parameterized route template even on error
+                route_name = _get_fastapi_route_name(request, route_name)
                 _emit_route(route_name, "fastapi", input_data, None, error_exc)
                 raise
+
+            # Use parameterized route template (e.g. /users/{user_id}) instead of
+            # literal path (/users/abc123) to avoid cardinality explosion
+            route_name = _get_fastapi_route_name(request, route_name)
 
             # Capture response body if JSON
             if response is not None:

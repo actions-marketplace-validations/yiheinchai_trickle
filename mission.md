@@ -6,19 +6,18 @@ Trickle's strategic moat is zero-code, local-first runtime observability that wo
 </higher directive>
 
 <focus point>
-CLI 0.1.177, client-js 0.2.118, client-python 0.2.25. SHIPPED: LLM auto-instrumentation, CSV export, pagination, dashboard charts. Just fixed: Python kwargs parameter wrapping bug (was collapsing kwargs into single object, now correctly maps each kwarg to its parameter name).
+CLI 0.1.177, client-js 0.2.119, client-python 0.2.26. Recent ships: LLM auto-instrumentation, CSV export, pagination, kwargs fix, route parameterization.
 
-Real-world testing results (Express, FastAPI, TypeScript, PyTorch):
-- JS instrumentation rock-solid: Express routes, middleware, auth, TypeScript via tsx all work perfectly
-- Python: function/variable capture works well. PyTorch tensor shapes captured correctly.
-- Known remaining issues: (a) Python .pyi stubs have invalid types for tensor params, (b) FastAPI routes not parameterized (literal IDs instead of {task_id}), (c) error stack traces point to temp file not source
+Just fixed: URL path normalization for both JS and Python. UUIDs, numeric IDs, hex strings, and MongoDB ObjectIds in URL paths are now replaced with `:uuid` or `:id` placeholders. Prevents cardinality explosion (5 different UUIDs → 1 function name). FastAPI middleware also extracts route templates from `request.scope['route'].path`.
+
+Known remaining issues: (a) Python .pyi stubs have invalid types for tensor params, (b) error stack traces point to temp file not source
 
 Priority areas:
 1. **AI agent runtime tracing** — first-class LangChain/CrewAI agent workflow tracing
 2. **OpenTelemetry export** — OTel-compatible span export with GenAI semantic conventions
 3. **Live streaming mode** — WebSocket real-time dashboard for long-running processes
 4. **More LLM providers** — Cohere, Mistral, Google Gemini, Python streaming tokens
-5. **Route parameterization (Python)** — use FastAPI/Flask route definitions to normalize HTTP paths
+5. **Python .pyi stub quality** — fix tensor param types, missing imports, meaningless Union[Any, ...]
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

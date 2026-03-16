@@ -14,7 +14,7 @@ Fresh technical priorities — test on real codebases and fix what breaks:
 
 2. **Test on a real CrewAI multi-agent crew** — now that pydantic is fixed, test with a real CrewAI crew that has multiple agents delegating tasks. Verify event bus tracing captures crew/agent/task lifecycle correctly.
 
-3. **LangGraph checkpointer tracing** — the TODO from memory observability. Patch LangGraph's checkpointer to capture state saves/loads. This completes the agent memory surface.
+3. **LangGraph checkpointer tracing** — SHIPPED (0.2.41): Patches BaseCheckpointSaver put/get/get_tuple/list. Writes checkpoint_put/checkpoint_get to memory.jsonl.
 
 4. **`trickle init` for Python projects** — VERIFIED: Detected FastAPI, created .pyi stubs, CLAUDE.md with updated commands, MCP settings.
 

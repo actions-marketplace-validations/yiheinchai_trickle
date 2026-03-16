@@ -132,6 +132,54 @@ def patch_mem0(mem0_module: Any) -> None:
         print("[trickle/memory] Patched Mem0 Memory class")
 
 
+def patch_langgraph_checkpointer(lg_module: Any) -> None:
+    """Patch LangGraph's BaseCheckpointSaver to capture state saves/loads."""
+    if getattr(lg_module, "_trickle_memory_patched", False):
+        return
+    lg_module._trickle_memory_patched = True
+
+    try:
+        from langgraph.checkpoint.base import BaseCheckpointSaver
+    except ImportError:
+        return
+
+    for method_name in ["put", "get", "get_tuple", "list"]:
+        orig = getattr(BaseCheckpointSaver, method_name, None)
+        if orig is None or getattr(orig, "_trickle_patched", False):
+            continue
+
+        def _make_wrapper(name: str, original: Any) -> Any:
+            def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+                start = time.perf_counter()
+                error_msg = None
+                result = None
+                try:
+                    result = original(self, *args, **kwargs)
+                    return result
+                except Exception as e:
+                    error_msg = str(e)[:200]
+                    raise
+                finally:
+                    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+                    event: dict[str, Any] = {
+                        "kind": "memory_op",
+                        "operation": f"checkpoint_{name}",
+                        "provider": "langgraph",
+                        "durationMs": duration_ms,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    if error_msg:
+                        event["error"] = error_msg
+                    _write_event(event)
+            wrapper._trickle_patched = True  # type: ignore
+            return wrapper
+
+        setattr(BaseCheckpointSaver, method_name, _make_wrapper(method_name, orig))
+
+    if _debug:
+        print("[trickle/memory] Patched LangGraph BaseCheckpointSaver")
+
+
 def patch_memory(debug: bool = False) -> None:
     """Install memory observer hooks."""
     global _debug
@@ -145,8 +193,17 @@ def patch_memory(debug: bool = False) -> None:
         except Exception:
             pass
 
+    if "langgraph" in sys.modules:
+        try:
+            patch_langgraph_checkpointer(sys.modules["langgraph"])
+        except Exception:
+            pass
+
     try:
         from trickle.db_observer import register_import_patches
-        register_import_patches({"mem0": patch_mem0})
+        register_import_patches({
+            "mem0": patch_mem0,
+            "langgraph": patch_langgraph_checkpointer,
+        })
     except Exception:
         pass

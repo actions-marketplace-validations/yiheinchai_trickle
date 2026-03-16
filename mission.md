@@ -10,7 +10,7 @@ CLI 0.1.186, client-js 0.2.121, client-python 0.2.34. 38 MCP tools. SHIPPED: All
 
 The "see everything" layer is complete. Priority now shifts to "catch every mistake" — reliability and evaluation:
 
-1. **Trace-based agent evaluation** — 89% of teams have observability but only 52% have evals (LangChain State of Agents). Build `trickle eval` that scores agent runs using traces already captured: tool selection accuracy (did the agent pick the right tool?), output relevance (did the response address the query?), cost efficiency (tokens spent vs value delivered). Use LLM-as-judge on captured traces — no separate eval pipeline needed. LangWatch just open-sourced this pattern; trickle should have it natively and locally.
+1. **Trace-based agent evaluation** — SHIPPED: `trickle eval` scores agent runs on 5 dimensions using captured traces — zero API keys needed. Dimensions: completion rate (30% weight), error rate (25%), cost efficiency (15%), tool reliability (20%), latency (10%). Produces A-F grade with actionable recommendations. Detects retry loops, high error rates, cost inefficiency. JSON output for CI. Closes the observability→eval gap without LLM-as-judge costs.
 
 2. **Agent run replay and diff** — SHIPPED: `trickle diff-runs` now compares LLM calls (cost delta, model changes), agent events (step count, tool additions/removals, error changes), and incorporates these into the verdict. Snapshots include llm.jsonl, agents.jsonl, mcp.jsonl. Enables regression testing when models update.
 

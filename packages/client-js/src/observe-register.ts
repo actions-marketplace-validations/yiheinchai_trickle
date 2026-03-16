@@ -1537,6 +1537,15 @@ if (enabled) {
       } catch { /* not critical */ }
     }
 
+    // Google Gemini SDK
+    if (request === '@google/genai' && !expressPatched.has('@google/genai')) {
+      expressPatched.add('@google/genai');
+      try {
+        const { patchGemini } = require(path.join(__dirname, 'llm-observer.js'));
+        patchGemini(exports, debug);
+      } catch { /* not critical */ }
+    }
+
     // Resolve to absolute path for dedup — do this FIRST since bundlers like
     // tsx/esbuild may use path aliases (e.g., @config/env) that don't start
     // with './' or '/'. We need the resolved path to decide if it's user code.

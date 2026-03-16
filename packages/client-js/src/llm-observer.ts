@@ -30,6 +30,12 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'claude-3-5-sonnet-20241022': { input: 3, output: 15 },
   'claude-3-5-haiku-20241022': { input: 0.8, output: 4 },
   'claude-3-haiku-20240307': { input: 0.25, output: 1.25 },
+  'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+  'gemini-2.5-flash': { input: 0.3, output: 2.5 },
+  'gemini-2.5-pro': { input: 1.25, output: 10 },
+  'gemini-2.0-flash': { input: 0.1, output: 0.4 },
+  'gemini-1.5-flash': { input: 0.075, output: 0.3 },
+  'gemini-1.5-pro': { input: 1.25, output: 5 },
 };
 
 function getLlmFile(): string {
@@ -478,6 +484,217 @@ function captureAnthropicError(params: any, err: any, startTime: number, debug: 
     toolUse: hasToolUse(params), timestamp: Date.now(),
     error: truncate(err?.message || String(err), 200),
   });
+}
+
+// ────────────────────────────────────────────────────
+// Google Gemini SDK instrumentation (@google/genai)
+// ────────────────────────────────────────────────────
+
+export function patchGemini(geminiModule: any, debug: boolean): void {
+  if (!geminiModule || getattr(geminiModule, '_trickle_llm_patched')) return;
+  setattr(geminiModule, '_trickle_llm_patched', true);
+
+  // @google/genai exports GoogleGenAI class
+  // Usage: const ai = new GoogleGenAI({ apiKey }); ai.models.generateContent({...})
+  const GoogleGenAI = geminiModule.GoogleGenAI || geminiModule.default?.GoogleGenAI;
+  if (typeof GoogleGenAI !== 'function') {
+    if (debug) console.log('[trickle/llm] Gemini: GoogleGenAI class not found');
+    return;
+  }
+
+  try {
+    // GoogleGenAI creates models as own property in the constructor.
+    // Patch the GoogleGenAI constructor to wrap generateContent after creation.
+    const origGoogleGenAIInit = GoogleGenAI.prototype.constructor;
+
+    // Use a post-construction hook: after new GoogleGenAI() creates the instance
+    // with models.generateContent as an own property, wrap that method.
+    const tmpClient = new GoogleGenAI({ apiKey: 'trickle-probe' });
+    const ModelsClass = Object.getPrototypeOf(tmpClient.models)?.constructor;
+
+    if (ModelsClass) {
+      const origModelsInit = ModelsClass;
+      // Patch the Models constructor to wrap generateContent after instance creation
+      const origConstruct = ModelsClass.prototype.constructor;
+
+      // We can't replace the ES6 class constructor, so instead we use a
+      // post-construction approach: hook into GoogleGenAI's prototype to
+      // patch models on each new client instance.
+      const origGAIProto = GoogleGenAI.prototype;
+      const origInitDescriptors = Object.getOwnPropertyDescriptors(origGAIProto);
+
+      // Define a lazy wrapper: first time models.generateContent is called,
+      // install the instrumentation wrapper
+      function wrapModelsInstance(models: any): void {
+        if (!models || models.__trickle_patched) return;
+        models.__trickle_patched = true;
+
+        if (typeof models.generateContent === 'function') {
+          const origGenerate = models.generateContent.bind(models);
+          models.generateContent = function patchedGenerateContent(...args: any[]) {
+            const params = args[0] || {};
+            const startTime = performance.now();
+            const result = origGenerate(...args);
+            if (result && typeof result.then === 'function') {
+              return result.then((response: any) => {
+                captureGeminiResponse(params, response, startTime, false, debug);
+                return response;
+              }).catch((err: any) => {
+                captureGeminiError(params, err, startTime, debug);
+                throw err;
+              });
+            }
+            return result;
+          };
+        }
+
+        if (typeof models.generateContentStream === 'function') {
+          const origStream = models.generateContentStream.bind(models);
+          models.generateContentStream = function patchedStream(...args: any[]) {
+            const params = args[0] || {};
+            const startTime = performance.now();
+            const result = origStream(...args);
+            if (result && typeof result.then === 'function') {
+              return result.then((stream: any) => handleGeminiStream(stream, params, startTime, debug));
+            }
+            return result;
+          };
+        }
+      }
+
+      // Intercept the GoogleGenAI constructor to patch each instance's models
+      // Since we can't replace ES6 class constructors, we use a Proxy
+      const proxyHandler: ProxyHandler<any> = {
+        construct(target: any, args: any[], newTarget: any): object {
+          const instance = Reflect.construct(target, args, newTarget) as any;
+          if (instance.models) wrapModelsInstance(instance.models);
+          return instance as object;
+        }
+      };
+      const ProxiedGoogleGenAI = new Proxy(GoogleGenAI, proxyHandler);
+
+      // Replace on the module (try both export styles)
+      try { geminiModule.GoogleGenAI = ProxiedGoogleGenAI; } catch {}
+      try { if (geminiModule.default?.GoogleGenAI) geminiModule.default.GoogleGenAI = ProxiedGoogleGenAI; } catch {}
+
+      // Also patch the already-created probe instance (in case someone imported before us)
+      // This is a no-op since the probe is discarded.
+
+      if (debug) console.log('[trickle/llm] Patched Gemini SDK');
+    }
+  } catch (e: any) {
+    if (debug) console.log('[trickle/llm] Gemini patch probe failed:', e.message);
+  }
+}
+
+function captureGeminiResponse(params: any, response: any, startTime: number, isStream: boolean, debug: boolean): void {
+  const usage = response.usageMetadata || {};
+  const model = params.model || 'gemini-unknown';
+  const inputTokens = usage.promptTokenCount || 0;
+  const outputTokens = usage.candidatesTokenCount || 0;
+  const totalTokens = usage.totalTokenCount || inputTokens + outputTokens;
+
+  let outputText = '';
+  let finishReason = 'unknown';
+  try {
+    outputText = response.text || '';
+  } catch {
+    const candidates = response.candidates || [];
+    if (candidates[0]?.content?.parts?.[0]?.text) {
+      outputText = candidates[0].content.parts[0].text;
+    }
+  }
+  const candidates = response.candidates || [];
+  if (candidates[0]?.finishReason) finishReason = candidates[0].finishReason;
+
+  // Extract input preview from contents
+  let inputPreview = '';
+  const contents = params.contents;
+  if (typeof contents === 'string') {
+    inputPreview = truncate(contents);
+  } else if (Array.isArray(contents)) {
+    const last = contents[contents.length - 1];
+    if (typeof last === 'string') inputPreview = truncate(last);
+    else if (last?.parts?.[0]?.text) inputPreview = truncate(last.parts[0].text);
+  }
+
+  const event: LlmEvent = {
+    kind: 'llm_call', provider: 'gemini', model,
+    durationMs: round(performance.now() - startTime),
+    inputTokens, outputTokens, totalTokens,
+    estimatedCostUsd: estimateCost(model, inputTokens, outputTokens),
+    stream: isStream, finishReason,
+    temperature: params.config?.temperature,
+    maxTokens: params.config?.maxOutputTokens,
+    systemPrompt: typeof params.config?.systemInstruction === 'string'
+      ? truncate(params.config.systemInstruction, 200) : undefined,
+    inputPreview, outputPreview: truncate(outputText),
+    messageCount: Array.isArray(contents) ? contents.length : (contents ? 1 : 0),
+    toolUse: !!(params.config?.tools?.length || params.tools?.length),
+    timestamp: Date.now(),
+  };
+  writeLlmEvent(event);
+  if (debug) console.log(`[trickle/llm] Gemini: ${model} (${totalTokens} tokens, ${event.durationMs}ms)`);
+}
+
+function captureGeminiError(params: any, err: any, startTime: number, debug: boolean): void {
+  const model = params.model || 'gemini-unknown';
+  writeLlmEvent({
+    kind: 'llm_call', provider: 'gemini', model,
+    durationMs: round(performance.now() - startTime),
+    inputTokens: 0, outputTokens: 0, totalTokens: 0, estimatedCostUsd: 0,
+    stream: false, finishReason: 'error',
+    temperature: params.config?.temperature,
+    maxTokens: params.config?.maxOutputTokens,
+    inputPreview: typeof params.contents === 'string' ? truncate(params.contents) : '',
+    outputPreview: '', messageCount: 0,
+    toolUse: false, timestamp: Date.now(),
+    error: truncate(err?.message || String(err), 200),
+  });
+}
+
+async function handleGeminiStream(stream: any, params: any, startTime: number, debug: boolean): Promise<any> {
+  if (!stream || !stream[Symbol.asyncIterator]) return stream;
+
+  const chunks: string[] = [];
+  const origIterator = stream[Symbol.asyncIterator].bind(stream);
+  let lastUsage: any = null;
+
+  stream[Symbol.asyncIterator] = function () {
+    const iter = origIterator();
+    return {
+      async next() {
+        const result = await iter.next();
+        if (!result.done) {
+          const chunk = result.value;
+          try { if (chunk.text) chunks.push(chunk.text); } catch {}
+          if (chunk.usageMetadata) lastUsage = chunk.usageMetadata;
+        } else {
+          // Stream finished
+          const model = params.model || 'gemini-unknown';
+          const inputTokens = lastUsage?.promptTokenCount || 0;
+          const outputTokens = lastUsage?.candidatesTokenCount || 0;
+          writeLlmEvent({
+            kind: 'llm_call', provider: 'gemini', model,
+            durationMs: round(performance.now() - startTime),
+            inputTokens, outputTokens, totalTokens: inputTokens + outputTokens,
+            estimatedCostUsd: estimateCost(model, inputTokens, outputTokens),
+            stream: true, finishReason: 'stop',
+            temperature: params.config?.temperature,
+            maxTokens: params.config?.maxOutputTokens,
+            inputPreview: typeof params.contents === 'string' ? truncate(params.contents) : '',
+            outputPreview: truncate(chunks.join('')),
+            messageCount: 0, toolUse: false, timestamp: Date.now(),
+          });
+          if (debug) console.log(`[trickle/llm] Gemini stream: ${model} (${outputTokens} tokens)`);
+        }
+        return result;
+      },
+      return: iter.return?.bind(iter),
+      throw: iter.throw?.bind(iter),
+    };
+  };
+  return stream;
 }
 
 // ────────────────────────────────────────────────────

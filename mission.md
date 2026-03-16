@@ -6,9 +6,9 @@ Trickle's strategic moat is zero-code, local-first runtime observability that wo
 </higher directive>
 
 <focus point>
-CLI 0.1.177, client-js 0.2.119, client-python 0.2.28. Recent reliability fixes: docstring preservation, import hook consolidation, error stack trace source mapping, route parameterization, kwargs fix.
+CLI 0.1.177, client-js 0.2.120, client-python 0.2.29. LLM auto-instrumentation now covers OpenAI, Anthropic, AND Google Gemini — the top 3 LLM APIs by usage.
 
-Just fixed: Error stack traces now reference the original source file instead of the deleted temp file. Installed sys.excepthook to rewrite both file paths and line numbers (subtracting preamble offset). errors.jsonl also records the original file path.
+Just shipped: Google Gemini SDK auto-instrumentation (@google/genai for JS, google-genai for Python). Captures model, tokens, cost, latency, content previews. JS uses Proxy on GoogleGenAI constructor to wrap models.generateContent. Python patches Client.__init__. Pricing for Gemini 2.5 Flash/Pro and 1.5 models included.
 
 Known remaining issue: Python .pyi stubs have invalid types for tensor params
 
@@ -16,8 +16,8 @@ Priority areas:
 1. **AI agent runtime tracing** — first-class LangChain/CrewAI agent workflow tracing
 2. **OpenTelemetry export** — OTel-compatible span export with GenAI semantic conventions
 3. **Live streaming mode** — WebSocket real-time dashboard for long-running processes
-4. **More LLM providers** — Cohere, Mistral, Google Gemini, Python streaming tokens
-5. **Python .pyi stub quality** — fix tensor param types, missing imports, meaningless Union[Any, ...]
+4. **More LLM providers** — Cohere, Mistral AI for broader coverage
+5. **Python .pyi stub quality** — fix tensor param types, missing imports
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

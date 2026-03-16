@@ -6,19 +6,21 @@ Trickle has completed three chapters: "see everything" (all 4 agent frameworks, 
 </higher directive>
 
 <focus point>
-CLI 0.1.192, client-js 0.2.121, client-python 0.2.34. 37 MCP tools, 74 CLI commands. SHIPPED: All 4 agent framework tracers, silent failure detection, `trickle why`, `trickle eval` (A-F + --fail-under for CI), `trickle diff-runs`, per-agent cost roll-up, `trickle security` (Lethal Trifecta scanning), `trickle audit --compliance` (EU AI Act / Colorado AI Act reports), GitHub Action example workflow.
+CLI 0.1.197, client-js 0.2.121, client-python 0.2.34, VSCode 0.1.68. 38 MCP tools. Four chapters complete: see everything, catch every mistake, prove it's safe, meet developers where they are.
 
-Three chapters complete (see everything → catch every mistake → prove it's safe). Priority shifts to "meet developers where they are":
+Full stack verified end-to-end on real Express blog API (378 vars, 70 functions, 60 call traces — all 11 commands pass). Every shipped feature works in production conditions.
 
-1. **IDE-native runtime insights** — PARTIAL: VSCode extension now surfaces security alerts (prompt injection, privilege escalation, cost spikes, tool errors, agent failures) as VS Code diagnostics (yellow/red squiggles). Watches alerts.jsonl for real-time updates. TODO: inline eval scores, per-function cost CodeLens, agent trace sidebar panel.
+Priority areas for next chapter — "scale and distribute":
 
-2. **Model tier / routing observability** — SHIPPED: cost-report now includes "Model Tier Analysis" classifying models into Frontier/Standard/Mini tiers. Shows per-tier cost%, call%, avg latency, error rate. Detects over-use of frontier models with optimization suggestion. Covers OpenAI (gpt-4/o1/o3), Anthropic (opus/sonnet/haiku), Gemini (pro/flash/lite). JSON output includes `byTier` for CI.
+1. **Real-world agent testing** — test trickle on REAL agent codebases (a LangChain RAG app, a CrewAI multi-agent crew, a production Express+OpenAI app). Fix every issue found. Current testing used mocks/simulations; real agent workloads will surface edge cases in hook injection, data volume, and framework version compatibility.
 
-3. **Smart data management** — SHIPPED: `trickle cleanup` with configurable retention. `--retain-days 7` prunes by timestamp, `--retain-lines 100` keeps last N lines per file. `--dry-run` shows impact without modifying. Cleans all JSONL files + snapshot/CSV dirs. TODO: auto-cleanup on run, TRICKLE_SAMPLE_RATE for JS client, trace summarization.
+2. **VSCode extension: CodeLens for costs** — show per-function LLM cost inline in the editor. When a function calls OpenAI, show "$0.003 (gpt-4o, 500 tokens)" as CodeLens above the function. This surfaces the most actionable insight (cost) in the most natural place (the code).
 
-4. **Cache hit/miss observability** — SHIPPED: cost-report now includes "Cache Analysis" detecting cached vs uncached LLM responses from latency bimodality (5x+ speed difference between fast and slow calls to same model). Shows per-model hit rate, fast/slow call counts, speedup factor, and avg latencies. Works on existing data without provider-specific API changes.
+3. **Trace summarization** — agents produce 100s of events per run. Add `trickle summarize` that compresses verbose traces into key decision points: "Agent called 5 tools, 3 LLM calls ($0.02), finished in 5s — key decision: chose search_docs over browse_web because..." This makes agent traces actionable without reading every event.
 
-5. **GitHub Action for trickle eval** — SHIPPED: Reusable workflow at `.github/workflows/trickle-eval.yml` + example at `example-agent-ci.yml`. Features: run agent with trickle, evaluate with --fail-under, security scan, compliance report as artifact, post eval score as PR comment. Updated devops-ci.md use case with agent CI examples. TODO: publish to GitHub Marketplace as standalone action.
+4. **Distribution** — README improvements, npm/PyPI package descriptions, example repos, blog posts. Trickle has a massive feature set but no marketing. The best tool nobody knows about doesn't win.
+
+5. **Performance on large datasets** — stress-test trickle with 10K+ observations, 1K+ LLM calls. Profile and optimize any bottlenecks in CSV export, dashboard rendering, eval scoring, cost-report.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

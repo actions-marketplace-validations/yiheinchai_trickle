@@ -546,8 +546,12 @@ trickle flamegraph
 
 1. **Get overview**: \`trickle summary\` — status, errors, N+1 queries, root causes, fix recommendations
 2. **Understand a file**: \`trickle explain ${exampleFile}\` — functions, call graph, data flow, queries, variables
-3. **Debug errors**: \`trickle context --errors\` — errors with nearby variable values
+3. **Debug errors**: \`trickle why\` — causal chain: error → call trace → variables → LLM reasoning
 4. **Fix & verify**: \`trickle verify --baseline\` → fix code → \`${runCmd}\` → \`trickle verify\`
+5. **Evaluate quality**: \`trickle eval\` — A-F reliability score (completion, errors, cost, tools, latency)
+6. **Check security**: \`trickle security\` — prompt injection, privilege escalation, data exfiltration
+7. **LLM costs**: \`trickle cost-report\` — cost breakdown by provider/model with budget checking
+8. **Compliance**: \`trickle audit --compliance\` — risk classification, decision lineage, audit trail
 
 ### MCP Server (recommended for Claude Code)
 
@@ -564,19 +568,21 @@ Add to \`.claude/settings.json\` or \`claude_desktop_config.json\`:
 }
 \`\`\`
 
-Key MCP tools (26 total):
+Key MCP tools (38 total):
 
 | Tool | Use for |
 |------|---------|
 | \`get_recommended_actions\` | Start here — tells you exactly what to do next |
 | \`get_last_run_summary\` | Complete overview: errors, queries, alerts, root causes |
+| \`why\` | Causal debugging: trace back from error to root cause |
 | \`explain_file\` | Understand a file: functions, call graph, data flow, queries |
 | \`run_tests\` | Run tests with structured pass/fail + runtime context |
 | \`get_flamegraph\` | Performance hotspots sorted by execution time |
-| \`get_errors\` | Errors with variable values at the error location |
+| \`get_llm_calls\` | LLM API calls with tokens, cost, latency |
+| \`get_agent_trace\` | Agent execution tree with parent-child relationships |
+| \`get_mcp_tool_calls\` | MCP tool invocations with latency and direction |
+| \`get_cost_report\` | Cost breakdown by provider/model with budget check |
 | \`save_baseline\` / \`compare_with_baseline\` | Before/after comparison for fix verification |
-| \`get_new_alerts\` | Polling-based monitoring for new issues |
-| \`refresh_runtime_data\` | Re-run the app to capture fresh data |
 
 ### What trickle Captures (automatically, zero config)
 
@@ -587,6 +593,9 @@ Key MCP tools (26 total):
 - **Logs**: winston, pino, bunyan (JS); logging, loguru, structlog (Python)
 - **HTTP requests**: fetch/requests calls with status + latency
 - **Call traces**: execution flow with parent-child relationships
+- **LLM calls**: OpenAI, Anthropic, Gemini — model, tokens, cost, latency (auto-detected)
+- **Agent workflows**: LangChain, CrewAI, Claude Agent SDK, OpenAI Agents SDK (auto-detected)
+- **MCP tool calls**: tool name, arguments, response, latency, direction
 - **Memory**: RSS + heap snapshots
 `;
 

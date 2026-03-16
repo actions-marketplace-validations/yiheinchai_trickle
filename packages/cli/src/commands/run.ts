@@ -827,10 +827,11 @@ function startLiveStatus(localDir: string): () => void {
       const queries = countJsonlLines(path.join(localDir, "queries.jsonl"));
       const errors = countJsonlLines(path.join(localDir, "errors.jsonl"));
       const llm = countJsonlLines(path.join(localDir, "llm.jsonl"));
+      const mcp = countJsonlLines(path.join(localDir, "mcp.jsonl"));
       const calltrace = countJsonlLines(path.join(localDir, "calltrace.jsonl"));
 
       // Only print if there's data and something changed
-      const total = fns + vars + queries + errors + llm + calltrace;
+      const total = fns + vars + queries + errors + llm + mcp + calltrace;
       if (total === 0) return;
 
       const parts: string[] = [];
@@ -839,6 +840,7 @@ function startLiveStatus(localDir: string): () => void {
       if (queries > 0) parts.push(`${queries} query`);
       if (calltrace > 0) parts.push(`${calltrace} call`);
       if (llm > 0) parts.push(`${llm} llm`);
+      if (mcp > 0) parts.push(`${mcp} mcp`);
       if (errors > 0) parts.push(chalk.red(`${errors} err`));
 
       const status = parts.join(" | ");

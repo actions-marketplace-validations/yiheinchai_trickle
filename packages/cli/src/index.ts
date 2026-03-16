@@ -936,6 +936,16 @@ program
     llmCommand(opts);
   });
 
+// trickle mcp-calls
+program
+  .command("mcp-calls")
+  .description("Show captured MCP tool calls — tool names, latency, arguments, errors")
+  .option("--json", "Output raw JSON")
+  .action(async (opts) => {
+    const { mcpCallsCommand } = await import("./commands/mcp-calls");
+    mcpCallsCommand(opts);
+  });
+
 // trickle annotate <file>
 program
   .command("annotate <file>")

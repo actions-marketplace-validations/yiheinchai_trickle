@@ -50,6 +50,7 @@ export function exportToCsvFiles(trickleDir: string, outDir: string): { file: st
     alerts: 'alerts.jsonl',
     profile: 'profile.jsonl',
     llm: 'llm.jsonl',
+    mcp: 'mcp.jsonl',
   };
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const results: { file: string; rows: number }[] = [];
@@ -513,18 +514,19 @@ export function serveDashboard(opts: { port?: number; dir?: string }): void {
         logs: readJsonl(path.join(trickleDir, 'logs.jsonl')),
         variables: readJsonl(path.join(trickleDir, 'variables.jsonl')),
         llm: readJsonl(path.join(trickleDir, 'llm.jsonl')),
+        mcp: readJsonl(path.join(trickleDir, 'mcp.jsonl')),
       };
       res.end(JSON.stringify(data));
       return;
     }
     // CSV download endpoint: /api/csv/:type
-    const csvMatch = req.url?.match(/^\/api\/csv\/(functions|queries|errors|calltrace|logs|variables|alerts|profile|llm)$/);
+    const csvMatch = req.url?.match(/^\/api\/csv\/(functions|queries|errors|calltrace|logs|variables|alerts|profile|llm|mcp)$/);
     if (csvMatch) {
       const type = csvMatch[1];
       const fileMap: Record<string, string> = {
         functions: 'observations.jsonl', queries: 'queries.jsonl', errors: 'errors.jsonl',
         calltrace: 'calltrace.jsonl', logs: 'logs.jsonl', variables: 'variables.jsonl',
-        alerts: 'alerts.jsonl', profile: 'profile.jsonl', llm: 'llm.jsonl',
+        alerts: 'alerts.jsonl', profile: 'profile.jsonl', llm: 'llm.jsonl', mcp: 'mcp.jsonl',
       };
       const items = readJsonl(path.join(trickleDir, fileMap[type]));
       const csv = jsonlToCsv(items);

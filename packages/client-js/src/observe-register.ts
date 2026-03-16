@@ -39,6 +39,7 @@ import { instrumentExpress, trickleMiddleware } from './express';
 import { initVarTracer, traceVar } from './trace-var';
 import { initCallTrace } from './call-trace';
 import { initLlmObserver } from './llm-observer';
+import { initMcpObserver } from './mcp-observer';
 import {
   findReassignments,
   findForLoopVars,
@@ -1231,6 +1232,9 @@ if (enabled) {
   // ── Hook 0b3: Initialize LLM observer ──
   initLlmObserver();
 
+  // ── Hook 0b4: Initialize MCP observer ──
+  initMcpObserver();
+
   // ── Hook 0c: Capture environment snapshot ──
   try {
     const envDir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
@@ -1534,6 +1538,22 @@ if (enabled) {
       try {
         const { patchAnthropic } = require(path.join(__dirname, 'llm-observer.js'));
         patchAnthropic(exports, debug);
+      } catch { /* not critical */ }
+    }
+
+    // MCP SDK (client + server) — match any subpath import
+    if (request.includes('@modelcontextprotocol/sdk') && !expressPatched.has('mcp-client') && exports.Client) {
+      expressPatched.add('mcp-client');
+      try {
+        const { patchMcpClient } = require(path.join(__dirname, 'mcp-observer.js'));
+        patchMcpClient(exports, debug);
+      } catch { /* not critical */ }
+    }
+    if (request.includes('@modelcontextprotocol/sdk') && !expressPatched.has('mcp-server') && (exports.Server || exports.McpServer)) {
+      expressPatched.add('mcp-server');
+      try {
+        const { patchMcpServer } = require(path.join(__dirname, 'mcp-observer.js'));
+        patchMcpServer(exports, debug);
       } catch { /* not critical */ }
     }
 

@@ -6,19 +6,17 @@ Trickle's strategic moat is zero-code, local-first runtime observability for bot
 </higher directive>
 
 <focus point>
-CLI 0.1.178, client-js 0.2.120, client-python 0.2.29. SHIPPED: live status display, Gemini auto-instrumentation, OTel export (`trickle export --otlp`), CSV export, pagination, LLM auto-instrumentation (OpenAI + Anthropic + Gemini), WebSocket observer, dashboard charts/sorting. LLM coverage spans top 3 providers.
+CLI 0.1.180, client-js 0.2.121, client-python 0.2.30. SHIPPED: MCP tool call tracing, .pyi stub quality fix, live status display, Gemini auto-instrumentation.
 
-Priority areas ranked by strategic opportunity:
+Just shipped: **MCP tool call auto-instrumentation** — zero-code capture of MCP tool invocations for both @modelcontextprotocol/sdk (JS) and mcp (Python). Captures tool name, arguments, response preview, latency, errors, and direction (outgoing client calls + incoming server handlers). Writes to .trickle/mcp.jsonl. CLI has `trickle mcp-calls` command. Dashboard/CSV export include MCP data. Live status shows MCP call count.
 
-1. **Framework-agnostic agent tracing** — LangSmith is locked to LangChain. CrewAI, OpenAI Agents SDK, Microsoft Agent Framework (AutoGen+Semantic Kernel merger), and LangGraph all need third-party observability. Build zero-code auto-detection and tracing of agent workflows: tool calls, reasoning steps, delegation between agents, state changes. Trace the agent execution graph automatically when running `trickle run` on any agent framework. This is the single biggest market gap — Arize Phoenix has agent graph visualization but requires manual instrumentation.
+This makes trickle the first observability tool with built-in MCP tracing — positioning it at the center of the 10K+ MCP server ecosystem.
 
-2. **MCP tool call tracing** — 10,390+ MCP servers exist and growing. Nobody traces MCP tool invocations as first-class observability events. Add automatic capture of MCP tool calls (tool name, arguments, response, latency, errors) into `.trickle/mcp.jsonl`. This makes trickle indispensable for anyone building or consuming MCP servers — and positions trickle at the center of the AI tool ecosystem.
-
-3. **Agent execution graph visualization** — Add a visual node-based graph view to the dashboard showing agent decision flow: LLM calls → tool invocations → sub-agent delegation → results. Arize Phoenix has this and it's becoming table stakes. Combine with trickle's existing call trace data to show the full picture without extra instrumentation.
-
-4. **WebSocket dashboard streaming** — Upgrade live status from CLI-only to browser dashboard via WebSocket. Real-time updates for long-running servers, training loops, and agent workflows. The shift-left observability trend demands instant feedback during development.
-
-5. **Python .pyi stub quality** — FIXED: class_name preserved during merge (Tensor/SimpleCNN no longer become TypedDict), Union[Any,Any,Any] deduplicated, conditional imports added. **More LLM providers** — Add Cohere and Mistral AI auto-instrumentation for broader LLM coverage.
+Priority areas:
+1. **Framework-agnostic agent tracing** — zero-code auto-detection of LangChain/CrewAI/OpenAI Agents SDK workflows
+2. **Agent execution graph visualization** — visual node-based graph in dashboard showing LLM→tool→agent flow
+3. **WebSocket dashboard streaming** — real-time browser updates for long-running processes
+4. **More LLM providers** — Cohere, Mistral AI for broader coverage
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

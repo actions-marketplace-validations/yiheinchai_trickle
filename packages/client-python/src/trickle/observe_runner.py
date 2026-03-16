@@ -162,10 +162,17 @@ def main() -> None:
     except Exception:
         pass  # Never block the user's app
 
-    # Patch LLM SDKs (OpenAI, Anthropic) for AI call capture
+    # Patch LLM SDKs (OpenAI, Anthropic, Gemini) for AI call capture
     try:
         from trickle.llm_observer import patch_llms
         patch_llms(debug=_debug)
+    except Exception:
+        pass  # Never block the user's app
+
+    # Patch MCP SDKs for tool call capture
+    try:
+        from trickle.mcp_observer import patch_mcp
+        patch_mcp(debug=_debug)
     except Exception:
         pass  # Never block the user's app
 

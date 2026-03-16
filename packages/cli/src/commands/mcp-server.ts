@@ -774,6 +774,23 @@ const TOOLS = [
       },
     },
   },
+  {
+    name: "get_llm_calls",
+    description: "Get all captured LLM/AI API calls — OpenAI, Anthropic, Google Gemini. Shows model, token counts (input/output/total), estimated cost (USD), latency, temperature, system prompt, input/output previews, streaming status, tool use, and errors. Essential for understanding AI cost, performance, and behavior in any app that calls LLM APIs.",
+    inputSchema: { type: "object", properties: {
+      provider: { type: "string", description: "Filter by provider: openai, anthropic, gemini" },
+    }},
+  },
+  {
+    name: "get_mcp_tool_calls",
+    description: "Get all captured MCP tool call invocations. Shows tool name, arguments, response preview, latency, errors, and direction (outgoing = client calling tool, incoming = server handling tool call). Use this to debug MCP server/client interactions and understand which tools are called, how often, and how fast.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "get_agent_trace",
+    description: "Get the agent execution trace — a timeline of all agent workflow events with parent-child relationships. Shows chain starts/ends, tool invocations, agent actions (with reasoning/thoughts), LLM calls, and errors. Each event has a runId and parentRunId for building the execution tree. Essential for debugging LangChain, CrewAI, or any agent framework.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
@@ -1273,6 +1290,54 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               }
             } catch (e: any) {
               result = { error: `Failed to run tests: ${e.message}` };
+            }
+            break;
+          }
+          case "get_llm_calls": {
+            try {
+              const llmFile = require('path').join(findTrickleDir(), 'llm.jsonl');
+              const fs = require('fs');
+              if (!fs.existsSync(llmFile)) {
+                result = { calls: [], total: 0, message: "No LLM call data. Run your app with trickle to capture OpenAI/Anthropic/Gemini calls." };
+              } else {
+                let calls = fs.readFileSync(llmFile, 'utf-8').split('\n').filter(Boolean).map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+                if (args.provider) calls = calls.filter((c: any) => c.provider === args.provider);
+                const totalCost = calls.reduce((s: number, c: any) => s + (c.estimatedCostUsd || 0), 0);
+                const totalTokens = calls.reduce((s: number, c: any) => s + (c.totalTokens || 0), 0);
+                result = { calls, total: calls.length, totalCost: Math.round(totalCost * 10000) / 10000, totalTokens };
+              }
+            } catch (e: any) {
+              result = { error: `Failed to read LLM calls: ${e.message}` };
+            }
+            break;
+          }
+          case "get_mcp_tool_calls": {
+            try {
+              const mcpFile = require('path').join(findTrickleDir(), 'mcp.jsonl');
+              const fs = require('fs');
+              if (!fs.existsSync(mcpFile)) {
+                result = { calls: [], total: 0, message: "No MCP tool call data. Run an app that uses MCP with trickle." };
+              } else {
+                const calls = fs.readFileSync(mcpFile, 'utf-8').split('\n').filter(Boolean).map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter((c: any) => c && c.kind === 'mcp_tool_call');
+                result = { calls, total: calls.length, outgoing: calls.filter((c: any) => c.direction === 'outgoing').length, incoming: calls.filter((c: any) => c.direction === 'incoming').length };
+              }
+            } catch (e: any) {
+              result = { error: `Failed to read MCP calls: ${e.message}` };
+            }
+            break;
+          }
+          case "get_agent_trace": {
+            try {
+              const agentsFile = require('path').join(findTrickleDir(), 'agents.jsonl');
+              const fs = require('fs');
+              if (!fs.existsSync(agentsFile)) {
+                result = { events: [], total: 0, message: "No agent trace data. Run a LangChain/CrewAI agent with trickle." };
+              } else {
+                const events = fs.readFileSync(agentsFile, 'utf-8').split('\n').filter(Boolean).map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+                result = { events, total: events.length };
+              }
+            } catch (e: any) {
+              result = { error: `Failed to read agent trace: ${e.message}` };
             }
             break;
           }

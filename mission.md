@@ -6,9 +6,9 @@ Trickle's strategic moat is zero-code, local-first runtime observability for bot
 </higher directive>
 
 <focus point>
-CLI 0.1.182, client-js 0.2.121, client-python 0.2.31. SHIPPED: Agent trace visualization, LangChain agent tracing, MCP tool call tracing, LLM auto-instrumentation.
+CLI 0.1.183, client-js 0.2.121, client-python 0.2.31. 36 MCP tools. New use case: ai-agent-builder.md.
 
-Just shipped: **Agent Trace tab in dashboard** — nested tree view of agent execution flow. Shows chains, tools, LLM calls, agent actions with parent-child nesting, durations, input/output previews, reasoning thoughts. Color-coded by event type (blue=chain, green=tool, yellow=action, purple=LLM, red=error). Built from agents.jsonl data with run_id→parentRunId tree construction. CSV export included.
+Just shipped: 3 new MCP server tools (get_llm_calls, get_mcp_tool_calls, get_agent_trace) + ai-agent-builder use case document. AI coding agents (Claude Code) can now inspect LLM costs, MCP tool invocations, and agent execution traces via MCP — closing the loop where an AI agent debugging another AI agent can see the full picture.
 
 Priority areas:
 1. **More agent frameworks** — CrewAI, OpenAI Agents SDK auto-detection
@@ -16,7 +16,6 @@ Priority areas:
 3. **WebSocket dashboard streaming** — real-time browser updates
 4. **More LLM providers** — Cohere, Mistral AI
 5. **Interactive trace details** — click nodes in trace view to expand inputs/outputs/timing
-</focus point>
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

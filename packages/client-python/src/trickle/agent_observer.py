@@ -316,6 +316,222 @@ def patch_langchain(langchain_module: Any) -> None:
 
 
 # ────────────────────────────────────────────────────
+# CrewAI auto-instrumentation via event bus
+# ────────────────────────────────────────────────────
+
+
+def patch_crewai(crewai_module: Any) -> None:
+    """Auto-inject trickle event listener into CrewAI's event bus.
+
+    CrewAI has a built-in event system (CrewAIEventsBus) that fires events
+    for crew kickoff, agent execution, task start/end, tool usage, and LLM calls.
+    We register listeners for all of these — zero code changes needed.
+    """
+    if getattr(crewai_module, "_trickle_agent_patched", False):
+        return
+    crewai_module._trickle_agent_patched = True
+
+    try:
+        from crewai.utilities.events.event_listener import crewai_event_bus
+    except ImportError:
+        try:
+            from crewai.events.event_listener import crewai_event_bus
+        except ImportError:
+            if _debug:
+                print("[trickle/agent] CrewAI event bus not found — skipping")
+            return
+
+    # Import event types — wrapped in try/except for version compatibility
+    event_handlers: list[tuple[Any, str]] = []
+
+    def _try_import_event(path: str) -> Any:
+        try:
+            parts = path.rsplit(".", 1)
+            mod = __import__(parts[0], fromlist=[parts[1]])
+            return getattr(mod, parts[1])
+        except Exception:
+            return None
+
+    # Crew events
+    CrewKickoffStarted = _try_import_event("crewai.utilities.events.crew_events.CrewKickoffStartedEvent")
+    CrewKickoffCompleted = _try_import_event("crewai.utilities.events.crew_events.CrewKickoffCompletedEvent")
+    CrewKickoffFailed = _try_import_event("crewai.utilities.events.crew_events.CrewKickoffFailedEvent")
+
+    # Agent events
+    AgentStarted = _try_import_event("crewai.utilities.events.agent_events.AgentExecutionStartedEvent")
+    AgentCompleted = _try_import_event("crewai.utilities.events.agent_events.AgentExecutionCompletedEvent")
+    AgentError = _try_import_event("crewai.utilities.events.agent_events.AgentExecutionErrorEvent")
+
+    # Task events
+    TaskStarted = _try_import_event("crewai.utilities.events.task_events.TaskStartedEvent")
+    TaskCompleted = _try_import_event("crewai.utilities.events.task_events.TaskCompletedEvent")
+    TaskFailed = _try_import_event("crewai.utilities.events.task_events.TaskFailedEvent")
+
+    # Tool events
+    ToolStarted = _try_import_event("crewai.utilities.events.tool_events.ToolUsageStartedEvent")
+    ToolFinished = _try_import_event("crewai.utilities.events.tool_events.ToolUsageFinishedEvent")
+    ToolError = _try_import_event("crewai.utilities.events.tool_events.ToolUsageErrorEvent")
+
+    # LLM events
+    LLMStarted = _try_import_event("crewai.utilities.events.llm_events.LLMCallStartedEvent")
+    LLMCompleted = _try_import_event("crewai.utilities.events.llm_events.LLMCallCompletedEvent")
+    LLMFailed = _try_import_event("crewai.utilities.events.llm_events.LLMCallFailedEvent")
+
+    _start_times: dict[str, float] = {}
+
+    def _safe_str(obj: Any) -> str:
+        try:
+            return str(obj)[:_TRUNCATE_LEN]
+        except Exception:
+            return "?"
+
+    # Register event handlers
+    if CrewKickoffStarted:
+        @crewai_event_bus.on(CrewKickoffStarted)
+        def _on_crew_start(ev: Any) -> None:
+            _start_times["crew"] = time.perf_counter()
+            _write_event({
+                "kind": "agent_action", "event": "crew_start",
+                "chain": "CrewAI", "framework": "crewai",
+                "input": _truncate(_safe_str(getattr(ev, "inputs", ""))),
+                "timestamp": int(time.time() * 1000),
+            })
+            if _debug:
+                print("[trickle/agent] CrewAI: crew started")
+
+    if CrewKickoffCompleted:
+        @crewai_event_bus.on(CrewKickoffCompleted)
+        def _on_crew_end(ev: Any) -> None:
+            dur = round((time.perf_counter() - _start_times.pop("crew", time.perf_counter())) * 1000, 2)
+            output = getattr(ev, "output", None)
+            token_usage = getattr(output, "token_usage", None) if output else None
+            _write_event({
+                "kind": "agent_action", "event": "crew_end",
+                "chain": "CrewAI", "framework": "crewai",
+                "output": _truncate(_safe_str(getattr(output, "raw", output))),
+                "durationMs": dur,
+                "tokens": _safe_str(token_usage) if token_usage else None,
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if CrewKickoffFailed:
+        @crewai_event_bus.on(CrewKickoffFailed)
+        def _on_crew_fail(ev: Any) -> None:
+            dur = round((time.perf_counter() - _start_times.pop("crew", time.perf_counter())) * 1000, 2)
+            _write_event({
+                "kind": "agent_action", "event": "crew_error",
+                "chain": "CrewAI", "framework": "crewai",
+                "error": _truncate(_safe_str(getattr(ev, "error", ""))),
+                "durationMs": dur,
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if AgentStarted:
+        @crewai_event_bus.on(AgentStarted)
+        def _on_agent_start(ev: Any) -> None:
+            agent = getattr(ev, "agent", None)
+            name = getattr(agent, "role", "unknown") if agent else "unknown"
+            _start_times[f"agent:{name}"] = time.perf_counter()
+            _write_event({
+                "kind": "agent_action", "event": "agent_start",
+                "chain": name, "framework": "crewai",
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if AgentCompleted:
+        @crewai_event_bus.on(AgentCompleted)
+        def _on_agent_end(ev: Any) -> None:
+            agent = getattr(ev, "agent", None)
+            name = getattr(agent, "role", "unknown") if agent else "unknown"
+            dur = round((time.perf_counter() - _start_times.pop(f"agent:{name}", time.perf_counter())) * 1000, 2)
+            _write_event({
+                "kind": "agent_action", "event": "agent_end",
+                "chain": name, "framework": "crewai",
+                "output": _truncate(_safe_str(getattr(ev, "output", ""))),
+                "durationMs": dur,
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if TaskStarted:
+        @crewai_event_bus.on(TaskStarted)
+        def _on_task_start(ev: Any) -> None:
+            task = getattr(ev, "task", None)
+            desc = getattr(task, "description", "unknown") if task else "unknown"
+            _start_times[f"task:{desc[:30]}"] = time.perf_counter()
+            _write_event({
+                "kind": "agent_action", "event": "task_start",
+                "chain": _truncate(desc, 100), "framework": "crewai",
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if TaskCompleted:
+        @crewai_event_bus.on(TaskCompleted)
+        def _on_task_end(ev: Any) -> None:
+            task = getattr(ev, "task", None)
+            desc = getattr(task, "description", "unknown") if task else "unknown"
+            dur = round((time.perf_counter() - _start_times.pop(f"task:{desc[:30]}", time.perf_counter())) * 1000, 2)
+            output = getattr(ev, "output", None)
+            _write_event({
+                "kind": "agent_action", "event": "task_end",
+                "chain": _truncate(desc, 100), "framework": "crewai",
+                "output": _truncate(_safe_str(output)),
+                "durationMs": dur,
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if ToolStarted:
+        @crewai_event_bus.on(ToolStarted)
+        def _on_tool_start(ev: Any) -> None:
+            name = _safe_str(getattr(ev, "tool_name", "unknown"))
+            _start_times[f"tool:{name}"] = time.perf_counter()
+            _write_event({
+                "kind": "agent_action", "event": "tool_start",
+                "tool": name, "framework": "crewai",
+                "toolInput": _truncate(_safe_str(getattr(ev, "tool_input", ""))),
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if ToolFinished:
+        @crewai_event_bus.on(ToolFinished)
+        def _on_tool_end(ev: Any) -> None:
+            name = _safe_str(getattr(ev, "tool_name", "unknown"))
+            dur = round((time.perf_counter() - _start_times.pop(f"tool:{name}", time.perf_counter())) * 1000, 2)
+            _write_event({
+                "kind": "agent_action", "event": "tool_end",
+                "tool": name, "framework": "crewai",
+                "output": _truncate(_safe_str(getattr(ev, "tool_result", ""))),
+                "durationMs": dur,
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if ToolError:
+        @crewai_event_bus.on(ToolError)
+        def _on_tool_error(ev: Any) -> None:
+            name = _safe_str(getattr(ev, "tool_name", "unknown"))
+            dur = round((time.perf_counter() - _start_times.pop(f"tool:{name}", time.perf_counter())) * 1000, 2)
+            _write_event({
+                "kind": "agent_action", "event": "tool_error",
+                "tool": name, "framework": "crewai",
+                "error": _truncate(_safe_str(getattr(ev, "error", ""))),
+                "durationMs": dur,
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if LLMCompleted:
+        @crewai_event_bus.on(LLMCompleted)
+        def _on_llm_end(ev: Any) -> None:
+            _write_event({
+                "kind": "agent_action", "event": "llm_end",
+                "framework": "crewai",
+                "output": _truncate(_safe_str(getattr(ev, "response", ""))),
+                "timestamp": int(time.time() * 1000),
+            })
+
+    if _debug:
+        print("[trickle/agent] CrewAI event listeners registered")
+
+
+# ────────────────────────────────────────────────────
 # Installation
 # ────────────────────────────────────────────────────
 
@@ -341,6 +557,11 @@ def patch_agents(debug: bool = False) -> None:
             patch_langchain(sys.modules["langchain_core"])
         except Exception:
             pass
+    if "crewai" in sys.modules:
+        try:
+            patch_crewai(sys.modules["crewai"])
+        except Exception:
+            pass
 
     # Register with the consolidated import hook
     try:
@@ -348,6 +569,7 @@ def patch_agents(debug: bool = False) -> None:
         register_import_patches({
             "langchain_core": patch_langchain,
             "langchain": patch_langchain,
+            "crewai": patch_crewai,
         })
     except Exception:
         pass

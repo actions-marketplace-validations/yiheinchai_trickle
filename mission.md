@@ -2,20 +2,23 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Trickle's strategic moat is zero-code, local-first runtime observability for both humans AND AI agents — at zero cost. The competitive landscape is heating up: Braintrust just raised $80M at $800M to be "the observability layer for AI," Dynatrace launched an MCP Server, and MCP SDKs hit 97M+ monthly downloads. But every competitor is cloud-first and expensive. Trickle wins by being free, local, and zero-code — the observability tool that works the way vibe coders and AI agents actually work. Three strategic pillars: (1) Framework-agnostic agent tracing — LangSmith is locked to LangChain, and multi-agent parallelism (OpenAI Codex fires multiple agents simultaneously) creates observability needs nobody serves yet. Be the Switzerland of agent observability. (2) MCP + A2A protocol-native — trickle already traces MCP tool calls; now A2A (agent-to-agent communication, backed by Google/IBM, governed by Linux Foundation) is emerging as the complementary protocol. Owning observability across both protocols makes trickle indispensable for the agentic future. (3) Instant value, zero friction — single-line setup, instant results. Claude Cowork is expanding AI tooling beyond developers; observability must be accessible to non-technical users too. Every feature must pass: "does this make a developer (or their AI agent) understand running code faster, with zero setup friction?"
+Trickle's strategic moat is zero-code, local-first runtime observability for both humans AND AI agents — at zero cost. Competition is accelerating: Honeycomb claims "first observability for AI agents," New Relic launched agentic monitoring, Arize Phoenix (8.8K stars) has agent graph visualization. But they're all cloud-first, enterprise-priced, or require code changes. Trickle wins on three axes: (1) Framework-agnostic agent tracing — CrewAI (44.6K stars, 12M+ PyPI downloads) has only proprietary observability; OpenAI Agents SDK tracing is locked to OpenAI; LangSmith is locked to LangChain. Trickle is the only zero-code tool that traces across all of them. (2) Causal debugging — the #1 developer pain is "why did the agent do X?" (66% spend more time fixing near-correct AI code than writing from scratch). Don't just show what happened — show why, with cost attribution and decision path tracing. (3) Zero friction, zero cost — free because it's local, instant because it's zero-code. Every feature must pass: "does this help a developer understand WHY their code (or agent) behaved this way, with zero setup?"
 </higher directive>
 
 <focus point>
-CLI 0.1.183, client-js 0.2.121, client-python 0.2.31. 36 MCP tools. New use case: ai-agent-builder.md.
+CLI 0.1.183, client-js 0.2.121, client-python 0.2.31. 36 MCP tools. SHIPPED: LangChain agent tracing, agent trace visualization, MCP tool call tracing, MCP server tools for agent debugging, LLM auto-instrumentation (OpenAI + Anthropic + Gemini), live status display.
 
-Just shipped: 3 new MCP server tools (get_llm_calls, get_mcp_tool_calls, get_agent_trace) + ai-agent-builder use case document. AI coding agents (Claude Code) can now inspect LLM costs, MCP tool invocations, and agent execution traces via MCP — closing the loop where an AI agent debugging another AI agent can see the full picture.
+Priority areas ranked by market impact:
 
-Priority areas:
-1. **More agent frameworks** — CrewAI, OpenAI Agents SDK auto-detection
-2. **A2A protocol observability** — trace Google's Agent-to-Agent protocol alongside MCP
-3. **WebSocket dashboard streaming** — real-time browser updates
-4. **More LLM providers** — Cohere, Mistral AI
-5. **Interactive trace details** — click nodes in trace view to expand inputs/outputs/timing
+1. **CrewAI auto-tracing** — SHIPPED: Zero-code CrewAI tracing via event bus (CrewAIEventsBus). Captures crew kickoff/complete, agent start/end, task start/end, tool usage, and LLM calls. Registered via import hook on `crewai` module. Events include `framework: "crewai"` field for dashboard filtering. Works alongside LangChain tracing in the same agents.jsonl.
+
+2. **OpenAI Agents SDK tracing** — OpenAI's SDK has built-in tracing but it's locked to their ecosystem. Developers using mixed providers (OpenAI + Anthropic + open-source models) need vendor-neutral tracing. Add zero-code interception of OpenAI's agent handoffs, guardrails, and tool calls.
+
+3. **Cost attribution and "why" debugging** — The #1 developer pain: surprise API bills ($30-$800/month) with no visibility into what drove costs, and 66% spending more time fixing near-correct AI output than writing from scratch. Add per-function and per-agent cost roll-up in the dashboard, token budget tracking, and decision path highlighting ("this agent chose tool X because of reasoning Y, which cost $Z").
+
+4. **WebSocket dashboard streaming** — Real-time browser updates via WebSocket. The dashboard currently polls every 5 seconds via `/api/data`. Upgrade to push-based streaming for instant feedback during agent runs, server processes, and training loops.
+
+5. **A2A protocol observability** — Google's Agent-to-Agent protocol has 100+ enterprise supporters and CrewAI already supports it natively, but it's still in reference-implementation stage. Monitor adoption; implement tracing when production usage materializes. Don't over-invest in a protocol that may not reach critical mass.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -16,7 +16,7 @@ Three chapters complete (see everything → catch every mistake → prove it's s
 
 3. **Smart data management** — SHIPPED: `trickle cleanup` with configurable retention. `--retain-days 7` prunes by timestamp, `--retain-lines 100` keeps last N lines per file. `--dry-run` shows impact without modifying. Cleans all JSONL files + snapshot/CSV dirs. TODO: auto-cleanup on run, TRICKLE_SAMPLE_RATE for JS client, trace summarization.
 
-4. **Cache hit/miss observability** — Prompt caching delivers 30-50% cost savings but nobody surfaces cache efficiency. Detect cached vs uncached LLM responses via latency bimodality and provider-reported cache tokens (OpenAI/Anthropic expose these). Show cache hit rate, cost saved, and bimodal latency distribution in cost-report and dashboard. Developers burning $5-25K/month need to know if caching works.
+4. **Cache hit/miss observability** — SHIPPED: cost-report now includes "Cache Analysis" detecting cached vs uncached LLM responses from latency bimodality (5x+ speed difference between fast and slow calls to same model). Shows per-model hit rate, fast/slow call counts, speedup factor, and avg latencies. Works on existing data without provider-specific API changes.
 
 5. **GitHub Action for trickle eval** — SHIPPED: Reusable workflow at `.github/workflows/trickle-eval.yml` + example at `example-agent-ci.yml`. Features: run agent with trickle, evaluate with --fail-under, security scan, compliance report as artifact, post eval score as PR comment. Updated devops-ci.md use case with agent CI examples. TODO: publish to GitHub Marketplace as standalone action.
 </focus point>

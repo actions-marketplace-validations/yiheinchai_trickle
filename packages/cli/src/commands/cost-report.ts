@@ -241,6 +241,54 @@ export function costReportCommand(opts: { json?: boolean; budget?: string }): vo
     }
   }
 
+  // Cache hit/miss analysis — detect from latency bimodality
+  if (calls.length >= 4) {
+    // Group by model, find bimodal latency distribution
+    const modelLatencies: Record<string, number[]> = {};
+    for (const c of calls) {
+      if (!c.durationMs || c.error) continue;
+      const key = c.model || 'unknown';
+      if (!modelLatencies[key]) modelLatencies[key] = [];
+      modelLatencies[key].push(c.durationMs);
+    }
+
+    let cacheDetected = false;
+    const cacheAnalysis: Array<{ model: string; fastCalls: number; slowCalls: number; fastAvg: number; slowAvg: number; hitRate: number }> = [];
+
+    for (const [model, latencies] of Object.entries(modelLatencies)) {
+      if (latencies.length < 3) continue;
+      latencies.sort((a, b) => a - b);
+      const median = latencies[Math.floor(latencies.length / 2)];
+      // Split into fast (< 30% of median) and slow (>= 30% of median)
+      const threshold = median * 0.3;
+      const fast = latencies.filter(l => l < threshold);
+      const slow = latencies.filter(l => l >= threshold);
+
+      if (fast.length >= 1 && slow.length >= 1 && fast.length / latencies.length >= 0.1) {
+        const fastAvg = fast.reduce((s, l) => s + l, 0) / fast.length;
+        const slowAvg = slow.reduce((s, l) => s + l, 0) / slow.length;
+        // Only report if there's a significant speed difference (5x+)
+        if (slowAvg / Math.max(1, fastAvg) >= 5) {
+          cacheDetected = true;
+          cacheAnalysis.push({
+            model, fastCalls: fast.length, slowCalls: slow.length,
+            fastAvg: Math.round(fastAvg), slowAvg: Math.round(slowAvg),
+            hitRate: Math.round((fast.length / latencies.length) * 100),
+          });
+        }
+      }
+    }
+
+    if (cacheDetected) {
+      console.log(chalk.gray('\n  ' + '─'.repeat(60)));
+      console.log(chalk.bold('  Cache Analysis') + chalk.gray(' (detected from latency bimodality)'));
+      for (const ca of cacheAnalysis) {
+        const speedup = (ca.slowAvg / Math.max(1, ca.fastAvg)).toFixed(0);
+        console.log(`  ${chalk.cyan(ca.model.padEnd(25))} hit rate: ${chalk.green(ca.hitRate + '%')} (${ca.fastCalls} fast, ${ca.slowCalls} slow)  ${speedup}x speedup  fast=${ca.fastAvg}ms slow=${ca.slowAvg}ms`);
+      }
+    }
+  }
+
   if (costlyCalls.length > 0) {
     console.log(chalk.gray('\n  ' + '─'.repeat(60)));
     console.log(chalk.bold('  Most Expensive Calls'));

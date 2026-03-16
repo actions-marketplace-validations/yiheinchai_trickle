@@ -1505,11 +1505,19 @@ function getLineMapForDocument(document: vscode.TextDocument): Map<number, Varia
  * When multiple entries tie, prefers the one with the highest cell counter
  * (most recent execution). */
 function findBestMatchingCell(cellText: string): Map<number, VariableObservation[]> | undefined {
+  return findBestMatchingCellIn(cellText, notebookCellIndex);
+}
+
+/** Generic version: search any cell index for the best content match. */
+function findBestMatchingCellIn(
+  cellText: string,
+  index: Map<string, Map<number, VariableObservation[]>>,
+): Map<number, VariableObservation[]> | undefined {
   let bestMatch: Map<number, VariableObservation[]> | undefined;
   let bestScore = 0;
   let bestCellNum = -1;
 
-  for (const [key, lineMap] of notebookCellIndex) {
+  for (const [key, lineMap] of index) {
     let score = 0;
     let total = 0;
     for (const obsArr of lineMap.values()) {
@@ -2920,24 +2928,14 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
     const hints: vscode.InlayHint[] = [];
 
     // Find error snapshot observations for this document
-    // For notebooks, match by cell index in the file path
     let snapLineMap: Map<number, VariableObservation[]> | undefined;
-    const docPath = document.uri.fsPath;
 
-    // Try direct match first
-    snapLineMap = errorSnapshotIndex.get(docPath);
-
-    // For notebooks, try matching by cell identifier
-    if (!snapLineMap) {
-      for (const [key, lineMap] of errorSnapshotIndex) {
-        if (key.includes('#cell_') || key.includes('__notebook__cell_')) {
-          // Match notebook cells by checking if the document is a notebook
-          if (document.uri.scheme === 'vscode-notebook-cell' || document.languageId === 'python') {
-            snapLineMap = lineMap;
-            break;
-          }
-        }
-      }
+    if (document.uri.scheme === 'file') {
+      snapLineMap = errorSnapshotIndex.get(document.uri.fsPath);
+    } else if (document.uri.scheme === 'vscode-notebook-cell') {
+      // Notebook cell: use content-based matching (same approach as regular hints)
+      const cellText = document.getText();
+      snapLineMap = findBestMatchingCellIn(cellText, errorSnapshotIndex);
     }
 
     if (!snapLineMap) return hints;

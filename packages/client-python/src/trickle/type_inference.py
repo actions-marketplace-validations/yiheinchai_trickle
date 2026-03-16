@@ -6,6 +6,7 @@ import dataclasses
 import datetime
 import enum
 import inspect
+import warnings
 from typing import Any, Dict, Set
 
 
@@ -68,6 +69,13 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if max_depth <= 0:
         return {"kind": "primitive", "name": "unknown"}
 
+    # Suppress FutureWarning from torch.distributed.reduce_op triggered by isinstance checks
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        return _infer_type_inner(value, max_depth, _seen)
+
+
+def _infer_type_inner(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) -> Dict[str, Any]:
     # Unwrap TrackedObject and proxy objects to get the actual object
     try:
         from trickle.attr_tracker import TrackedObject
@@ -346,7 +354,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         # types as a positional tuple rather than array[union(...)]. This converts
         # `array[union(int, str, list[int])]` → `list[int, str, list[int]]`.
         if element_type.get("kind") == "union" and len(sample) <= 12:
-            elements = [infer_type(el, max_depth - 1, _seen) for el in sample]
+            elements = [_infer_type_inner(el, max_depth - 1, _seen) for el in sample]
             return {"kind": "tuple", "elements": elements, "class_name": "list"}
         return {"kind": "array", "element": element_type}
 
@@ -356,9 +364,9 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         if hasattr(value, "_fields"):
             props: Dict[str, Any] = {}
             for field_name in value._fields:
-                props[field_name] = infer_type(getattr(value, field_name), max_depth - 1, _seen)
+                props[field_name] = _infer_type_inner(getattr(value, field_name), max_depth - 1, _seen)
             return {"kind": "object", "properties": props, "class_name": type(value).__name__}
-        elements = [infer_type(el, max_depth - 1, _seen) for el in value]
+        elements = [_infer_type_inner(el, max_depth - 1, _seen) for el in value]
         return {"kind": "tuple", "elements": elements}
 
     # --- set / frozenset ---
@@ -371,7 +379,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if isinstance(value, dict):
         props = {}
         for k, v in value.items():
-            props[str(k)] = infer_type(v, max_depth - 1, _seen)
+            props[str(k)] = _infer_type_inner(v, max_depth - 1, _seen)
 
         # Large dicts with uniform value types → Dict[str, V] (map)
         # instead of a named-property object that would generate hundreds
@@ -398,7 +406,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         props = {}
         for field in dataclasses.fields(value):
-            props[field.name] = infer_type(getattr(value, field.name), max_depth - 1, _seen)
+            props[field.name] = _infer_type_inner(getattr(value, field.name), max_depth - 1, _seen)
         return {"kind": "object", "properties": props, "class_name": type(value).__name__}
 
     # --- Pydantic models ---
@@ -407,7 +415,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         props = {}
         for field_name in pydantic_fields:
             try:
-                props[field_name] = infer_type(getattr(value, field_name), max_depth - 1, _seen)
+                props[field_name] = _infer_type_inner(getattr(value, field_name), max_depth - 1, _seen)
             except Exception:
                 props[field_name] = {"kind": "primitive", "name": "unknown"}
         return {"kind": "object", "properties": props, "class_name": type(value).__name__}
@@ -422,7 +430,7 @@ def infer_type(value: Any, max_depth: int = 5, _seen: Set[int] | None = None) ->
         if attrs:
             props = {}
             for k, v in attrs.items():
-                props[k] = infer_type(v, max_depth - 1, _seen)
+                props[k] = _infer_type_inner(v, max_depth - 1, _seen)
             return {"kind": "object", "properties": props, "class_name": type(value).__name__}
     except Exception:
         pass
@@ -1445,7 +1453,7 @@ def _unify_element_types(elements: list, max_depth: int, _seen: Set[int]) -> Dic
     types: list[Dict[str, Any]] = []
     seen_reprs: set[str] = set()
     for el in elements:
-        t = infer_type(el, max_depth, _seen)
+        t = _infer_type_inner(el, max_depth, _seen)
         # Deduplicate by repr (cheap canonical form)
         r = _stable_repr(t)
         if r not in seen_reprs:

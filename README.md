@@ -1,6 +1,6 @@
 # trickle
 
-**Runtime observability for JavaScript and Python.** See what your code actually does — functions, variables, database queries, errors, performance — with zero code changes.
+**Zero-code runtime observability for JavaScript, Python, and AI agents.** See what your code actually does — functions, variables, LLM calls, agent workflows, database queries, errors, performance — with zero code changes. Free, local-first, works with every framework.
 
 ## Getting Started (2 minutes)
 
@@ -26,9 +26,14 @@ trickle run python manage.py runserver  # Django
 
 ```bash
 trickle summary                   # complete overview: errors, queries, root causes
+trickle why                       # causal debugging: trace back to root cause
 trickle explain src/api.ts        # understand a file: functions, call graph, data flow
 trickle flamegraph                # where is time being spent?
 trickle doctor                    # health check with recommended next actions
+trickle eval                      # reliability score (A-F) for agent runs
+trickle cost-report               # LLM cost breakdown by provider/model/tier
+trickle security                  # scan for prompt injection, data exfiltration
+trickle audit --compliance        # compliance report (EU AI Act / Colorado AI Act)
 ```
 
 ### Run tests with observability
@@ -54,13 +59,43 @@ export default defineConfig({
 
 Run `npx vitest run` — inline variable hints appear in both source files and test files.
 
-### For AI agents (Claude Code, Cursor)
+### AI Agent Observability (LangChain, CrewAI, OpenAI, Claude)
+
+Zero-code tracing for all major agent frameworks:
 
 ```bash
-trickle init    # creates CLAUDE.md + .claude/settings.json with 26 MCP tools
+trickle run python my_agent.py    # auto-detects and traces agent execution
+trickle eval                      # reliability score: A-F grade
+trickle why                       # causal debugging: why did the agent fail?
+trickle cost-report               # cost by provider, model tier, agent
+trickle security                  # prompt injection, data exfiltration detection
 ```
 
-The agent can now use `get_recommended_actions`, `get_last_run_summary`, `explain_file`, `run_tests`, `get_flamegraph`, and 21 more tools.
+**Auto-captures:** LLM calls (OpenAI + Anthropic + Gemini), agent workflows (LangChain + CrewAI + Claude Agent SDK + OpenAI Agents SDK), MCP tool calls, token counts, estimated costs.
+
+```
+$ trickle eval
+  Overall: B (78/100)
+  Completion     ████████████████████ 100/100
+  Errors         ████████████████░░░░  80/100
+  Cost           ████████████████████ 100/100
+  Tools          ███████████░░░░░░░░░  55/100
+  Latency        █████████████████░░░  85/100
+
+$ trickle cost-report
+  Model Tier Analysis
+  🔴 Frontier      $0.043  83% cost  25% of calls
+  🟡 Standard      $0.008  15% cost  25% of calls
+  🟢 Mini          $0.001   1% cost  50% of calls
+```
+
+### For AI coding agents (Claude Code, Cursor)
+
+```bash
+trickle init    # creates CLAUDE.md + .claude/settings.json with 38 MCP tools
+```
+
+The agent can now use `why`, `get_llm_calls`, `get_agent_trace`, `get_cost_report`, `get_recommended_actions`, and 33 more tools.
 
 ---
 

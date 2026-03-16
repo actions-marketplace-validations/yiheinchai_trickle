@@ -1,7 +1,7 @@
 {
   "name": "trickle-observe",
-  "version": "0.2.121",
-  "description": "Runtime type observability for JavaScript applications",
+  "version": "0.2.122",
+  "description": "Zero-code runtime observability for JavaScript/TypeScript. Auto-instruments Express, OpenAI, Anthropic, Gemini, MCP. Captures functions, variables, LLM calls, agent workflows.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

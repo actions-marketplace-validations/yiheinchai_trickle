@@ -82,14 +82,14 @@ function scanValue(value: unknown, source: string, location: string): SecurityFi
 
 export interface SecurityResult {
   findings: SecurityFinding[];
-  scanned: { variables: number; queries: number; logs: number; observations: number };
+  scanned: Record<string, number>;
   summary: { critical: number; warning: number; info: number };
 }
 
 export function runSecurityScan(opts?: { dir?: string; json?: boolean }): SecurityResult {
   const trickleDir = opts?.dir || process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
   const findings: SecurityFinding[] = [];
-  const scanned = { variables: 0, queries: 0, logs: 0, observations: 0 };
+  const scanned: Record<string, number> = { variables: 0, queries: 0, logs: 0, observations: 0 };
 
   // Scan variables
   const variables = readJsonl(path.join(trickleDir, 'variables.jsonl'));
@@ -133,6 +133,97 @@ export function runSecurityScan(opts?: { dir?: string; json?: boolean }): Securi
     if (o.sampleOutput) findings.push(...scanValue(o.sampleOutput, 'function_output', `${o.module}.${o.functionName}`));
   }
 
+  // ── Agent Security: The "Lethal Trifecta" ──
+
+  // Scan LLM calls for prompt injection and data exfiltration
+  const llmCalls = readJsonl(path.join(trickleDir, 'llm.jsonl'));
+  for (const c of llmCalls) {
+    // Prompt injection patterns in LLM inputs
+    const input = String(c.inputPreview || '').toLowerCase();
+    const INJECTION_PATTERNS = [
+      { pattern: /ignore\s+(all\s+)?previous\s+instructions/i, name: 'Instruction override' },
+      { pattern: /you\s+are\s+now\s+a\s+/i, name: 'Role hijacking' },
+      { pattern: /system\s*:\s*you\s+are/i, name: 'System prompt injection' },
+      { pattern: /\bdo\s+not\s+follow\s+(any|the)\s+(previous|above)/i, name: 'Instruction bypass' },
+      { pattern: /forget\s+(all|everything|your)\s+(previous|prior|instructions)/i, name: 'Memory wipe attempt' },
+      { pattern: /pretend\s+you\s+(are|have)\s+(no|unrestricted)/i, name: 'Jailbreak attempt' },
+    ];
+    for (const inj of INJECTION_PATTERNS) {
+      if (inj.pattern.test(c.inputPreview || '') || inj.pattern.test(c.systemPrompt || '')) {
+        findings.push({
+          severity: 'critical', category: 'prompt_injection',
+          message: `${inj.name} detected in LLM input`,
+          source: 'llm_call', location: c.model || 'unknown',
+          evidence: (c.inputPreview || '').substring(0, 100),
+        });
+        break;
+      }
+    }
+
+    // Secrets in LLM outputs (data exfiltration)
+    const output = String(c.outputPreview || '');
+    if (output) {
+      const outputFindings = scanValue(output, 'llm_output', `${c.provider}/${c.model}`);
+      for (const f of outputFindings) {
+        f.category = 'data_exfiltration';
+        f.message = `LLM output contains ${f.message.toLowerCase()}`;
+        findings.push(f);
+      }
+    }
+
+    // Secrets in LLM inputs
+    const inputStr = String(c.inputPreview || '');
+    if (inputStr) {
+      const inputFindings = scanValue(inputStr, 'llm_input', `${c.provider}/${c.model}`);
+      for (const f of inputFindings) {
+        f.message = `Secret passed to LLM: ${f.message}`;
+        findings.push(f);
+      }
+    }
+  }
+
+  // Scan agent events for unauthorized tool calls
+  const agentEvents = readJsonl(path.join(trickleDir, 'agents.jsonl'));
+  const toolErrors = agentEvents.filter(e => e.event === 'tool_error');
+  const toolStarts = agentEvents.filter(e => e.event === 'tool_start');
+
+  // Detect privilege escalation: agent calling dangerous tools
+  const DANGEROUS_TOOLS = ['Bash', 'bash', 'shell', 'exec', 'eval', 'rm', 'sudo', 'chmod', 'kill'];
+  for (const t of toolStarts) {
+    const toolName = String(t.tool || '');
+    if (DANGEROUS_TOOLS.some(d => toolName.toLowerCase().includes(d.toLowerCase()))) {
+      // Check if tool input contains dangerous commands
+      const toolInput = String(t.toolInput || '').toLowerCase();
+      if (toolInput.includes('rm -rf') || toolInput.includes('sudo') || toolInput.includes('chmod 777') ||
+          toolInput.includes('curl') && toolInput.includes('|') || toolInput.includes('wget') && toolInput.includes('|')) {
+        findings.push({
+          severity: 'critical', category: 'privilege_escalation',
+          message: `Agent executed dangerous command via ${toolName}`,
+          source: 'agent_tool', location: t.framework || 'agent',
+          evidence: (t.toolInput || '').substring(0, 100),
+        });
+      }
+    }
+  }
+
+  // Scan MCP tool calls for secrets in args/responses
+  const mcpCalls = readJsonl(path.join(trickleDir, 'mcp.jsonl'));
+  for (const m of mcpCalls) {
+    if (m.args) {
+      const argsStr = typeof m.args === 'string' ? m.args : JSON.stringify(m.args);
+      const argsFindings = scanValue(argsStr, 'mcp_tool_args', `MCP: ${m.tool}`);
+      findings.push(...argsFindings);
+    }
+    if (m.resultPreview) {
+      const resultFindings = scanValue(m.resultPreview, 'mcp_tool_result', `MCP: ${m.tool}`);
+      for (const f of resultFindings) {
+        f.category = 'data_exfiltration';
+        f.message = `MCP tool response contains ${f.message.toLowerCase()}`;
+        findings.push(f);
+      }
+    }
+  }
+
   // Deduplicate
   const seen = new Set<string>();
   const deduped = findings.filter(f => {
@@ -148,6 +239,9 @@ export function runSecurityScan(opts?: { dir?: string; json?: boolean }): Securi
     info: deduped.filter(f => f.severity === 'info').length,
   };
 
+  scanned.llmCalls = llmCalls.length;
+  scanned.agentEvents = agentEvents.length;
+  scanned.mcpCalls = mcpCalls.length;
   const result: SecurityResult = { findings: deduped, scanned, summary };
 
   if (opts?.json) {
@@ -159,7 +253,11 @@ export function runSecurityScan(opts?: { dir?: string; json?: boolean }): Securi
   console.log('');
   console.log(chalk.bold('  trickle security'));
   console.log(chalk.gray('  ' + '─'.repeat(50)));
-  console.log(chalk.gray(`  Scanned: ${scanned.variables} vars, ${scanned.queries} queries, ${scanned.logs} logs, ${scanned.observations} functions`));
+  const scanParts = [`${scanned.variables} vars`, `${scanned.queries} queries`, `${scanned.logs} logs`, `${scanned.observations} functions`];
+  if (scanned.llmCalls) scanParts.push(`${scanned.llmCalls} LLM calls`);
+  if (scanned.agentEvents) scanParts.push(`${scanned.agentEvents} agent events`);
+  if (scanned.mcpCalls) scanParts.push(`${scanned.mcpCalls} MCP calls`);
+  console.log(chalk.gray(`  Scanned: ${scanParts.join(', ')}`));
 
   if (deduped.length === 0) {
     console.log(chalk.green('  No security issues found. ✓'));

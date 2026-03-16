@@ -953,6 +953,16 @@ program
     whyCommand(query, opts);
   });
 
+// trickle memory
+program
+  .command("memory")
+  .description("Show captured agent memory operations (Mem0 add/get/search/update/delete)")
+  .option("--json", "Output raw JSON")
+  .action(async (opts) => {
+    const { memoryCommand } = await import("./commands/memory");
+    memoryCommand(opts);
+  });
+
 // trickle benchmark
 program
   .command("benchmark [command...]")

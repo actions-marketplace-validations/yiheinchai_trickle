@@ -953,6 +953,18 @@ program
     whyCommand(query, opts);
   });
 
+// trickle benchmark
+program
+  .command("benchmark [command...]")
+  .description("Multi-trial reliability testing — run N times, measure consistency, cost variance, pass@k")
+  .option("--runs <n>", "Number of trial runs (default: 5)")
+  .option("--json", "Output structured JSON")
+  .option("--fail-under-consistency <pct>", "Fail if consistency below threshold (0-100, for CI)")
+  .action(async (commandParts: string[], opts) => {
+    const { benchmarkCommand } = await import("./commands/benchmark");
+    await benchmarkCommand(commandParts.length > 0 ? commandParts.join(' ') : undefined, opts);
+  });
+
 // trickle playback
 program
   .command("playback")

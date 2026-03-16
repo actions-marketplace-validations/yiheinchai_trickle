@@ -65,7 +65,7 @@ export async function runDemo(): Promise<void> {
   console.log('');
   console.log(chalk.bold.cyan('  ╔══════════════════════════════════════════╗'));
   console.log(chalk.bold.cyan('  ║          trickle — Live Demo             ║'));
-  console.log(chalk.bold.cyan('  ║  Runtime Observability in 60 Seconds     ║'));
+  console.log(chalk.bold.cyan('  ║  Zero-Code Observability in 60 Seconds   ║'));
   console.log(chalk.bold.cyan('  ╚══════════════════════════════════════════╝'));
 
   // Step 1: Create demo project
@@ -175,9 +175,15 @@ export async function runDemo(): Promise<void> {
   console.log(chalk.bold.cyan('  ║                                          ║'));
   console.log(chalk.bold.cyan('  ║  npm install -g trickle-cli              ║'));
   console.log(chalk.bold.cyan('  ║  trickle init                            ║'));
-  console.log(chalk.bold.cyan('  ║  trickle run                             ║'));
+  console.log(chalk.bold.cyan('  ║  trickle run node app.js                 ║'));
   console.log(chalk.bold.cyan('  ║                                          ║'));
-  console.log(chalk.bold.cyan('  ║  31 MCP tools | 16 integrations          ║'));
+  console.log(chalk.bold.cyan('  ║  Also try:                               ║'));
+  console.log(chalk.bold.cyan('  ║    trickle eval        — A-F grading     ║'));
+  console.log(chalk.bold.cyan('  ║    trickle why         — root cause      ║'));
+  console.log(chalk.bold.cyan('  ║    trickle cost-report — LLM costs       ║'));
+  console.log(chalk.bold.cyan('  ║    trickle summarize   — trace summary   ║'));
+  console.log(chalk.bold.cyan('  ║                                          ║'));
+  console.log(chalk.bold.cyan('  ║  38 MCP tools | Free, local, zero-code   ║'));
   console.log(chalk.bold.cyan('  ║  github.com/yiheinchai/trickle           ║'));
   console.log(chalk.bold.cyan('  ╚══════════════════════════════════════════╝'));
   console.log('');

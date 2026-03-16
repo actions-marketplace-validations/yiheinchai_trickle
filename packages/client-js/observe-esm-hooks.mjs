@@ -648,87 +648,104 @@ function transformSource(source, url, originalSource) {
     }
   }
 
-  // ── Detect framework imports and inject instrumentation ──
-  // Scan for: import express from 'express' / import { Hono } from 'hono' etc.
+  // ── Detect framework imports and rewrite to auto-instrument all instances ──
+  // Strategy: rewrite the import to wrap the factory/constructor so EVERY
+  // instance created from it is automatically instrumented.
+  // E.g., `import { Hono } from 'hono'` becomes:
+  //   import { Hono as __OrigHono } from 'hono'
+  //   const Hono = (...args) => { const a = new __OrigHono(...args); instrumentHono(a); return a; }
   const frameworkInjects = [];
   const expressImportMatch = source.match(/import\s+(\w+)\s+from\s+['"]express['"]/);
   const fastifyImportMatch = source.match(/import\s+(\w+)\s+from\s+['"]fastify['"]/);
   const koaImportMatch = source.match(/import\s+(\w+)\s+from\s+['"]koa['"]/);
-  const honoImportMatch = source.match(/import\s+\{\s*Hono\s*\}\s+from\s+['"]hono['"]/);
+  const honoImportMatch = source.match(/import\s+\{\s*Hono\s*(?:,\s*\w+)*\s*\}\s+from\s+['"]hono['"]/);
 
   if (expressImportMatch) {
-    // Express: imported as factory. Detect `const app = express()` and inject instrument(app)
     const factoryName = expressImportMatch[1];
-    const appMatch = source.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*${factoryName}\\s*\\(`));
-    if (appMatch) {
-      frameworkInjects.push({ framework: 'express', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/express.js') });
-    }
+    frameworkInjects.push({ framework: 'express', factoryName, type: 'factory', importPath: config.wrapperPath.replace('/wrap.js', '/express.js') });
   }
   if (fastifyImportMatch) {
     const factoryName = fastifyImportMatch[1];
-    const appMatch = source.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*${factoryName}\\s*\\(`));
-    if (appMatch) {
-      frameworkInjects.push({ framework: 'fastify', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/fastify.js') });
-    }
+    frameworkInjects.push({ framework: 'fastify', factoryName, type: 'factory', importPath: config.wrapperPath.replace('/wrap.js', '/fastify.js') });
   }
   if (koaImportMatch) {
     const className = koaImportMatch[1];
-    const appMatch = source.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*new\\s+${className}\\s*\\(`));
-    if (appMatch) {
-      frameworkInjects.push({ framework: 'koa', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/koa.js') });
-    }
+    frameworkInjects.push({ framework: 'koa', factoryName: className, type: 'class', importPath: config.wrapperPath.replace('/wrap.js', '/koa.js') });
   }
   if (honoImportMatch) {
-    const appMatch = source.match(/(?:const|let|var)\s+(\w+)\s*=\s*new\s+Hono\s*\(/);
-    if (appMatch) {
-      frameworkInjects.push({ framework: 'hono', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/hono.js') });
+    frameworkInjects.push({ framework: 'hono', factoryName: 'Hono', type: 'class', importPath: config.wrapperPath.replace('/wrap.js', '/hono.js') });
+  }
+
+  // Rewrite framework imports in the result array
+  for (const fi of frameworkInjects) {
+    const instrumentFn = fi.framework === 'express' ? 'instrumentExpress'
+      : fi.framework === 'fastify' ? 'instrumentFastify'
+      : fi.framework === 'koa' ? 'instrumentKoa'
+      : 'instrumentHono';
+    const fiPath = fi.importPath.replace(/\\/g, '\\\\');
+
+    for (let ri = 0; ri < result.length; ri++) {
+      const line = result[ri];
+
+      if (fi.framework === 'hono' && /import\s+\{[^}]*Hono[^}]*\}\s+from\s+['"]hono['"]/.test(line)) {
+        // Rewrite: import { Hono } from 'hono' → import { Hono as __OrigHono } from 'hono'
+        result[ri] = line.replace(/\bHono\b/, 'Hono as __OrigHono');
+        // Insert wrapper after imports are hoisted (add at this position, it'll run after all imports)
+        result.splice(ri + 1, 0,
+          `import { createRequire as __cr_hono } from 'node:module';`,
+          `const __rq_hono = __cr_hono(import.meta.url);`,
+          `const __fwHono = __rq_hono('${fiPath}');`,
+          `const Hono = function(...args) { const a = new __OrigHono(...args); try { __fwHono.${instrumentFn}(a, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(e) {} return a; };`,
+          `Hono.prototype = __OrigHono.prototype;`,
+        );
+        break;
+      }
+
+      if (fi.framework === 'express' && new RegExp(`import\\s+${fi.factoryName}\\s+from\\s+['"]express['"]`).test(line)) {
+        result[ri] = line.replace(fi.factoryName, `__OrigExpress`);
+        result.splice(ri + 1, 0,
+          `import { createRequire as __cr_express } from 'node:module';`,
+          `const __rq_express = __cr_express(import.meta.url);`,
+          `const __fwExpress = __rq_express('${fiPath}');`,
+          `const ${fi.factoryName} = function(...args) { const a = __OrigExpress(...args); try { __fwExpress.${instrumentFn}(a, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(e) {} return a; };`,
+        );
+        break;
+      }
+
+      if (fi.framework === 'fastify' && new RegExp(`import\\s+${fi.factoryName}\\s+from\\s+['"]fastify['"]`).test(line)) {
+        result[ri] = line.replace(fi.factoryName, `__OrigFastify`);
+        result.splice(ri + 1, 0,
+          `import { createRequire as __cr_fastify } from 'node:module';`,
+          `const __rq_fastify = __cr_fastify(import.meta.url);`,
+          `const __fwFastify = __rq_fastify('${fiPath}');`,
+          `const ${fi.factoryName} = function(...args) { const a = __OrigFastify(...args); try { __fwFastify.${instrumentFn}(a, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(e) {} return a; };`,
+        );
+        break;
+      }
+
+      if (fi.framework === 'koa' && new RegExp(`import\\s+${fi.factoryName}\\s+from\\s+['"]koa['"]`).test(line)) {
+        result[ri] = line.replace(fi.factoryName, `__OrigKoa`);
+        result.splice(ri + 1, 0,
+          `import { createRequire as __cr_koa } from 'node:module';`,
+          `const __rq_koa = __cr_koa(import.meta.url);`,
+          `const __fwKoa = __rq_koa('${fiPath}');`,
+          `const ${fi.factoryName} = function(...args) { const a = new __OrigKoa(...args); try { __fwKoa.${instrumentFn}(a, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(e) {} return a; };`,
+        );
+        break;
+      }
     }
   }
 
-  // If nothing to wrap or trace, but we have framework injections, continue
+  // Framework imports are now rewritten above (constructor/factory wrapping).
+  // Early return if nothing else to transform.
   if (exportedFunctions.length === 0 && exportedDefaults.length === 0 && namedExports.length === 0 && !hasVarTracing && frameworkInjects.length === 0) {
     return source;
   }
-
-  // If ONLY framework injections (no function wrapping needed), inject directly
   if (exportedFunctions.length === 0 && exportedDefaults.length === 0 && namedExports.length === 0 && !hasVarTracing && frameworkInjects.length > 0) {
-    const lines = source.split('\n');
-    const injections = [];
-    for (const fi of frameworkInjects) {
-      const instrumentFn = fi.framework === 'express' ? 'instrumentExpress'
-        : fi.framework === 'fastify' ? 'instrumentFastify'
-        : fi.framework === 'koa' ? 'instrumentKoa'
-        : 'instrumentHono';
-      const fiPath = fi.importPath.replace(/\\/g, '\\\\');
-      injections.push(`import { createRequire as __cr_fw } from 'node:module';`);
-      injections.push(`const __req_fw = __cr_fw(import.meta.url);`);
-      injections.push(`try { const __fwMod = __req_fw('${fiPath}'); __fwMod.${instrumentFn}(${fi.appVar}, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(__e) { if (${config.debug}) console.error('[trickle/esm] Framework instrumentation failed:', __e.message); }`);
-    }
-    // Find the line after the app creation and insert
-    for (const fi of frameworkInjects) {
-      const appPattern = new RegExp(`(?:const|let|var)\\s+${fi.appVar}\\s*=`);
-      for (let i = 0; i < lines.length; i++) {
-        if (appPattern.test(lines[i])) {
-          // Find end of statement
-          let endLine = i;
-          let depth = 0;
-          for (let j = i; j < lines.length; j++) {
-            for (const ch of lines[j]) {
-              if (ch === '(' || ch === '{' || ch === '[') depth++;
-              if (ch === ')' || ch === '}' || ch === ']') depth--;
-            }
-            if (lines[j].includes(';') && depth <= 0) { endLine = j; break; }
-            if (j > i && depth <= 0) { endLine = j - 1; break; }
-          }
-          lines.splice(endLine + 1, 0, ...injections);
-          break;
-        }
-      }
-    }
     if (config.debug) {
-      console.log(`[trickle/esm] Injected ${frameworkInjects.map(f => f.framework).join(', ')} instrumentation into ${moduleName}`);
+      console.log(`[trickle/esm] Wrapped ${frameworkInjects.map(f => f.framework).join(', ')} constructor(s) in ${moduleName}`);
     }
-    return lines.join('\n');
+    return result.join('\n');
   }
 
   // Add wrapper import and wrapping code

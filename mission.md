@@ -16,7 +16,7 @@ Next chapter: "grow" — reliability, distribution, community:
 
 3. **Dev.to / HN launch content** — Write "Debug AI agents in 60 seconds with trickle" tutorial on Dev.to showing: install → trickle run on a LangChain app → see agent traces → trickle eval → trickle security. Use real output, real screenshots. Prepare for a Show HN post. GitHub Trending → HN → Reddit is the proven OSS growth flywheel (SigNoz, Biome, Graphite all followed this).
 
-4. **GitHub Marketplace action** — Publish `trickle-eval-action` as standalone reusable action with action.yml at repo root. One-liner: `uses: trickle/eval-action@v1`. This is a concrete distribution artifact that markets itself — every CI run becomes a touchpoint. Companies with AI governance get 12x more projects into production.
+4. **GitHub Marketplace action** — SHIPPED: `action.yml` at repo root. Usage: `uses: yiheinchai/trickle@main`. Inputs: command, fail-under, security-scan, compliance-report. Outputs: score, grade, passed. Composite action: installs trickle, runs command, evaluates, optionally scans security and generates compliance report.
 
 5. **VSCode CodeLens for cost + eval** — SHIPPED: CodeLens shows at top of file: "⚡ trickle: 5 LLM calls | $0.041 | 10.7K tokens | gpt-4o, gpt-4o-mini". Also shows agent eval summary and security alert counts. Clicking opens terminal with full report. Three CodeLens types: cost, eval, security.
 </focus point>

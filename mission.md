@@ -18,7 +18,7 @@ Next chapter: "grow" — reliability, distribution, community:
 
 4. **GitHub Marketplace action** — Publish `trickle-eval-action` as standalone reusable action with action.yml at repo root. One-liner: `uses: trickle/eval-action@v1`. This is a concrete distribution artifact that markets itself — every CI run becomes a touchpoint. Companies with AI governance get 12x more projects into production.
 
-5. **VSCode CodeLens for cost + eval** — Show per-function LLM cost inline: "$0.003 (gpt-4o, 500 tokens)" above functions that call LLMs. Show eval grade next to agent entry points. This is the "wow" feature for demos and screenshots — visual proof that trickle surfaces insights where developers actually work. Essential for Dev.to content and HN launch visuals.
+5. **VSCode CodeLens for cost + eval** — SHIPPED: CodeLens shows at top of file: "⚡ trickle: 5 LLM calls | $0.041 | 10.7K tokens | gpt-4o, gpt-4o-mini". Also shows agent eval summary and security alert counts. Clicking opens terminal with full report. Three CodeLens types: cost, eval, security.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

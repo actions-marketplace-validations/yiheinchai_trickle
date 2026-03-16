@@ -496,6 +496,93 @@ function saveTypeHistory(hashes: Map<string, string>): void {
   }
 }
 
+/**
+ * CodeLens provider that shows LLM cost and eval score inline.
+ * Reads .trickle/llm.jsonl to find which functions made LLM calls
+ * and displays cost/token info above them.
+ */
+class TrickleCostCodeLensProvider implements vscode.CodeLensProvider {
+  provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+    const lenses: vscode.CodeLens[] = [];
+    const fileDir = path.dirname(document.uri.fsPath);
+    const trickleDir = findNearestTrickleDirCached(fileDir);
+    if (!trickleDir) return lenses;
+
+    // Read LLM data
+    const llmPath = path.join(trickleDir, 'llm.jsonl');
+    if (!fs.existsSync(llmPath)) return lenses;
+
+    let llmCalls: any[];
+    try {
+      llmCalls = fs.readFileSync(llmPath, 'utf-8').split('\n').filter(Boolean)
+        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } catch { return lenses; }
+
+    if (llmCalls.length === 0) return lenses;
+
+    // Aggregate: total cost, calls, tokens
+    const totalCost = llmCalls.reduce((s: number, c: any) => s + (c.estimatedCostUsd || 0), 0);
+    const totalTokens = llmCalls.reduce((s: number, c: any) => s + (c.totalTokens || 0), 0);
+    const errorCount = llmCalls.filter((c: any) => c.error).length;
+    const models = [...new Set(llmCalls.map((c: any) => c.model))];
+
+    // Show summary CodeLens at line 0
+    const costStr = totalCost > 0 ? `$${totalCost.toFixed(4)}` : '$0';
+    const tokStr = totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : String(totalTokens);
+    const errStr = errorCount > 0 ? ` | ${errorCount} errors` : '';
+    const modelStr = models.length <= 2 ? models.join(', ') : `${models.length} models`;
+
+    const title = `$(zap) trickle: ${llmCalls.length} LLM calls | ${costStr} | ${tokStr} tokens | ${modelStr}${errStr}`;
+    const lens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+      title,
+      command: 'trickle.showCostReport',
+      tooltip: 'Click to see full LLM cost report (trickle cost-report)',
+    });
+    lenses.push(lens);
+
+    // Read eval data if available
+    const agentsPath = path.join(trickleDir, 'agents.jsonl');
+    if (fs.existsSync(agentsPath)) {
+      try {
+        const agentEvents = fs.readFileSync(agentsPath, 'utf-8').split('\n').filter(Boolean)
+          .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        if (agentEvents.length > 0) {
+          const crewStarts = agentEvents.filter((e: any) => e.event === 'crew_start' || e.event === 'chain_start');
+          const errors = agentEvents.filter((e: any) => e.event?.includes('error'));
+          const toolCalls = agentEvents.filter((e: any) => e.event === 'tool_start');
+          const evalLens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+            title: `$(beaker) trickle eval: ${crewStarts.length} agent runs | ${toolCalls.length} tool calls | ${errors.length} errors`,
+            command: 'trickle.showEval',
+            tooltip: 'Click to see agent evaluation (trickle eval)',
+          });
+          lenses.push(evalLens);
+        }
+      } catch {}
+    }
+
+    // Read alerts for security
+    const alertsPath = path.join(trickleDir, 'alerts.jsonl');
+    if (fs.existsSync(alertsPath)) {
+      try {
+        const alerts = fs.readFileSync(alertsPath, 'utf-8').split('\n').filter(Boolean)
+          .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+        const critical = alerts.filter((a: any) => a.severity === 'critical');
+        const warnings = alerts.filter((a: any) => a.severity === 'warning');
+        if (critical.length > 0 || warnings.length > 0) {
+          const secLens = new vscode.CodeLens(new vscode.Range(0, 0, 0, 0), {
+            title: `$(shield) trickle security: ${critical.length} critical | ${warnings.length} warnings`,
+            command: 'trickle.showSecurity',
+            tooltip: 'Click to see security scan (trickle security)',
+          });
+          lenses.push(secLens);
+        }
+      } catch {}
+    }
+
+    return lenses;
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 0);
   statusBarItem.command = 'trickle.refreshVariables';
@@ -530,6 +617,30 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Register inline hints provider
   registerInlineHints(context, selector);
+
+  // Register CodeLens provider for LLM cost + eval insights
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(selector, new TrickleCostCodeLensProvider()),
+  );
+
+  // Register CodeLens commands
+  context.subscriptions.push(
+    vscode.commands.registerCommand('trickle.showCostReport', () => {
+      const terminal = vscode.window.createTerminal('trickle');
+      terminal.sendText('trickle cost-report');
+      terminal.show();
+    }),
+    vscode.commands.registerCommand('trickle.showEval', () => {
+      const terminal = vscode.window.createTerminal('trickle');
+      terminal.sendText('trickle eval');
+      terminal.show();
+    }),
+    vscode.commands.registerCommand('trickle.showSecurity', () => {
+      const terminal = vscode.window.createTerminal('trickle');
+      terminal.sendText('trickle security');
+      terminal.show();
+    }),
+  );
 
   // Watch for changes to variables.jsonl in ANY subdirectory (not just workspace root)
   const workspaceFolders = vscode.workspace.workspaceFolders;

@@ -648,9 +648,87 @@ function transformSource(source, url, originalSource) {
     }
   }
 
-  // If nothing to wrap or trace, return original
-  if (exportedFunctions.length === 0 && exportedDefaults.length === 0 && namedExports.length === 0 && !hasVarTracing) {
+  // ── Detect framework imports and inject instrumentation ──
+  // Scan for: import express from 'express' / import { Hono } from 'hono' etc.
+  const frameworkInjects = [];
+  const expressImportMatch = source.match(/import\s+(\w+)\s+from\s+['"]express['"]/);
+  const fastifyImportMatch = source.match(/import\s+(\w+)\s+from\s+['"]fastify['"]/);
+  const koaImportMatch = source.match(/import\s+(\w+)\s+from\s+['"]koa['"]/);
+  const honoImportMatch = source.match(/import\s+\{\s*Hono\s*\}\s+from\s+['"]hono['"]/);
+
+  if (expressImportMatch) {
+    // Express: imported as factory. Detect `const app = express()` and inject instrument(app)
+    const factoryName = expressImportMatch[1];
+    const appMatch = source.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*${factoryName}\\s*\\(`));
+    if (appMatch) {
+      frameworkInjects.push({ framework: 'express', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/express.js') });
+    }
+  }
+  if (fastifyImportMatch) {
+    const factoryName = fastifyImportMatch[1];
+    const appMatch = source.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*${factoryName}\\s*\\(`));
+    if (appMatch) {
+      frameworkInjects.push({ framework: 'fastify', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/fastify.js') });
+    }
+  }
+  if (koaImportMatch) {
+    const className = koaImportMatch[1];
+    const appMatch = source.match(new RegExp(`(?:const|let|var)\\s+(\\w+)\\s*=\\s*new\\s+${className}\\s*\\(`));
+    if (appMatch) {
+      frameworkInjects.push({ framework: 'koa', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/koa.js') });
+    }
+  }
+  if (honoImportMatch) {
+    const appMatch = source.match(/(?:const|let|var)\s+(\w+)\s*=\s*new\s+Hono\s*\(/);
+    if (appMatch) {
+      frameworkInjects.push({ framework: 'hono', appVar: appMatch[1], importPath: config.wrapperPath.replace('/wrap.js', '/hono.js') });
+    }
+  }
+
+  // If nothing to wrap or trace, but we have framework injections, continue
+  if (exportedFunctions.length === 0 && exportedDefaults.length === 0 && namedExports.length === 0 && !hasVarTracing && frameworkInjects.length === 0) {
     return source;
+  }
+
+  // If ONLY framework injections (no function wrapping needed), inject directly
+  if (exportedFunctions.length === 0 && exportedDefaults.length === 0 && namedExports.length === 0 && !hasVarTracing && frameworkInjects.length > 0) {
+    const lines = source.split('\n');
+    const injections = [];
+    for (const fi of frameworkInjects) {
+      const instrumentFn = fi.framework === 'express' ? 'instrumentExpress'
+        : fi.framework === 'fastify' ? 'instrumentFastify'
+        : fi.framework === 'koa' ? 'instrumentKoa'
+        : 'instrumentHono';
+      const fiPath = fi.importPath.replace(/\\/g, '\\\\');
+      injections.push(`import { createRequire as __cr_fw } from 'node:module';`);
+      injections.push(`const __req_fw = __cr_fw(import.meta.url);`);
+      injections.push(`try { const __fwMod = __req_fw('${fiPath}'); __fwMod.${instrumentFn}(${fi.appVar}, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(__e) { if (${config.debug}) console.error('[trickle/esm] Framework instrumentation failed:', __e.message); }`);
+    }
+    // Find the line after the app creation and insert
+    for (const fi of frameworkInjects) {
+      const appPattern = new RegExp(`(?:const|let|var)\\s+${fi.appVar}\\s*=`);
+      for (let i = 0; i < lines.length; i++) {
+        if (appPattern.test(lines[i])) {
+          // Find end of statement
+          let endLine = i;
+          let depth = 0;
+          for (let j = i; j < lines.length; j++) {
+            for (const ch of lines[j]) {
+              if (ch === '(' || ch === '{' || ch === '[') depth++;
+              if (ch === ')' || ch === '}' || ch === ']') depth--;
+            }
+            if (lines[j].includes(';') && depth <= 0) { endLine = j; break; }
+            if (j > i && depth <= 0) { endLine = j - 1; break; }
+          }
+          lines.splice(endLine + 1, 0, ...injections);
+          break;
+        }
+      }
+    }
+    if (config.debug) {
+      console.log(`[trickle/esm] Injected ${frameworkInjects.map(f => f.framework).join(', ')} instrumentation into ${moduleName}`);
+    }
+    return lines.join('\n');
   }
 
   // Add wrapper import and wrapping code
@@ -658,14 +736,18 @@ function transformSource(source, url, originalSource) {
 
   // Insert wrapper setup at the top (after imports, before user code)
   // Using import + createRequire to load CJS wrapper from ESM context
+  // Always create __require if we have exports OR framework injections
+  const needsWrapper = exportedFunctions.length > 0 || exportedDefaults.length > 0 || namedExports.length > 0 || frameworkInjects.length > 0;
   const wrapSetup = [
     '',
     '// [trickle] Auto-observation wrappers',
     `import { createRequire as __cr } from 'node:module';`,
     `const __require = __cr(import.meta.url);`,
-    `const { wrapFunction: __tw } = __require('${wrapperPathEscaped}');`,
-    `const __twOpts = (name, paramNames) => { const o = { functionName: name, module: '${moduleName}', trackArgs: true, trackReturn: true, sampleRate: 1, maxDepth: 5, environment: process.env.TRICKLE_ENV || 'development', enabled: true }; if (paramNames && paramNames.length) o.paramNames = paramNames; return o; };`,
   ];
+  if (exportedFunctions.length > 0 || exportedDefaults.length > 0 || namedExports.length > 0) {
+    wrapSetup.push(`const { wrapFunction: __tw } = __require('${wrapperPathEscaped}');`);
+    wrapSetup.push(`const __twOpts = (name, paramNames) => { const o = { functionName: name, module: '${moduleName}', trackArgs: true, trackReturn: true, sampleRate: 1, maxDepth: 5, environment: process.env.TRICKLE_ENV || 'development', enabled: true }; if (paramNames && paramNames.length) o.paramNames = paramNames; return o; };`);
+  }
 
   // For in-place wrapping: insert wrapper calls right after each function declaration
   // This ensures functions are wrapped BEFORE any top-level code calls them
@@ -726,16 +808,60 @@ function transformSource(source, url, originalSource) {
     result.push(`export default __trickle_default_wrapped;`);
   }
 
+  // Inject framework instrumentation if detected
+  if (frameworkInjects.length > 0) {
+    for (const fi of frameworkInjects) {
+      const instrumentFn = fi.framework === 'express' ? 'instrumentExpress'
+        : fi.framework === 'fastify' ? 'instrumentFastify'
+        : fi.framework === 'koa' ? 'instrumentKoa'
+        : 'instrumentHono';
+      const fiPath = fi.importPath.replace(/\\/g, '\\\\');
+      // Find where the app is created and inject after
+      const appPattern = new RegExp(`(?:const|let|var)\\s+${fi.appVar}\\s*=`);
+      for (let ri = 0; ri < result.length; ri++) {
+        if (appPattern.test(result[ri])) {
+          let endLine = ri;
+          let depth = 0;
+          for (let j = ri; j < result.length; j++) {
+            for (const ch of result[j]) {
+              if (ch === '(' || ch === '{' || ch === '[') depth++;
+              if (ch === ')' || ch === '}' || ch === ']') depth--;
+            }
+            if (result[j].includes(';') && depth <= 0) { endLine = j; break; }
+            if (j > ri && depth <= 0) { endLine = j - 1; break; }
+          }
+          // We need to inject BEFORE routes are defined. Since __require from wrapSetup
+      // may not be initialized yet, we add a separate import + require pair.
+      // ESM import declarations are hoisted, so this import is available immediately.
+      // We use __cr_fw (unique name) to avoid conflicts with other createRequire imports.
+      const crImportLine = `import { createRequire as __cr_fw_${fi.framework} } from 'node:module';`;
+      // Insert the import at the very beginning of result
+      result.unshift(crImportLine);
+      // The endLine index shifted by 1 due to unshift
+      result.splice(endLine + 2, 0,
+        `try { const __rq_fw = __cr_fw_${fi.framework}(import.meta.url); const __fw = __rq_fw('${fiPath}'); __fw.${instrumentFn}(${fi.appVar}, { environment: process.env.TRICKLE_ENV || 'development' }); } catch(__e) { if (${config.debug}) console.error('[trickle/esm] Framework injection error:', __e.message); }`
+      );
+          break;
+        }
+      }
+    }
+  }
+
   const transformed = result.join('\n');
 
   if (config.debug) {
     const fnCount = exportedFunctions.length + exportedDefaults.length + namedExports.length;
     const varCount = varDecls.length + destructDecls.length;
-    console.log(`[trickle/esm] Transformed ${fnCount} exports, ${varCount} vars from ${moduleName}`);
+    const fwCount = frameworkInjects.length;
+    console.log(`[trickle/esm] Transformed ${fnCount} exports, ${varCount} vars, ${fwCount} frameworks from ${moduleName}`);
   }
 
   return transformed;
 }
+
+// ── Framework auto-instrumentation for ESM ──
+// ESM imports bypass Module._load, so CJS hooks don't fire.
+// We detect framework imports in user source code and inject instrumentation calls.
 
 /**
  * ESM load hook — intercepts module loading to transform user modules.

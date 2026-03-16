@@ -936,6 +936,16 @@ program
     llmCommand(opts);
   });
 
+// trickle why [query]
+program
+  .command("why [query]")
+  .description("Causal debugging — trace back from an error or behavior to show WHY it happened")
+  .option("--json", "Output raw JSON for agent consumption")
+  .action(async (query: string | undefined, opts) => {
+    const { whyCommand } = await import("./commands/why");
+    whyCommand(query, opts);
+  });
+
 // trickle cost-report
 program
   .command("cost-report")

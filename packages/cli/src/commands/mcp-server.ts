@@ -792,6 +792,13 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "why",
+    description: "Causal debugging — given an error message, function name, or behavior query, traces back through the execution to show WHY it happened. Returns the error, call chain, variable values at crash point, LLM reasoning, agent decisions, and MCP tool calls that are relevant. Essential for understanding root causes — don't just see what failed, understand the chain of events that led to it.",
+    inputSchema: { type: "object", properties: {
+      query: { type: "string", description: "Error message, function name, or search term. If omitted, shows the most recent error." },
+    }},
+  },
+  {
     name: "get_cost_report",
     description: "Get LLM cost attribution — breakdown by provider and model with token counts, estimated costs, error rates, and monthly projection. Use this to understand WHERE money is being spent on LLM APIs and identify cost optimization opportunities. Shows the most expensive individual calls.",
     inputSchema: { type: "object", properties: {
@@ -1330,6 +1337,24 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               }
             } catch (e: any) {
               result = { error: `Failed to read MCP calls: ${e.message}` };
+            }
+            break;
+          }
+          case "why": {
+            try {
+              const { whyCommand } = require('./why');
+              // Capture JSON output
+              const origLog = console.log;
+              let output = '';
+              console.log = (msg: string) => { output += msg + '\n'; };
+              try {
+                whyCommand(args.query as string || undefined, { json: true });
+              } finally {
+                console.log = origLog;
+              }
+              try { result = JSON.parse(output.trim()); } catch { result = { raw: output.trim() }; }
+            } catch (e: any) {
+              result = { error: `Failed: ${e.message}` };
             }
             break;
           }

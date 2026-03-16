@@ -951,6 +951,7 @@ program
   .command("eval")
   .description("Score agent runs on reliability — completion, errors, cost efficiency, tool reliability, latency")
   .option("--json", "Output raw JSON for CI integration")
+  .option("--fail-under <score>", "Exit with code 1 if overall score is below this threshold (0-100, for CI)")
   .action(async (opts) => {
     const { evalCommand } = await import("./commands/eval");
     evalCommand(opts);

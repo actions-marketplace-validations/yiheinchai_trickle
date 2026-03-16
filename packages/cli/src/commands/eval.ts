@@ -36,7 +36,7 @@ function readJsonl(fp: string): any[] {
     .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
 }
 
-export function evalCommand(opts: { json?: boolean }): void {
+export function evalCommand(opts: { json?: boolean; failUnder?: string }): void {
   const dir = process.env.TRICKLE_LOCAL_DIR || path.join(process.cwd(), '.trickle');
   const agentEvents = readJsonl(path.join(dir, 'agents.jsonl'));
   const llmCalls = readJsonl(path.join(dir, 'llm.jsonl'));
@@ -51,7 +51,15 @@ export function evalCommand(opts: { json?: boolean }): void {
   const result = scoreRun(agentEvents, llmCalls, errors, mcpCalls);
 
   if (opts.json) {
-    console.log(JSON.stringify(result, null, 2));
+    const threshold = opts.failUnder ? parseInt(opts.failUnder, 10) : undefined;
+    const output = {
+      ...result,
+      ...(threshold !== undefined ? { threshold, passed: result.overallScore >= threshold } : {}),
+    };
+    console.log(JSON.stringify(output, null, 2));
+    if (threshold !== undefined && result.overallScore < threshold) {
+      process.exit(1);
+    }
     return;
   }
 
@@ -85,6 +93,15 @@ export function evalCommand(opts: { json?: boolean }): void {
   }
 
   console.log('');
+
+  // CI mode: exit with non-zero if score below threshold
+  if (opts.failUnder) {
+    const threshold = parseInt(opts.failUnder, 10);
+    if (!isNaN(threshold) && result.overallScore < threshold) {
+      console.log(chalk.red(`  FAIL: Score ${result.overallScore} is below threshold ${threshold}`));
+      process.exit(1);
+    }
+  }
 }
 
 function printDimension(name: string, dim: { score: number; detail: string }): void {

@@ -36,6 +36,8 @@ import { wrapFunction } from './wrap';
 import { WrapOptions } from './types';
 import { patchFetch } from './fetch-observer';
 import { instrumentExpress, trickleMiddleware } from './express';
+import { instrumentFastify } from './fastify';
+import { instrumentKoa } from './koa';
 import { initVarTracer, traceVar } from './trace-var';
 import { initCallTrace } from './call-trace';
 import { initLlmObserver } from './llm-observer';
@@ -1390,6 +1392,95 @@ if (enabled) {
         } catch { /* non-critical */ }
         return wrappedExpress;
       } catch { /* fall through to normal processing */ }
+    }
+
+    // ── Fastify auto-detection ──
+    if (request === 'fastify' && !expressPatched.has('fastify')) {
+      expressPatched.add('fastify');
+      try {
+        const origFastify = exports;
+        // Fastify exports a factory function (or default export with .fastify property)
+        const factory = typeof origFastify === 'function' ? origFastify : origFastify.default || origFastify.fastify;
+        if (typeof factory === 'function') {
+          const wrappedFactory = function (this: any, ...args: any[]): any {
+            const app = factory.apply(this, args);
+            try {
+              instrumentFastify(app, { environment });
+              if (debug) {
+                console.log('[trickle/observe] Auto-instrumented Fastify app');
+              }
+            } catch (e: unknown) {
+              if (debug) {
+                console.log('[trickle/observe] Fastify instrumentation error:', (e as Error).message);
+              }
+            }
+            return app;
+          };
+          // Copy static properties
+          for (const key of Object.keys(factory)) {
+            (wrappedFactory as any)[key] = (factory as any)[key];
+          }
+          if (typeof origFastify === 'function') {
+            try {
+              const resolvedPath = M._resolveFilename(request, parent);
+              if (require.cache[resolvedPath]) {
+                require.cache[resolvedPath]!.exports = wrappedFactory;
+              }
+            } catch { /* non-critical */ }
+            return wrappedFactory;
+          } else {
+            // Module has named exports
+            const wrapped = { ...origFastify };
+            if (origFastify.default) wrapped.default = wrappedFactory;
+            if (origFastify.fastify) wrapped.fastify = wrappedFactory;
+            return wrapped;
+          }
+        }
+      } catch { /* fall through */ }
+    }
+
+    // ── Koa auto-detection ──
+    if (request === 'koa' && !expressPatched.has('koa')) {
+      expressPatched.add('koa');
+      try {
+        const origKoa = exports;
+        const KoaClass = typeof origKoa === 'function' ? origKoa : origKoa.default;
+        if (typeof KoaClass === 'function') {
+          // Wrap the Koa constructor to auto-instrument every new Koa() instance
+          const WrappedKoa = function (this: any, ...args: any[]): any {
+            const app = new KoaClass(...args);
+            try {
+              instrumentKoa(app, { environment });
+              if (debug) {
+                console.log('[trickle/observe] Auto-instrumented Koa app');
+              }
+            } catch (e: unknown) {
+              if (debug) {
+                console.log('[trickle/observe] Koa instrumentation error:', (e as Error).message);
+              }
+            }
+            return app;
+          };
+          // Preserve prototype chain so instanceof checks work
+          WrappedKoa.prototype = KoaClass.prototype;
+          for (const key of Object.keys(KoaClass)) {
+            (WrappedKoa as any)[key] = (KoaClass as any)[key];
+          }
+
+          if (typeof origKoa === 'function') {
+            try {
+              const resolvedPath = M._resolveFilename(request, parent);
+              if (require.cache[resolvedPath]) {
+                require.cache[resolvedPath]!.exports = WrappedKoa;
+              }
+            } catch { /* non-critical */ }
+            return WrappedKoa;
+          } else {
+            const wrapped = { ...origKoa, default: WrappedKoa };
+            return wrapped;
+          }
+        }
+      } catch { /* fall through */ }
     }
 
     // ── Database auto-detection: patch database drivers to capture SQL queries ──

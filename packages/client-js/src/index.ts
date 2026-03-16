@@ -3,6 +3,8 @@ import { wrapFunction } from './wrap';
 import { detectEnvironment } from './env-detect';
 import { GlobalOpts, TrickleOpts, WrapOptions } from './types';
 import { instrumentExpress, trickleMiddleware } from './express';
+import { instrumentFastify, tricklePlugin } from './fastify';
+import { instrumentKoa, instrumentKoaRouter } from './koa';
 
 let globalOpts: GlobalOpts = {
   backendUrl: 'http://localhost:4888',
@@ -133,26 +135,54 @@ export function trickleExpress(
 }
 
 /**
- * Auto-instrument a framework app. Currently supports Express.
+ * Auto-instrument a framework app. Supports Express, Fastify, and Koa.
  *
  * Usage:
  *   import { instrument } from 'trickle';
- *   const app = express();
  *   instrument(app);
  *
- * Detects Express by checking for `app.listen` and `app.get` (function) on the object.
+ * Detects the framework automatically:
+ * - Express: has `app.listen`, `app.get`, `app.use`, `app.set`
+ * - Fastify: has `app.route`, `app.register`, `app.addHook`
+ * - Koa: has `app.use`, `app.listen`, `app.context` (but no `app.get` method on the app itself)
  */
 export function instrument(
   app: any,
   opts?: { enabled?: boolean; environment?: string; sampleRate?: number; maxDepth?: number },
 ): void {
-  // Detect Express-like app
-  if (app && typeof app.listen === 'function' && typeof app.get === 'function' && typeof app.use === 'function') {
-    trickleExpress(app, opts);
+  if (!app) {
+    if (typeof console !== 'undefined' && console.warn) {
+      console.warn('[trickle] instrument(): received null/undefined app');
+    }
     return;
   }
 
-  // Future: detect other frameworks here (Koa, Fastify, etc.)
+  const mergedOpts = {
+    enabled: opts?.enabled ?? globalOpts.enabled,
+    environment: opts?.environment ?? globalOpts.environment ?? detectEnvironment(),
+    sampleRate: opts?.sampleRate ?? 1,
+    maxDepth: opts?.maxDepth ?? 5,
+  };
+
+  // Detect Fastify: has .route(), .register(), .addHook()
+  if (typeof app.route === 'function' && typeof app.register === 'function' && typeof app.addHook === 'function') {
+    instrumentFastify(app, mergedOpts);
+    return;
+  }
+
+  // Detect Koa: has .use(), .listen(), .context (but NOT .get as a route method on the app object)
+  // Koa apps have a .context property and .use() but .get is only defined on koa-router
+  if (typeof app.use === 'function' && typeof app.listen === 'function' && app.context !== undefined && typeof app.set !== 'function') {
+    instrumentKoa(app, mergedOpts);
+    return;
+  }
+
+  // Detect Express: has .listen(), .get(), .use(), .set()
+  if (typeof app.listen === 'function' && typeof app.get === 'function' && typeof app.use === 'function') {
+    trickleExpress(app, mergedOpts);
+    return;
+  }
+
   if (typeof console !== 'undefined' && console.warn) {
     console.warn('[trickle] instrument(): could not detect a supported framework on the provided object');
   }
@@ -195,6 +225,8 @@ function inferModule(): string {
 export type { TypeNode, GlobalOpts, TrickleOpts, IngestPayload } from './types';
 export { flush } from './transport';
 export { instrumentExpress, trickleMiddleware } from './express';
+export { instrumentFastify, tricklePlugin } from './fastify';
+export { instrumentKoa, instrumentKoaRouter } from './koa';
 export { observe, observeFn } from './observe';
 export type { ObserveOpts } from './observe';
 export { wrapFunction } from './wrap';

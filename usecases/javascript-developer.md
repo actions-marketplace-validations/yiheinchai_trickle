@@ -90,28 +90,55 @@ function processOrders(orders: Order[]) {
 
 ---
 
-## Use Case 3: Node.js / Express Backend
+## Use Case 3: Node.js Backend (Express, Fastify, Koa)
 
 ```bash
 trickle run node server.js
 ```
 
-Your Express route handlers get typed automatically — no code changes:
+Works with all major Node.js frameworks — no code changes needed:
 
+**Express:**
 ```javascript
 app.get('/api/users', async (req, res) => {
   const query = req.query;
   // → query: { page: string; limit: string; filter?: string }
-
   const users = await db.users.findMany({ where: buildFilter(query) });
   // → users: Array<{id: number; name: string; email: string; role: string}>
-
-  const total = await db.users.count();
-  // → total: 284
-
-  res.json({ users, total, page: Number(query.page) });
-  // → { users: User[]; total: 284; page: number }
+  res.json({ users, total: users.length });
 });
+```
+
+**Fastify:**
+```javascript
+app.get('/api/users', async (request, reply) => {
+  const users = await db.users.findMany();
+  // → users: Array<{id: number; name: string; email: string}>
+  return { users, total: users.length };
+  // → { users: User[]; total: number }
+});
+```
+
+**Koa (with @koa/router):**
+```javascript
+router.get('/api/users', async (ctx) => {
+  const users = await db.users.findMany();
+  // → users: Array<{id: number; name: string; email: string}>
+  ctx.body = { users, total: users.length };
+});
+```
+
+Or use explicit instrumentation in your code:
+```javascript
+import { instrument } from 'trickle';
+instrument(app);  // Auto-detects Express, Fastify, or Koa
+```
+
+Framework-specific imports are also available:
+```javascript
+import { instrumentFastify } from 'trickle';   // Fastify
+import { instrumentKoa } from 'trickle';        // Koa
+import { instrumentExpress } from 'trickle';    // Express
 ```
 
 ---
@@ -454,4 +481,4 @@ This captures everything: functions, queries, variables, errors, logs, HTTP requ
 - **Hover for details**: Hover over any type hint to see sample values and full type information
 - **Arrow functions**: Variables inside arrow functions are traced too
 - **Destructuring**: `const { a, b } = obj` traces both `a` and `b`
-- **Express routes**: Route handler parameters and response shapes are captured automatically
+- **Framework routes**: Express, Fastify, and Koa route handler parameters and response shapes are captured automatically

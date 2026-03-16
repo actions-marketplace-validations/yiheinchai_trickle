@@ -18,7 +18,7 @@ Fresh technical priorities — test on real codebases and fix what breaks:
 
 4. **`trickle init` for Python projects** — VERIFIED: Detected FastAPI, created .pyi stubs, CLAUDE.md with updated commands, MCP settings.
 
-5. **Performance profiling on large datasets** — stress-test trickle with 10K+ observations, verify dashboard/CSV export/eval/cost-report don't degrade. Profile any bottlenecks.
+5. **Performance profiling** — VERIFIED: 10K observations + 1K LLM calls + 500 agent events. All commands <500ms. No bottlenecks.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

@@ -240,3 +240,68 @@ trickle check --save api-baseline.json
 git add api-baseline.json
 git commit -m "Update API baseline — removed deprecated email field"
 ```
+
+---
+
+## Use Case 6: Agent Reliability CI
+
+Evaluate AI agent runs in CI and fail the build if reliability drops:
+
+```yaml
+# .github/workflows/agent-ci.yml
+- run: trickle run python my_agent.py
+  continue-on-error: true
+
+# Score reliability (A-F) — fail if below 70
+- run: trickle eval --fail-under 70
+
+# Security scan — detect prompt injection, data exfiltration
+- run: trickle security --json
+
+# Cost check — fail if budget exceeded
+- run: trickle cost-report --budget 1.00 --json
+
+# Compliance audit trail
+- run: trickle audit --compliance -o compliance-report.json
+```
+
+**What `trickle eval` scores:**
+- Completion rate (did workflows finish?)
+- Error rate (tool failures, agent errors)
+- Cost efficiency (tokens per output)
+- Tool reliability (success rate + retry detection)
+- Latency (execution time)
+
+**Output:**
+```
+Grade: B (78/100)
+Completion   ████████████████████ 100/100
+Errors       ████████████████░░░░  80/100
+Cost         ████████████████████ 100/100
+Tools        ███████████░░░░░░░░░  55/100
+Latency      █████████████████░░░  85/100
+```
+
+---
+
+## Use Case 7: Compare Agent Runs Across Model Updates
+
+When a model updates (GPT-4o → GPT-4o-2024-11-20), regression test:
+
+```bash
+# Before model update: save baseline
+trickle run python agent.py
+trickle diff-runs --snapshot
+
+# After model update: compare
+trickle run python agent.py
+trickle diff-runs
+```
+
+**Output:**
+```
+Verdict: ~ MIXED
+LLM calls: 5 → 8
+LLM cost: $0.0410 → $0.0650 (+$0.0240)
+Agent errors: 0 → 2
+```

@@ -6,16 +6,18 @@ Trickle's strategic moat is zero-code, local-first runtime observability that wo
 </higher directive>
 
 <focus point>
-CLI 0.1.177, client-js 0.2.120, client-python 0.2.29. LLM auto-instrumentation now covers OpenAI, Anthropic, AND Google Gemini — the top 3 LLM APIs by usage.
+CLI 0.1.178, client-js 0.2.120, client-python 0.2.29. Just shipped: live status display + Gemini auto-instrumentation.
 
-Just shipped: Google Gemini SDK auto-instrumentation (@google/genai for JS, google-genai for Python). Captures model, tokens, cost, latency, content previews. JS uses Proxy on GoogleGenAI constructor to wrap models.generateContent. Python patches Client.__init__. Pricing for Gemini 2.5 Flash/Pro and 1.5 models included.
+Live status: `trickle run` now shows real-time observation counts during execution (functions, variables, calls, queries, LLM calls, errors). Updates every 3 seconds, only when data changes. Gives developers immediate feedback that trickle is working — especially important for long-running servers and training loops. Doesn't fire for fast scripts that finish in <2s.
+
+LLM coverage: OpenAI + Anthropic + Google Gemini — the top 3 LLM APIs.
 
 Known remaining issue: Python .pyi stubs have invalid types for tensor params
 
 Priority areas:
 1. **AI agent runtime tracing** — first-class LangChain/CrewAI agent workflow tracing
 2. **OpenTelemetry export** — OTel-compatible span export with GenAI semantic conventions
-3. **Live streaming mode** — WebSocket real-time dashboard for long-running processes
+3. **WebSocket dashboard streaming** — real-time updates in the browser dashboard (live status is CLI-only for now)
 4. **More LLM providers** — Cohere, Mistral AI for broader coverage
 5. **Python .pyi stub quality** — fix tensor param types, missing imports
 </focus point>

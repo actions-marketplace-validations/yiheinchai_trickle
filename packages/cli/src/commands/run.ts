@@ -481,10 +481,14 @@ async function executeSingleRun(
     liveTypesStop = startLiveLocalTypes(singleFile, jsonlPath, generateLocalStubs);
   }
 
+  // Start live status display — shows observation counts during execution
+  const liveStatusStop = startLiveStatus(localDir);
+
   // Run the instrumented command
   const exitCode = await runProcess(instrumentedCommand, env);
 
-  // Stop live watcher
+  // Stop live watchers
+  liveStatusStop();
   if (liveTypesStop) liveTypesStop();
 
   // Brief pause for any async file writes to complete
@@ -791,6 +795,68 @@ function startLiveStubsGeneration(stubsDir: string): () => void {
   const interval = setInterval(poll, 3000);
   return () => {
     stopped = true;
+    clearInterval(interval);
+  };
+}
+
+// ── Live status display during run ──
+
+function countJsonlLines(filePath: string): number {
+  try {
+    if (!fs.existsSync(filePath)) return 0;
+    const content = fs.readFileSync(filePath, "utf-8");
+    return content.trim().split("\n").filter(Boolean).length;
+  } catch { return 0; }
+}
+
+/**
+ * Start a live status poller that shows observation counts during execution.
+ * Prints a compact status line every few seconds to give developers real-time
+ * feedback on what trickle is capturing — especially useful for long-running
+ * processes (servers, training loops, agent workflows).
+ */
+function startLiveStatus(localDir: string): () => void {
+  let stopped = false;
+  let lastPrintedStatus = "";
+
+  const poll = () => {
+    if (stopped) return;
+    try {
+      const fns = countJsonlLines(path.join(localDir, "observations.jsonl"));
+      const vars = countJsonlLines(path.join(localDir, "variables.jsonl"));
+      const queries = countJsonlLines(path.join(localDir, "queries.jsonl"));
+      const errors = countJsonlLines(path.join(localDir, "errors.jsonl"));
+      const llm = countJsonlLines(path.join(localDir, "llm.jsonl"));
+      const calltrace = countJsonlLines(path.join(localDir, "calltrace.jsonl"));
+
+      // Only print if there's data and something changed
+      const total = fns + vars + queries + errors + llm + calltrace;
+      if (total === 0) return;
+
+      const parts: string[] = [];
+      if (fns > 0) parts.push(`${fns} fn`);
+      if (vars > 0) parts.push(`${vars} var`);
+      if (queries > 0) parts.push(`${queries} query`);
+      if (calltrace > 0) parts.push(`${calltrace} call`);
+      if (llm > 0) parts.push(`${llm} llm`);
+      if (errors > 0) parts.push(chalk.red(`${errors} err`));
+
+      const status = parts.join(" | ");
+      if (status === lastPrintedStatus) return;
+      lastPrintedStatus = status;
+
+      const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+      console.log(chalk.gray(`  [${ts}] trickle: ${status}`));
+    } catch { /* never crash */ }
+  };
+
+  // First check after 2s, then every 3s
+  const initialTimer = setTimeout(poll, 2000);
+  const interval = setInterval(poll, 3000);
+
+  return () => {
+    stopped = true;
+    clearTimeout(initialTimer);
     clearInterval(interval);
   };
 }

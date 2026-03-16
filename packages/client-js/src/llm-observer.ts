@@ -18,10 +18,10 @@ let eventCount = 0;
 const MAX_LLM_EVENTS = 500;
 const TRUNCATE_LEN = 500;
 
-// Token budget enforcement
+// Graduated token budget enforcement: alert 50%, warn 80%, exceeded 100%
 let cumulativeTokens = 0;
 let cumulativeCost = 0;
-let budgetWarned = false;
+let budgetLevel = 0; // 0=ok, 1=alert(50%), 2=warn(80%), 3=exceeded(100%)
 const TOKEN_BUDGET = parseInt(process.env.TRICKLE_TOKEN_BUDGET || '0', 10);
 const COST_BUDGET = parseFloat(process.env.TRICKLE_COST_BUDGET || '0');
 
@@ -88,16 +88,23 @@ function writeLlmEvent(event: LlmEvent): void {
   cumulativeTokens += event.totalTokens || 0;
   cumulativeCost += event.estimatedCostUsd || 0;
 
-  if (!budgetWarned) {
-    if (TOKEN_BUDGET > 0 && cumulativeTokens > TOKEN_BUDGET) {
-      console.warn(`[trickle] ⚠ Token budget exceeded: ${cumulativeTokens} tokens used (budget: ${TOKEN_BUDGET}). Set TRICKLE_TOKEN_BUDGET=0 to disable.`);
-      budgetWarned = true;
-    }
-    if (COST_BUDGET > 0 && cumulativeCost > COST_BUDGET) {
-      console.warn(`[trickle] ⚠ Cost budget exceeded: $${cumulativeCost.toFixed(4)} spent (budget: $${COST_BUDGET.toFixed(4)}). Set TRICKLE_COST_BUDGET=0 to disable.`);
-      budgetWarned = true;
+  // Graduated budget: alert at 50%, warn at 80%, exceeded at 100%
+  function checkBudget(current: number, budget: number, unit: string): void {
+    if (budget <= 0) return;
+    const pct = current / budget;
+    if (pct >= 1.0 && budgetLevel < 3) {
+      budgetLevel = 3;
+      console.warn(`[trickle] ❌ ${unit} budget EXCEEDED: ${current.toFixed(4)} / ${budget} (100%+). Consider stopping.`);
+    } else if (pct >= 0.8 && budgetLevel < 2) {
+      budgetLevel = 2;
+      console.warn(`[trickle] ⚠ ${unit} budget at 80%: ${current.toFixed(4)} / ${budget}. Approaching limit.`);
+    } else if (pct >= 0.5 && budgetLevel < 1) {
+      budgetLevel = 1;
+      console.warn(`[trickle] ℹ ${unit} budget at 50%: ${current.toFixed(4)} / ${budget}.`);
     }
   }
+  checkBudget(cumulativeTokens, TOKEN_BUDGET, 'Token');
+  checkBudget(cumulativeCost, COST_BUDGET, 'Cost ($)');
   try {
     fs.appendFileSync(getLlmFile(), JSON.stringify(event) + '\n');
   } catch {}

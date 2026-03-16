@@ -21,10 +21,11 @@ _event_count = 0
 _MAX_EVENTS = 500
 _TRUNCATE_LEN = 500
 
-# Token budget enforcement
+# Graduated token budget enforcement
+# Alert at 50%, warn at 80%, hard warning at 100%
 _cumulative_tokens = 0
 _cumulative_cost = 0.0
-_budget_warned = False
+_budget_level = 0  # 0=ok, 1=alert(50%), 2=warn(80%), 3=exceeded(100%)
 _TOKEN_BUDGET = int(os.environ.get("TRICKLE_TOKEN_BUDGET", "0"))
 _COST_BUDGET = float(os.environ.get("TRICKLE_COST_BUDGET", "0"))
 
@@ -67,24 +68,33 @@ def _get_llm_file() -> str:
 
 
 def _write_event(event: dict[str, Any]) -> None:
-    global _event_count, _cumulative_tokens, _cumulative_cost, _budget_warned
+    global _event_count, _cumulative_tokens, _cumulative_cost, _budget_level
     if _event_count >= _MAX_EVENTS:
         return
     _event_count += 1
 
-    # Track cumulative usage for budget enforcement
+    # Track cumulative usage for graduated budget enforcement
     _cumulative_tokens += event.get("totalTokens", 0) or 0
     _cumulative_cost += event.get("estimatedCostUsd", 0) or 0
 
-    if not _budget_warned:
-        if _TOKEN_BUDGET > 0 and _cumulative_tokens > _TOKEN_BUDGET:
-            import sys
-            print(f"[trickle] \u26a0 Token budget exceeded: {_cumulative_tokens} tokens used (budget: {_TOKEN_BUDGET})", file=sys.stderr)
-            _budget_warned = True
-        if _COST_BUDGET > 0 and _cumulative_cost > _COST_BUDGET:
-            import sys
-            print(f"[trickle] \u26a0 Cost budget exceeded: ${_cumulative_cost:.4f} spent (budget: ${_COST_BUDGET:.4f})", file=sys.stderr)
-            _budget_warned = True
+    def _check_budget(current: float, budget: float, unit: str) -> None:
+        global _budget_level
+        if budget <= 0:
+            return
+        pct = current / budget
+        import sys
+        if pct >= 1.0 and _budget_level < 3:
+            _budget_level = 3
+            print(f"[trickle] \u274c {unit} budget EXCEEDED: {current:.4g} / {budget:.4g} (100%+). Consider stopping the run.", file=sys.stderr)
+        elif pct >= 0.8 and _budget_level < 2:
+            _budget_level = 2
+            print(f"[trickle] \u26a0 {unit} budget at 80%: {current:.4g} / {budget:.4g}. Approaching limit.", file=sys.stderr)
+        elif pct >= 0.5 and _budget_level < 1:
+            _budget_level = 1
+            print(f"[trickle] \u2139 {unit} budget at 50%: {current:.4g} / {budget:.4g}.", file=sys.stderr)
+
+    _check_budget(_cumulative_tokens, _TOKEN_BUDGET, "Token")
+    _check_budget(_cumulative_cost, _COST_BUDGET, "Cost ($)")
 
     try:
         with open(_get_llm_file(), "a") as f:

@@ -805,6 +805,11 @@ const TOOLS = [
       budget: { type: "number", description: "Optional budget in USD to check against" },
     }},
   },
+  {
+    name: "get_memory_operations",
+    description: "Get captured agent memory operations (Mem0 add/get/search/update/delete). Shows what was stored, what was retrieved, retrieval counts, and latency. Essential for debugging agent memory — understanding why an agent remembered or forgot something.",
+    inputSchema: { type: "object", properties: {} },
+  },
 ];
 
 async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
@@ -1389,6 +1394,21 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
               }
             } catch (e: any) {
               result = { error: `Failed to generate cost report: ${e.message}` };
+            }
+            break;
+          }
+          case "get_memory_operations": {
+            try {
+              const memFile = require('path').join(findTrickleDir(), 'memory.jsonl');
+              const fs = require('fs');
+              if (!fs.existsSync(memFile)) {
+                result = { operations: [], total: 0, message: "No memory data. Run an app that uses Mem0 with trickle." };
+              } else {
+                const ops = fs.readFileSync(memFile, 'utf-8').split('\n').filter(Boolean).map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter((o: any) => o && o.kind === 'memory_op');
+                result = { operations: ops, total: ops.length };
+              }
+            } catch (e: any) {
+              result = { error: `Failed to read memory operations: ${e.message}` };
             }
             break;
           }

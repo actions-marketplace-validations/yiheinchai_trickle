@@ -10,9 +10,9 @@ CLI 0.1.206, client-js 0.2.126, client-python 0.2.39, VSCode 0.1.69. 38 MCP tool
 
 Distribution is now the #1 priority. The product is ready — more features without users = zero impact:
 
-1. **Agent memory observability** — SHIPPED (0.2.40): Mem0 Memory class patched to capture add/get/search/update/delete. Records input, query, userId, result counts, duration. `.trickle/memory.jsonl`. TODO: `trickle memory` CLI command, MCP tool, LangGraph checkpointer support.
+1. **Agent memory observability** — SHIPPED (Py 0.2.40, CLI 0.1.207): Mem0 patched + `trickle memory` CLI command. TODO: MCP tool, LangGraph checkpointer.
 
-2. **Onboarding optimization** — VERIFIED: Fresh directory → `trickle run node app.js` → types captured in 4.7 seconds. Output is clean (no backend/cloud noise). Well under 30s target. TODO: add `trickle memory` CLI for the new memory.jsonl data.
+2. **Onboarding optimization** — VERIFIED: 4.7 seconds to first types. Clean output.
 
 3. **"Pilot to production" content** — Write a Dev.to tutorial: "Your AI agent works 85% of the time. Here's why that means it fails 80% of the time — and how to fix it." Walk through: trickle benchmark (measure variance) → trickle eval (score quality) → trickle diff-runs (catch regressions) → trickle playback (debug failures) → trickle security (scan for vulns) → trickle audit (compliance report). Real output, real screenshots. This is the content that HN and Reddit will upvote.
 

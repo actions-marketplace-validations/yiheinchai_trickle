@@ -226,7 +226,7 @@ function sanitizeVarSample(value: unknown, depth: number = 3): unknown {
   if (depth <= 0) return '[...]';
 
   if (Array.isArray(value)) {
-    return value.slice(0, 3).map(item => sanitizeVarSample(item, depth - 1));
+    return value.slice(0, 20).map(item => sanitizeVarSample(item, depth - 1));
   }
 
   if (t === 'object') {

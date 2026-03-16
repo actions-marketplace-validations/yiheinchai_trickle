@@ -1865,7 +1865,7 @@ export function transformEsmSource(
       `    if (t === 'string') return v.length > 100 ? v.substring(0, 100) + '...' : v;`,
       `    if (t === 'number' || t === 'boolean') return v; if (t === 'bigint') return String(v);`,
       `    if (t === 'function') return '[Function: ' + (v.name || 'anonymous') + ']';`,
-      `    if (Array.isArray(v)) return v.slice(0, 3).map(i => _sanitize(i, d-1));`,
+      `    if (Array.isArray(v)) return v.slice(0, 20).map(i => _sanitize(i, d-1));`,
       `    if (t === 'object') { if (v instanceof Date) return v.toISOString(); if (v instanceof RegExp) return String(v); if (v instanceof Error) return { error: v.message }; if (v instanceof Promise) return '[Promise]';`,
       `      const r = {}; const keys = Object.keys(v).slice(0, 10); for (const k of keys) { try { r[k] = _sanitize(v[k], d-1); } catch(e) { r[k] = '[unreadable]'; } } return r; }`,
       `    return String(v);`,

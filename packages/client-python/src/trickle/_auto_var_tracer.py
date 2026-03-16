@@ -504,7 +504,7 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
         elif isinstance(value, (int, float)):
             sample = value
         elif isinstance(value, str):
-            sample = value[:100]
+            sample = value[:200]
         elif hasattr(value, '_fields') and isinstance(value, tuple):
             # NamedTuple — emit field dict for structured display
             sample = {f: _simple_scalar(getattr(value, f, None)) for f in list(value._fields)[:8]}
@@ -518,21 +518,37 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
                 fields = list(type(value).model_fields.keys())[:8]
                 sample = {f: _simple_scalar(getattr(value, f, None)) for f in fields}
             except Exception:
-                sample = str(value)[:100]
+                sample = str(value)[:200]
         elif hasattr(type(value), '__fields__') and hasattr(value, 'dict'):
             # Pydantic v1
             try:
                 fields = list(type(value).__fields__.keys())[:8]
                 sample = {f: _simple_scalar(getattr(value, f, None)) for f in fields}
             except Exception:
-                sample = str(value)[:100]
+                sample = str(value)[:200]
         elif hasattr(value, "to_dict") and hasattr(value, "model_type"):
             # HuggingFace PretrainedConfig — show priority fields as a dict sample
             try:
                 fields = _extract_config_fields(value)
                 sample = {k: v for k, v in list(fields.items())[:8]}
             except Exception:
-                sample = str(value)[:100]
+                sample = str(value)[:200]
+        elif isinstance(value, (list, tuple)):
+            # Serialize list/tuple elements so the VSCode renderer can show them expandably
+            try:
+                items = []
+                for item in value[:30]:
+                    if item is None or isinstance(item, (bool, int, float)):
+                        items.append(item)
+                    elif isinstance(item, str):
+                        items.append(item[:80])
+                    else:
+                        items.append(str(item)[:80])
+                sample = items
+                if len(value) > 30:
+                    sample.append(f"... ({len(value)} total)")
+            except Exception:
+                sample = str(value)[:200]
         elif isinstance(value, dict) and len(value) <= 20:
             # Plain dict with string keys + primitive values — build a JSON-serializable
             # sample so the VSCode renderer can show {key: value} inline
@@ -543,18 +559,18 @@ def _trace_var(value: Any, var_name: str, line_no: int, file_path: str,
                         sv = _simple_scalar(v)
                         if sv is not None:
                             sample_dict[k] = sv
-                sample = sample_dict if sample_dict else str(value)[:100]
+                sample = sample_dict if sample_dict else str(value)[:200]
             except Exception:
-                sample = str(value)[:100]
+                sample = str(value)[:200]
         else:
             # For class instances with a `config` attribute, generate a constructor-call
             # style sample: "GPT(vocab_size=50257, n_embd=768, n_layer=12)" — this is the ML
-            # convention and gives much more useful context than str(value)[:100].
+            # convention and gives much more useful context than str(value)[:200].
             config_sample = _config_call_sample(value)
             if config_sample is not None:
                 sample = config_sample
             else:
-                sample = str(value)[:100]
+                sample = str(value)[:200]
 
         record: dict = {
             "kind": "variable",

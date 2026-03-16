@@ -3512,8 +3512,8 @@ function formatSample(sample: unknown): string {
   try {
     const str = JSON.stringify(sample, null, 2);
     // Truncate long samples
-    if (str.length > 500) {
-      return str.substring(0, 500) + '\n// ... truncated';
+    if (str.length > 2000) {
+      return str.substring(0, 2000) + '\n// ... truncated';
     }
     return str;
   } catch {

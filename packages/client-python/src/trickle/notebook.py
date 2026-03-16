@@ -118,9 +118,25 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
         elif isinstance(value, (int, float, bool)):
             sample = value
         elif isinstance(value, str):
-            sample = value[:100]
+            sample = value[:200]
+        elif isinstance(value, (list, tuple)):
+            # Serialize list/tuple elements so the VSCode renderer can show them expandably
+            try:
+                items = []
+                for item in value[:30]:
+                    if item is None or isinstance(item, (bool, int, float)):
+                        items.append(item)
+                    elif isinstance(item, str):
+                        items.append(item[:80])
+                    else:
+                        items.append(str(item)[:80])
+                sample = items
+                if len(value) > 30:
+                    sample.append(f"... ({len(value)} total)")
+            except Exception:
+                sample = str(value)[:200]
         else:
-            sample = str(value)[:100]
+            sample = str(value)[:200]
 
         record: dict = {
             "kind": "variable",

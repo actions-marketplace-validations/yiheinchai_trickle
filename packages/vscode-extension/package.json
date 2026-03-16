@@ -25,6 +25,14 @@
       {
         "command": "trickle.clearVariables",
         "title": "Trickle: Clear Variable Data"
+      },
+      {
+        "command": "trickle.toggleInlineHints",
+        "title": "Trickle: Toggle Inline Hints"
+      },
+      {
+        "command": "trickle.cycleInlineHintMode",
+        "title": "Trickle: Cycle Inline Hint Mode (auto → sample → type)"
       }
     ],
     "configuration": {
@@ -44,6 +52,17 @@
           "type": "boolean",
           "default": true,
           "description": "Show inline type hints after variable declarations"
+        },
+        "trickle.inlineHintMode": {
+          "type": "string",
+          "default": "auto",
+          "enum": ["auto", "sample", "type"],
+          "enumDescriptions": [
+            "Show sample values for primitives, types for complex structures (default)",
+            "Always show sample/value data inline when available",
+            "Always show the runtime type inline"
+          ],
+          "description": "What to display in inline hints: auto (smart), sample (prefer values), or type (prefer types)"
         }
       }
     }

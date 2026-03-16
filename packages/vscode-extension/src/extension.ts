@@ -822,11 +822,37 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+  // Toggle inline hints on/off
+  context.subscriptions.push(
+    vscode.commands.registerCommand('trickle.toggleInlineHints', async () => {
+      const config = vscode.workspace.getConfiguration('trickle');
+      const current = config.get('inlineHints', true);
+      await config.update('inlineHints', !current, vscode.ConfigurationTarget.Global);
+      vscode.window.showInformationMessage(`Trickle: Inline hints ${!current ? 'enabled' : 'disabled'}`);
+    }),
+  );
+
+  // Cycle inline hint mode: auto → sample → type → auto
+  context.subscriptions.push(
+    vscode.commands.registerCommand('trickle.cycleInlineHintMode', async () => {
+      const config = vscode.workspace.getConfiguration('trickle');
+      const current = config.get<string>('inlineHintMode', 'auto');
+      const order = ['auto', 'sample', 'type'];
+      const next = order[(order.indexOf(current) + 1) % order.length];
+      await config.update('inlineHintMode', next, vscode.ConfigurationTarget.Global);
+      refreshInlineHints();
+      vscode.window.showInformationMessage(`Trickle: Inline hint mode → ${next}`);
+    }),
+  );
+
   // Listen for config changes
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('trickle.inlineHints')) {
         registerInlineHints(context, selector);
+      }
+      if (e.affectsConfiguration('trickle.inlineHintMode')) {
+        refreshInlineHints();
       }
     }),
   );
@@ -1882,27 +1908,38 @@ class TrickleInlayHintsProvider implements vscode.InlayHintsProvider {
         const obsLabels = getDimLabels(obs);
         const fullTypeStr = typeNodeToString(obs.type, 3, obsLabels);
         let typeStr = typeNodeToStringCompact(obs.type, obsLabels, obs.sample);
+        const hintMode = config.get<string>('inlineHintMode', 'auto');
 
-        // For primitive types, show actual value inline instead of just "number"/"integer"
-        if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
-          if (obs.type.name === 'number' && typeof obs.sample === 'number') {
-            typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
-          } else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
-            typeStr = String(obs.sample);
-          } else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
-            typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
-          } else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
-            typeStr = `"${obs.sample}"`;
+        if (hintMode !== 'type') {
+          // "auto" or "sample" mode — show sample values inline
+
+          // For primitive types, show actual value inline instead of just "number"/"integer"
+          if (obs.type.kind === 'primitive' && obs.sample !== undefined && obs.sample !== null) {
+            if (obs.type.name === 'number' && typeof obs.sample === 'number') {
+              typeStr = Number.isInteger(obs.sample) ? String(obs.sample) : obs.sample.toFixed(4);
+            } else if (obs.type.name === 'integer' && typeof obs.sample === 'number') {
+              typeStr = String(obs.sample);
+            } else if (obs.type.name === 'boolean' && typeof obs.sample === 'boolean') {
+              typeStr = isPython ? (obs.sample ? 'True' : 'False') : String(obs.sample);
+            } else if (obs.type.name === 'string' && typeof obs.sample === 'string' && obs.sample.length <= 40) {
+              typeStr = `"${obs.sample}"`;
+            }
           }
-        }
 
-        // For class instances with a config, sample is a constructor-call string like
-        // "GPT(n_layer=12, n_head=12, n_embd=768)" — use it as the inline hint directly.
-        if (obs.type.kind === 'object' && obs.type.class_name &&
-            typeof obs.sample === 'string' &&
-            obs.sample.startsWith(obs.type.class_name + '(') &&
-            obs.sample.endsWith(')')) {
-          typeStr = obs.sample;
+          // For class instances with a config, sample is a constructor-call string like
+          // "GPT(n_layer=12, n_head=12, n_embd=768)" — use it as the inline hint directly.
+          if (obs.type.kind === 'object' && obs.type.class_name &&
+              typeof obs.sample === 'string' &&
+              obs.sample.startsWith(obs.type.class_name + '(') &&
+              obs.sample.endsWith(')')) {
+            typeStr = obs.sample;
+          }
+
+          // "sample" mode — aggressively prefer sample data for all types
+          if (hintMode === 'sample' && obs.sample !== undefined && obs.sample !== null) {
+            const sampleStr = formatSampleInline(obs.sample);
+            if (sampleStr) typeStr = sampleStr;
+          }
         }
 
         const position = new vscode.Position(lineNo - 1, varEnd);
@@ -3505,6 +3542,26 @@ function isComplexType(node: TypeNode): boolean {
 }
 
 /** Format a sample value for display */
+/** Format a sample value for inline hint display (compact, single-line). */
+function formatSampleInline(sample: unknown): string | null {
+  if (sample === undefined || sample === null) return null;
+  if (typeof sample === 'number') {
+    return Number.isInteger(sample) ? String(sample) : sample.toFixed(4);
+  }
+  if (typeof sample === 'boolean') return String(sample);
+  if (typeof sample === 'string') {
+    return sample.length <= 60 ? `"${sample}"` : `"${sample.substring(0, 57)}..."`;
+  }
+  try {
+    const str = JSON.stringify(sample);
+    if (str.length <= 80) return str;
+    return str.substring(0, 77) + '...';
+  } catch {
+    const s = String(sample);
+    return s.length <= 80 ? s : s.substring(0, 77) + '...';
+  }
+}
+
 function formatSample(sample: unknown): string {
   if (sample === undefined) return 'undefined';
   if (sample === null) return 'null';

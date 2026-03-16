@@ -98,9 +98,9 @@ Compare across environments:
 trickle diff --env1 staging --env2 production
 ```
 
-## Use Case 4: Generate Test Files
+## Use Case 4: Generate API Test Files
 
-Generate API tests from observed types:
+Generate API route tests from observed types:
 
 ```bash
 trickle test --generate -o tests/api.test.ts --framework vitest
@@ -114,6 +114,54 @@ This creates test files that:
 ```bash
 # Or for Jest
 trickle test --generate -o tests/api.test.ts --framework jest
+```
+
+## Use Case 4b: Generate Unit Tests from Runtime Data
+
+Generate function-level unit tests using real observed inputs and outputs:
+
+```bash
+# Generate vitest/jest unit tests for all observed JS/TS functions
+trickle test --generate --unit -o tests/unit.test.ts
+
+# Generate pytest tests for all observed Python functions
+trickle test --generate --unit --framework pytest -o tests/test_generated.py
+
+# Filter by function name or module
+trickle test --generate --unit --function calculateTotal
+trickle test --generate --unit --module src/utils
+```
+
+This creates tests using actual runtime data — not mocks or guesses:
+- Real function inputs from production/test observations
+- Type assertions based on observed output shapes
+- Smart test naming that describes the test case
+- Grouped by module with correct import paths
+
+Example generated vitest output:
+```typescript
+import { describe, it, expect } from "vitest";
+import { calculateDiscount, roundToDecimals } from "./src/utils/math";
+
+describe("calculateDiscount", () => {
+  it("given 100, 20, returns 80", () => {
+    const result = calculateDiscount(100, 20);
+    expect(typeof result).toBe("number");
+  });
+});
+```
+
+Example generated pytest output:
+```python
+from utils import tokenize, count_words
+
+def test_tokenize():
+    result = tokenize("Hello World!", True)
+    assert isinstance(result, list)
+
+def test_count_words():
+    result = count_words("The quick brown fox")
+    assert isinstance(result, (int, float))
 ```
 
 ## Use Case 5: Replay Captured Requests

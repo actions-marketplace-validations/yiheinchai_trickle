@@ -2,23 +2,19 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Trickle is feature-complete: 84 CLI commands, 39 MCP tools, 5 LLM providers, 4 agent frameworks, agent memory observability (Mem0), the full reliability stack, security, compliance, cost attribution. The ecosystem is accelerating: NVIDIA launched NemoClaw (open-source enterprise agent platform) at GTC today, Google open-sourced "Always On Memory Agent," GPT-5.4 shipped with 1M context. More agents shipping = more observability demand. But trickle's distribution items (Dev.to tutorial, awesome-lists, Show HN) have carried over for 3 cycles without execution — these remain the highest-ROI activities. The product does not need more features. It needs battle-testing on real codebases (to ensure zero first-run failures) and then users. The remaining technical work: test on real LangChain/CrewAI projects, complete LangGraph checkpointer tracing, and stress-test at scale. Everything beyond that is distribution. Every decision must pass: "does this get trickle in front of more developers THIS WEEK?"
+Trickle is the only tool that infers types from runtime behavior and generates typed clients, stubs, and specs — no OpenAPI spec required, no framework lock-in, no code changes. The SDK generator market is consolidating around spec-first tools (Postman acquired Fern + liblab, Stainless powers OpenAI/Anthropic) — our runtime-first approach is orthogonal and defensible. No competitor does observe-first type inference + codegen. Our primary audience is full-stack developers and small teams (2-10 engineers) who need type safety, observability, and documentation without overhead. The biggest distribution opportunity is the MCP ecosystem: Claude Code grew from 4% to 63% adoption, and our 39 MCP tools position us to be the default observability layer for AI-assisted development. With 16,670+ MCP servers competing for attention, discoverability and real-world validation matter more than feature count. We must shift from building features to proving value on real codebases and expanding framework coverage to remove adoption blockers.
 </higher directive>
 
 <focus point>
-CLI 0.1.208, client-js 0.2.126, client-python 0.2.40, VSCode 0.1.69. 39 MCP tools, 84+ CLI commands, 5 LLM providers, 4 agent frameworks, Mem0 memory tracing. ALL previous priorities shipped. Distribution tasks (#3-#5 from prior cycle: Dev.to tutorial, awesome-lists, Show HN) require human action.
+1. **Framework coverage: Fastify and Koa** — Fastify and Koa are 2 of the top 3 most popular Node.js web frameworks and we don't support them. This is the single biggest adoption blocker for JavaScript developers. Implement auto-instrumentation for both (like we did for Express), add e2e tests, and update the JS developer usecase guide. Same pattern as express.ts — monkey-patch route handlers, capture request/response types.
 
-Fresh technical priorities — test on real codebases and fix what breaks:
+2. **Real-world validation on open-source projects** — We have 70+ commands but zero published evidence they work on real codebases. Find 3-5 popular open-source projects (an Express API, a FastAPI service, a Next.js app, a LangChain agent), run trickle on them, fix any issues encountered, and document the results. Every bug found this way is a bug our users would hit. Every success is a case study we can reference. This is how we prove the "zero-code" promise actually holds.
 
-1. **Test on a real LangChain RAG app** — DONE: 3 functions, 39 variables, 40 agent events captured. Eval: A (100/100). Playback + summarize work. Zero bugs.
+3. **MCP registry listing and Claude Code optimization** — With 16,670+ MCP servers and Claude Code at 63% developer adoption, getting listed on the official MCP registry (registry.modelcontextprotocol.io) and mcp.so is a high-leverage distribution move. Ensure our MCP server conforms to registry requirements, optimize tool descriptions for agent consumption, and test the full agent workflow (init → run → get_recommended_actions → heal → verify) end-to-end in Claude Code.
 
-2. **Test on a real CrewAI multi-agent crew** — now that pydantic is fixed, test with a real CrewAI crew that has multiple agents delegating tasks. Verify event bus tracing captures crew/agent/task lifecycle correctly.
+4. **Onboarding: progressive disclosure for 70+ commands** — New users see 70+ commands and don't know where to start. Implement `trickle help <topic>` with grouped command discovery (e.g., `trickle help debug`, `trickle help types`, `trickle help agents`). Add shell completion scripts (bash/zsh) so tab-complete works. The first 5 minutes determine adoption — make them guided, not overwhelming.
 
-3. **LangGraph checkpointer tracing** — SHIPPED (0.2.41): Patches BaseCheckpointSaver put/get/get_tuple/list. Writes checkpoint_put/checkpoint_get to memory.jsonl.
-
-4. **`trickle init` for Python projects** — VERIFIED: Detected FastAPI, created .pyi stubs, CLAUDE.md with updated commands, MCP settings.
-
-5. **Performance profiling** — VERIFIED: 10K observations + 1K LLM calls + 500 agent events. All commands <500ms. No bottlenecks.
+5. **Browser and frontend instrumentation** — React/Next.js/React Native usecases exist in docs but actual browser-side instrumentation is minimal. Frontend developers are a huge audience (the "backend ships faster than they document" pain point is universal). Add React component render tracking, state mutation capture (useState/useReducer), and network waterfall visualization. The Vite plugin and Next.js plugin exist — extend them to capture meaningful frontend observability data.
 </focus point>
 
 this is just an example, please look at usecases directory for the customer journey and add

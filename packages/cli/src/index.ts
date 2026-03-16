@@ -250,10 +250,13 @@ program
   .command("test [command...]")
   .description("Run tests with observability (default) or generate test files (--generate)")
   .option("--generate", "Generate test file from observed routes instead of running tests")
+  .option("--unit", "Generate function-level unit tests instead of API route tests (with --generate)")
   .option("--json", "Structured JSON output for agent consumption")
   .option("-o, --out <path>", "Write tests to a file (with --generate)")
-  .option("--framework <name>", "Test framework: vitest or jest (with --generate)")
+  .option("--framework <name>", "Test framework: vitest, jest, or pytest (with --generate)")
   .option("--base-url <url>", "Base URL for API requests (with --generate)")
+  .option("--function <name>", "Filter by function name (with --generate --unit)")
+  .option("--module <name>", "Filter by module name (with --generate --unit)")
   .action(async (commandParts: string[], opts) => {
     if (opts.generate) {
       await testGenCommand(opts);

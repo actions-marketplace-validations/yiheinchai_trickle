@@ -300,6 +300,31 @@ def _flush_cloud_buffer() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Public flush
+# ---------------------------------------------------------------------------
+
+def flush(timeout: float = 5.0) -> None:
+    """Force-send all queued observations immediately.
+
+    Blocks until the queue is drained or *timeout* seconds elapse.
+    Useful before ``sys.exit()`` or at the end of short-lived scripts
+    to ensure all captured data reaches the backend.
+    """
+    if _local_mode:
+        return  # local mode writes synchronously in enqueue()
+
+    _ensure_worker()
+
+    # Wait for queue to drain
+    deadline = time.monotonic() + timeout
+    while not _queue.empty() and time.monotonic() < deadline:
+        time.sleep(0.1)
+
+    # Also flush cloud buffer
+    _flush_cloud_buffer()
+
+
+# ---------------------------------------------------------------------------
 # Shutdown hook
 # ---------------------------------------------------------------------------
 

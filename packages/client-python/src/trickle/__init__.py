@@ -1,5 +1,5 @@
 from .decorator import trickle
-from .transport import configure
+from .transport import configure, flush
 from .instrument import instrument, instrument_fastapi, instrument_flask, instrument_django
 from .observe import observe, observe_fn
 from .progress import progress
@@ -7,6 +7,7 @@ from .progress import progress
 __all__ = [
     "trickle",
     "configure",
+    "flush",
     "instrument",
     "instrument_fastapi",
     "instrument_flask",

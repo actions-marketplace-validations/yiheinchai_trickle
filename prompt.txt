@@ -1,64 +1,10 @@
 BEFORE DOING ANYTHING, read principles.md. It governs all work on this project.
 
-/loop 30min BUILD SOMETHING REAL, USE TRICKLE, FIX WHAT'S BROKEN.
+Three agent roles exist. Read the one that matches your task:
+- agents/director.md — setting project direction, updating mission.md focus points
+- agents/ic.md — fixing specific gaps from mission.md focus points
+- agents/user.md — building real projects using trickle as a development tool
 
-  You are not building trickle features. You are a developer working on a
-  real project, and trickle is your tool. The only way to improve trickle
-  is to use it and fix what doesn't work.
+/loop 30min USER AGENT: Read agents/user.md, then build something real using trickle.
 
-  WORKFLOW:
-  1. Pick a real coding task on an UNFAMILIAR codebase or dataset. Examples:
-     - Clone a Python ML project and try to get it working with new data
-     - Pick a repo from ~/Documents/dev/ and try to fix a bug or add a feature
-     - Download a dataset you've never seen and write code to process it
-     - Clone an open-source project and try to understand how it works
-
-  2. Use trickle throughout your development:
-     - `trickle run python your_script.py` to run your code
-     - `trickle hints` to see runtime types of every variable
-     - `trickle hints --errors` when something crashes — read the output
-       and use it to understand what went wrong
-     - `trickle vars` to inspect captured variables
-
-  3. Pay attention to where trickle FAILS YOU:
-     - Did a type show as "unknown" when you know what it should be?
-     - Did the error output give you enough context to fix the bug?
-     - Was the error line number correct?
-     - Were the sample values helpful or truncated/useless?
-     - Was any output slow?
-     - Did you have to fall back to print() because trickle didn't capture
-       something you needed?
-
-  4. Fix what failed. This is the only way to add trickle features.
-     The gap between "what trickle showed me" and "what I needed to see"
-     IS the feature to build.
-
-  5. After fixing, re-run your project to verify the output is now useful.
-     Commit and push. Publish affected packages.
-
-  DO NOT:
-  - "Think of a feature" — features come from usage, not imagination
-  - Build integrations nobody asked for (webhooks, compliance, RBAC)
-  - Add CLI commands without first using the existing ones on real code
-  - Mark anything as done without showing the before/after output
-
-  The goal is NOT to improve trickle. The goal is to build something real
-  and let trickle's gaps reveal themselves naturally.
-
-
-/loop 20min DIRECTOR: Read principles.md, then review the current state.
-
-  Your job is to set direction based on OBSERVED gaps, not market research.
-
-  1. Run `trickle hints` and `trickle hints --errors` on a real codebase
-  2. Look at the output — what's wrong, missing, or unhelpful?
-  3. Update the focus points in mission.md (max 3) based on what you found
-  4. Only edit within <focus point> tags
-  5. Keep <higher directive> the same unless the user asks you to change it
-
-  Focus points must be concrete and testable:
-    GOOD: "trickle hints shows 'unknown' for pandas DataFrames — fix type inference"
-    BAD:  "improve Python API completeness"
-
-  If all focus points are done, run trickle on a new codebase to find new ones.
-  Do NOT invent focus points from imagination.
+/loop 20min DIRECTOR: Read agents/director.md, then review and update mission.md focus points.

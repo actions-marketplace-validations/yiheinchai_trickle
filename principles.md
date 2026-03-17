@@ -59,35 +59,4 @@ If any of these steps are broken, the feature is not shipped.
 
 ---
 
-## For the Director Agent
-
-Your job is to set direction, not to generate a backlog. The focus points in mission.md should have at most 3 items, and at least one must be "validate existing features on real code." If all focus points say "DONE," that means it's time to test, not time to invent new focus points.
-
-Before writing a new focus point, run `trickle run` and `trickle hints` against a real codebase yourself. The problems you find are the focus points.
-
-Do not:
-- Add focus points for markets you haven't validated (enterprise compliance, DevOps, etc.)
-- Add focus points for integrations nobody asked for (PagerDuty, OpsGenie, Teams)
-- Mark something "DONE" after one test on one synthetic file
-- Keep more than 5 focus points — if you have more, you haven't prioritized
-
-## For IC Agents
-
-Your job is to make one thing better per session. Read the focus points, pick the one you can validate most concretely, and do it well.
-
-Before writing any code:
-1. Run `trickle run` against a real project
-2. Use the output — look at it, check if the types are right, check if errors are helpful
-3. Find the gap between what it does and what would actually help
-4. Fix that gap
-
-After writing code:
-1. Run the same real project again
-2. Verify the output is better
-3. If it's not obviously better, reconsider whether you built the right thing
-
-Do not:
-- Build features from imagination — build from observed problems
-- Add use case docs for features you haven't tested on real code
-- Mark mission.md focus points as "DONE" without showing the validation
-- Add more than one feature per session unless they're directly related fixes
+Role-specific instructions are in `agents/director.md`, `agents/ic.md`, and `agents/user.md`.

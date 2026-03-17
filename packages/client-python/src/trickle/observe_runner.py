@@ -361,20 +361,26 @@ def _quick_type_sample(val):
         return {"kind": "object", "properties": props, "class_name": cn}, f'{cn}({", ".join(parts)})'
     if isinstance(val, (list, tuple)):
         items = []
-        for item in val[:20]:
+        for item in val[:5]:  # limit to 5 for speed (tensors are slow to stringify)
             if item is None or isinstance(item, (bool, int, float)):
                 items.append(item)
             elif isinstance(item, str):
                 items.append(item[:80])
+            elif hasattr(item, "shape") and hasattr(item, "dtype"):
+                # Fast path for tensors — don't call str() which prints all values
+                s = f"{type(item).__name__}(shape={list(item.shape)}, dtype={item.dtype})"
+                items.append(s)
             else:
-                items.append(str(item)[:80])
-        if len(val) > 20:
+                items.append(type(item).__name__)
+        if len(val) > 5:
             items.append(f"... ({len(val)} total)")
         elem_name = "unknown"
         if val and isinstance(val[0], str):
             elem_name = "string"
         elif val and isinstance(val[0], (int, float)):
             elem_name = "number"
+        elif val and hasattr(val[0], "shape"):
+            elem_name = type(val[0]).__name__
         return {"kind": "array", "element": {"kind": "primitive", "name": elem_name}}, items
     if isinstance(val, dict):
         d = {}

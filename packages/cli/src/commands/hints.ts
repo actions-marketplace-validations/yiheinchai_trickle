@@ -16,6 +16,7 @@ import * as path from "path";
 
 export interface HintsOptions {
   values?: boolean;
+  errors?: boolean;
 }
 
 interface TypeNode {
@@ -38,6 +39,8 @@ interface VarObservation {
   type: TypeNode;
   sample?: unknown;
   funcName?: string;
+  error?: string;
+  errorLine?: number;
 }
 
 function typeToString(node: TypeNode): string {
@@ -124,17 +127,35 @@ export async function hintsCommand(
     process.exit(1);
   }
 
-  // Load and deduplicate variable observations (last wins per file:line:varName)
+  // Load observations from variables.jsonl
   const obsMap = new Map<string, VarObservation>();
+  const errorSnaps: VarObservation[] = [];
+  const targetKinds = opts.errors ? ["error_snapshot"] : ["variable"];
+
   for (const line of fs.readFileSync(varsFile, "utf-8").split("\n").filter(Boolean)) {
     try {
       const v = JSON.parse(line) as VarObservation;
-      if (v.kind !== "variable") continue;
-      const key = `${v.file}:${v.line}:${v.varName}`;
-      obsMap.set(key, v);
+      if (v.kind === "variable") {
+        const key = `${v.file}:${v.line}:${v.varName}`;
+        obsMap.set(key, v);
+      }
+      if (v.kind === "error_snapshot") {
+        errorSnaps.push(v);
+      }
     } catch {}
   }
-  const vars = [...obsMap.values()];
+
+  // In error mode, use error snapshots; look up original assignment lines from regular vars
+  let vars: VarObservation[];
+  if (opts.errors) {
+    if (errorSnaps.length === 0) {
+      console.error("No error snapshots found. Run code that produces an error first.");
+      process.exit(1);
+    }
+    vars = errorSnaps;
+  } else {
+    vars = [...obsMap.values()];
+  }
 
   // Filter by target file
   let filtered = vars;
@@ -149,6 +170,20 @@ export async function hintsCommand(
   if (filtered.length === 0) {
     console.error(targetFile ? `No observations found for "${targetFile}".` : "No observations found.");
     process.exit(1);
+  }
+
+  // In error mode, resolve each snapshot var to its original assignment line
+  // by looking up the regular variable observations
+  if (opts.errors) {
+    for (const snap of filtered) {
+      // Find matching regular observation to get original line
+      for (const [, obs] of obsMap) {
+        if (obs.file === snap.file && obs.varName === snap.varName) {
+          snap.line = obs.line; // use original assignment line
+          break;
+        }
+      }
+    }
   }
 
   // Group by file
@@ -217,14 +252,25 @@ export async function hintsCommand(
           if (!lineObs.has(v.line)) lineObs.set(v.line, new Map());
           lineObs.get(v.line)!.set(v.varName, v);
         }
-        console.log(`# ${relPath}`);
+        // Print header with error info if in error mode
+        const errorMsg = fileVars.find(v => v.error)?.error;
+        const errorLine = fileVars.find(v => v.errorLine)?.errorLine;
+        if (opts.errors && errorMsg) {
+          console.log(`# ${relPath} — ERROR`);
+          console.log(`# ${errorMsg}${errorLine ? ` (line ${errorLine})` : ""}`);
+          console.log(`# Variables at crash time:`);
+        } else {
+          console.log(`# ${relPath}`);
+        }
         console.log("```python");
         for (const [lineNo, obs] of [...lineObs.entries()].sort((a, b) => a[0] - b[0])) {
           for (const v of obs.values()) {
             const typeStr = typeToString(v.type);
             const scope = v.funcName ? ` (in ${v.funcName})` : "";
-            if (opts.values && v.sample !== undefined) {
-              console.log(`${v.varName}: ${typeStr} = ${formatSample(v.sample)}${scope}`);
+            const sampleStr = formatSample(v.sample);
+            // In error mode, always show values (crash-time state)
+            if ((opts.errors || opts.values) && v.sample !== undefined) {
+              console.log(`${v.varName}: ${typeStr} = ${sampleStr}${scope}`);
             } else {
               console.log(`${v.varName}: ${typeStr}${scope}`);
             }
@@ -247,7 +293,16 @@ export async function hintsCommand(
       lineObs.get(v.line)!.set(v.varName, v);
     }
 
-    console.log(`# ${relPath}`);
+    // Print header with error info if in error mode
+    const errMsg = fileVars.find(v => v.error)?.error;
+    const errLine = fileVars.find(v => v.errorLine)?.errorLine;
+    if (opts.errors && errMsg) {
+      console.log(`# ${relPath} — ERROR`);
+      console.log(`# ${errMsg}${errLine ? ` (line ${errLine})` : ""}`);
+      console.log(`# Variables at crash time:`);
+    } else {
+      console.log(`# ${relPath}`);
+    }
     console.log("```python");
 
     for (let i = 0; i < sourceLines.length; i++) {
@@ -302,9 +357,9 @@ export async function hintsCommand(
           if (isFuncParam && afterVar.startsWith(":")) continue;
         }
 
-        // Build the hint string
+        // Build the hint string — error mode always shows values (crash-time state)
         let hint: string;
-        if (opts.values && v.sample !== undefined && v.sample !== null) {
+        if ((opts.errors || opts.values) && v.sample !== undefined && v.sample !== null) {
           const sampleStr = formatSample(v.sample);
           hint = sampleStr ? `: ${typeStr} = ${sampleStr}` : `: ${typeStr}`;
         } else {

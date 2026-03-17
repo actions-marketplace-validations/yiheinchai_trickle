@@ -540,7 +540,8 @@ program
   .command("hints [file]")
   .description("Output source code with inline type hints from runtime observations (for AI agents)")
   .option("--values", "Include sample values alongside types")
-  .action(async (file: string | undefined, opts: { values?: boolean }) => {
+  .option("--errors", "Show error mode — variables at crash time with values that caused the error")
+  .action(async (file: string | undefined, opts: { values?: boolean; errors?: boolean }) => {
     await hintsCommand(file, opts);
   });
 

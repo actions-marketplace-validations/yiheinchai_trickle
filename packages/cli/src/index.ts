@@ -44,6 +44,7 @@ import { mcpServerCommand } from "./commands/mcp-server";
 import { rnCommand } from "./commands/rn";
 import { nextCommand } from "./commands/next";
 import { pythonCommand } from "./commands/python";
+import { hintsCommand } from "./commands/hints";
 
 const program = new Command();
 
@@ -532,6 +533,15 @@ program
   .option("--tensors", "Show only tensor/ndarray variables")
   .action(async (opts) => {
     await varsCommand(opts);
+  });
+
+// trickle hints
+program
+  .command("hints [file]")
+  .description("Output source code with inline type hints from runtime observations (for AI agents)")
+  .option("--values", "Include sample values alongside types")
+  .action(async (file: string | undefined, opts: { values?: boolean }) => {
+    await hintsCommand(file, opts);
   });
 
 // trickle layers

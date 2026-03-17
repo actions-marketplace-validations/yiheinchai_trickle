@@ -1,19 +1,29 @@
-# Trickle – See PyTorch tensor shapes inline in VSCode as you code
+<p align="center">
+  <h1 align="center">trickle</h1>
+  <p align="center">
+    Runtime type annotations for Python — see tensor shapes, variable types, and crash-time values inline as you code.
+  </p>
+  <p align="center">
+    <a href="https://pypi.org/project/trickle-observe/"><img src="https://img.shields.io/pypi/v/trickle-observe?label=pypi&color=blue" alt="PyPI"></a>
+    <a href="https://www.npmjs.com/package/trickle-cli"><img src="https://img.shields.io/npm/v/trickle-cli?label=npm&color=red" alt="npm"></a>
+    <a href="https://marketplace.visualstudio.com/items?itemName=yiheinchai.trickle-vscode"><img src="https://img.shields.io/visual-studio-marketplace/v/yiheinchai.trickle-vscode?label=vscode&color=purple" alt="VS Marketplace"></a>
+    <a href="https://pypi.org/project/trickle-observe/"><img src="https://img.shields.io/pypi/pyversions/trickle-observe" alt="Python"></a>
+    <a href="https://github.com/yiheinchai/trickle/blob/main/LICENSE"><img src="https://img.shields.io/github/license/yiheinchai/trickle" alt="License"></a>
+  </p>
+</p>
 
-Runtime context for every variable in your code — types, shapes, values, error state — without adding print statements.
+---
 
-It's for the development process: when you're working with unfamiliar data, iterating on code, and need to understand what's actually flowing through each line.
-
-For example: Pytorch tensor shape annotations from runtime
+No more `print(x.shape)`. Run your code, see every variable's type and value inline — in VSCode or in the terminal.
 
 ![Pytorch tensor shape annotations from runtime](image.png)
 
-## Installation
+## Install
 
 ```bash
-pip install trickle-observe
-npm install -g trickle-cli
-code --install-extension yiheinchai.trickle-vscode
+pip install trickle-observe                        # Python runtime tracer
+npm install -g trickle-cli                         # CLI (trickle run, trickle hints)
+code --install-extension yiheinchai.trickle-vscode  # VSCode inline hints
 ```
 
 ## See tensor shapes flow through your model
@@ -25,6 +35,8 @@ def forward(self, x: Tensor[32, 784] float32):
     x: Tensor[32, 10] float32  = self.fc2(x)
     return x
 ```
+
+Every layer, every shape, every dtype — visible without adding a single print statement.
 
 ## See exactly what caused a crash
 
@@ -43,36 +55,9 @@ for file_path: string = "demographics.txt" in data_file_paths:
 
 `file_path` is `"demographics.txt"`. `patient_gait_data` is `string[]` — headers, not numbers. Bug found in seconds.
 
-## Try it
+## Quick start
 
-There's a demo project in `demo/` you can run immediately:
-
-```bash
-# Script
-trickle run python demo/demo.py
-trickle hints demo/demo.py
-
-# Jupyter notebook
-# Open demo/demo.ipynb in VSCode, run the cells
-```
-
-## Setup
-
-```bash
-pip install trickle-observe          # runtime tracer
-npm install -g trickle-cli           # CLI
-code --install-extension yiheinchai.trickle-vscode  # VSCode inline hints
-```
-
-## Jupyter Notebooks
-
-```python
-%load_ext trickle                    # first cell, then run your code
-```
-
-Types appear inline in VSCode immediately after each cell runs.
-
-## Scripts
+### Scripts
 
 ```bash
 trickle run python train.py          # run with tracing
@@ -80,9 +65,26 @@ trickle hints                        # source with inline types
 trickle hints --errors               # crash-time values + error underline
 ```
 
+### Jupyter Notebooks
+
+```python
+%load_ext trickle                    # first cell, then run your code
+```
+
+Types appear inline in VSCode immediately after each cell runs.
+
+### Try the demo
+
+```bash
+git clone https://github.com/yiheinchai/trickle.git
+cd trickle
+trickle run python demo/demo.py
+trickle hints demo/demo.py
+```
+
 ## For AI agents
 
-Two interfaces: VSCode inline hints for human developers, and `trickle hints` CLI output for AI agents that need runtime context in the terminal.
+`trickle hints` outputs source with inline types in the terminal — no VSCode needed.
 
 ```bash
 trickle hints --errors --show types        # types only
@@ -92,16 +94,19 @@ trickle hints --errors --show both         # both (default in error mode)
 
 ## Use cases
 
-- [ML Engineer](usecases/ml-engineer.md) — tensor shapes, training loops, Jupyter notebooks
-- [AI Agent](usecases/ai-agent.md) — runtime context in the terminal for debugging unfamiliar code
+- **[ML Engineer](usecases/ml-engineer.md)** — tensor shapes, training loops, Jupyter notebooks
+- **[AI Agent](usecases/ai-agent.md)** — runtime context in the terminal for debugging unfamiliar code
 
 ## How it works
 
 Trickle rewrites your Python source via AST transformation before execution. After every variable assignment, it inserts a lightweight call that captures the type and a sample value, then writes to `.trickle/variables.jsonl`. The VSCode extension watches this file and renders inline hints.
 
-Only your code is traced — stdlib, site-packages, torch/numpy internals are skipped. No code changes to your files. No decorators. No type annotations required.
+- Only your code is traced — stdlib, site-packages, torch/numpy internals are skipped
+- No code changes to your files. No decorators. No type annotations required
+- Same value at the same line is deduplicated — loops don't explode the data file
 
-## Key features Documentation
+## Documentation
 
-- [Key Features](features.md)
-- [Full Features](archive/pre_steve_jobs_features.md)
+- [Features](features.md)
+- [ML Engineer Guide](usecases/ml-engineer.md)
+- [AI Agent Guide](usecases/ai-agent.md)

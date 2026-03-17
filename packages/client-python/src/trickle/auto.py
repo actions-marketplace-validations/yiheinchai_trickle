@@ -168,7 +168,7 @@ except Exception:
 from trickle._auto_codegen import generate_types, inject_python_types, generate_coverage_report, generate_type_summary  # noqa: E402
 
 _debug = os.environ.get("TRICKLE_DEBUG", "").lower() in ("1", "true", "yes")
-_stubs_enabled = os.environ.get("TRICKLE_STUBS", "1").lower() not in ("0", "false")
+_stubs_enabled = os.environ.get("TRICKLE_STUBS", "0").lower() not in ("0", "false")
 _last_function_count = 0
 _generation_count = 0
 _stop_event = threading.Event()

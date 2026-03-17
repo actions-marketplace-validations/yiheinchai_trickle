@@ -222,7 +222,7 @@ def main() -> None:
             _user_code_error = exc
 
         # Generate .pyi stubs from observations (unless TRICKLE_STUBS=0)
-        _stubs_enabled = os.environ.get("TRICKLE_STUBS", "1").lower() not in ("0", "false")
+        _stubs_enabled = os.environ.get("TRICKLE_STUBS", "0").lower() not in ("0", "false")
         if _stubs_enabled:
             try:
                 from trickle._auto_codegen import generate_types
@@ -301,7 +301,7 @@ def main() -> None:
             _user_code_error = exc
 
     # Generate .pyi stubs from observations (unless TRICKLE_STUBS=0)
-    _stubs_enabled = os.environ.get("TRICKLE_STUBS", "1").lower() not in ("0", "false")
+    _stubs_enabled = os.environ.get("TRICKLE_STUBS", "0").lower() not in ("0", "false")
     if _stubs_enabled:
         try:
             from trickle._auto_codegen import generate_types

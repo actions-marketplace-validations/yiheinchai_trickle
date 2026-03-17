@@ -459,8 +459,8 @@ async function executeSingleRun(
 
   const { generateLocalStubs, generateFromJsonl, readObservations } = await import("../local-codegen");
 
-  // Check if stub generation is enabled (TRICKLE_STUBS=0 disables .pyi/.d.ts files)
-  const stubsEnabled = (env.TRICKLE_STUBS || process.env.TRICKLE_STUBS || "1").toLowerCase() !== "0";
+  // Check if stub generation is enabled (opt-in: TRICKLE_STUBS=1 enables .pyi/.d.ts files)
+  const stubsEnabled = (env.TRICKLE_STUBS || process.env.TRICKLE_STUBS || "0").toLowerCase() !== "0";
 
   // Start live type generation — types update while the process runs
   let liveTypesStop: (() => void) | null = null;

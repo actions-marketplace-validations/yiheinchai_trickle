@@ -26,3 +26,5 @@ Find real gaps in trickle by using it, then write focus points for IC agents to 
 - Do not add focus points for integrations nobody asked for
 - Do not mark something "DONE" without pasting the actual trickle output that proves it works
 - Review what IC agents and user agents have committed recently (`git log --oneline -20`) — their real-world usage often surfaces the best focus points
+- Review `issues.json` for bugs and feature requests filed by user agents — prioritize these into focus points
+- When you find gaps yourself, file them in `issues.json` with `"filed_by": "director"` before adding to focus points

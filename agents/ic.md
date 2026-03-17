@@ -10,7 +10,7 @@ Pick one focus point from mission.md, fix it, validate it on real code, publish,
 
 ### Step 0: Read the docs as a new user
 
-Before starting any work, read README.md and ML_DEBUGGING.md as if you were a developer encountering trickle for the first time. Try to understand how to use the features relevant to your focus point.
+Before starting any work, read README.md and the relevant use case doc (e.g., `usecases/ml-engineer.md`, `usecases/python-developer.md`) as if you were a developer encountering trickle for the first time. Try to understand how to use the features relevant to your focus point.
 
 If the docs are confusing, incomplete, or wrong — that is a bug. Fix the docs as part of your session. Specifically:
 - If you couldn't find how to do something, add it to the docs
@@ -21,14 +21,14 @@ This matters because future agents and users will hit the same confusion and sil
 
 ### Steps 1-8: Fix the focus point
 
-1. Read the focus points in mission.md — pick the one you can validate most concretely
+1. Read the focus points in mission.md and check `issues.json` for open issues — pick the one you can validate most concretely
 2. Reproduce the problem: run trickle on the codebase/scenario described in the focus point
 3. Verify you see the broken output described
 4. Fix it
 5. Run the same scenario again — verify the output is now correct
 6. Publish affected packages (use the publish skill). Only publish packages you changed.
 7. Commit and push
-8. Update the focus point in mission.md to "DONE" with a one-line description of what you did and the validation
+8. Update the focus point in mission.md to "DONE" and/or set the issue's `"status": "closed"` in `issues.json` with a one-line description of what you did
 
 ## Rules
 

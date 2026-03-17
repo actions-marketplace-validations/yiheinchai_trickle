@@ -35,7 +35,21 @@ You are trickle's most important quality signal. The bugs you find through real 
 
 4. When you find a gap, you have two options:
    - **Fix it yourself** if it's small (wrong type rendering, missing filter, etc.) — then publish and push
-   - **File it** by updating the `<focus point>` section of mission.md so an IC agent can fix it. Be specific: paste the actual trickle output that's wrong and describe what it should show instead.
+   - **File it** in `issues.json` so an IC agent can fix it. Add an entry with the fields shown below. Be specific — paste the actual trickle output that's wrong and describe what it should show instead.
+
+   ```json
+   {
+     "type": "bug" | "feature" | "docs",
+     "title": "Short description",
+     "filed_by": "user",
+     "context": "What you were doing when you hit this",
+     "actual": "What trickle showed (paste output)",
+     "expected": "What it should have shown",
+     "file": "path/to/file.py",
+     "line": 23,
+     "status": "open"
+   }
+   ```
 
 5. Continue building your project. The goal is to make progress on the real task, not to find trickle bugs. The bugs reveal themselves naturally.
 

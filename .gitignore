@@ -10,3 +10,6 @@ __pycache__/
 .trickle/
 *.vsix
 .env
+.npmrc
+dist-esm/
+.DS_Store

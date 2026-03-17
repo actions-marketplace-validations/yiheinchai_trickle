@@ -3913,12 +3913,55 @@ const KNOWN_TYPE_MEMBERS: Record<string, { props: string[]; methods: string[] }>
   },
 };
 
+/**
+ * Find the enclosing function name for a given line in a Python document.
+ * Returns undefined if the line is at module/cell top level.
+ */
+function findEnclosingFunction(document: vscode.TextDocument, lineIdx: number): string | undefined {
+  for (let i = lineIdx; i >= 0; i--) {
+    const text = document.lineAt(i).text;
+    const m = text.match(/^\s*(?:async\s+)?def\s+(\w+)\s*\(/);
+    if (m) {
+      // Check indentation: if the target line is indented more than the def, it's inside
+      const defIndent = text.search(/\S/);
+      if (i === lineIdx) return m[1]; // cursor is on the def line itself
+      const targetIndent = document.lineAt(lineIdx).text.search(/\S/);
+      if (targetIndent > defIndent) return m[1];
+      // If same or less indent, this def doesn't contain our line
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find the observation for a variable name, scoped to the enclosing function.
+ * Falls back to module-level observations if no function-scoped match.
+ */
+function findScopedObservation(
+  lineMap: Map<number, VariableObservation[]>,
+  varName: string,
+  funcName: string | undefined,
+): VariableObservation | undefined {
+  let funcMatch: VariableObservation | undefined;
+  let moduleMatch: VariableObservation | undefined;
+  for (const [, observations] of lineMap) {
+    for (const o of observations) {
+      if (o.varName !== varName) continue;
+      if (funcName && o.funcName === funcName) {
+        funcMatch = o;
+      } else if (!o.funcName) {
+        moduleMatch = o;
+      }
+    }
+  }
+  return funcMatch || (funcName ? undefined : moduleMatch);
+}
+
 class TrickleCompletionProvider implements vscode.CompletionItemProvider {
   provideCompletionItems(
     document: vscode.TextDocument,
     position: vscode.Position,
   ): vscode.CompletionItem[] | undefined {
-    // Get the text before the cursor to find the variable name
     const lineText = document.lineAt(position.line).text;
     const textBefore = lineText.substring(0, position.character);
 
@@ -3927,33 +3970,24 @@ class TrickleCompletionProvider implements vscode.CompletionItemProvider {
     if (!dotMatch) return undefined;
     const varName = dotMatch[1];
 
-    // Look up this variable in trickle observations
     const lineMap = getLineMapForDocument(document);
     if (!lineMap) return undefined;
 
-    // Find the observation for this variable (search all lines)
-    let obs: VariableObservation | undefined;
-    for (const [, observations] of lineMap) {
-      for (const o of observations) {
-        if (o.varName === varName) {
-          obs = o;
-        }
-      }
-    }
+    // Scope to the enclosing function
+    const funcName = findEnclosingFunction(document, position.line);
+    const obs = findScopedObservation(lineMap, varName, funcName);
     if (!obs) return undefined;
 
-    // Resolve the effective type (unwrap arrays for element access, etc.)
     const typeNode = obs.type;
     const items: vscode.CompletionItem[] = [];
 
-    // 1. Check known class types
     const className = resolveClassName(typeNode);
     if (className && KNOWN_TYPE_MEMBERS[className]) {
       const known = KNOWN_TYPE_MEMBERS[className];
       for (const prop of known.props) {
         const item = new vscode.CompletionItem(prop, vscode.CompletionItemKind.Property);
         item.detail = `(trickle) ${className}.${prop}`;
-        item.sortText = `0_${prop}`; // sort before other completions
+        item.sortText = `0_${prop}`;
         items.push(item);
       }
       for (const method of known.methods) {
@@ -3964,10 +3998,8 @@ class TrickleCompletionProvider implements vscode.CompletionItemProvider {
       }
     }
 
-    // 2. Add observed properties from the type node itself
     if (typeNode.kind === 'object' && typeNode.properties) {
       for (const [key, valType] of Object.entries(typeNode.properties)) {
-        // Skip internal properties and ones already added from known types
         if (key.startsWith('__')) continue;
         if (className && KNOWN_TYPE_MEMBERS[className]) {
           const known = KNOWN_TYPE_MEMBERS[className];
@@ -4012,15 +4044,18 @@ class TrickleSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
     const lineMap = getLineMapForDocument(document);
     if (!lineMap) return undefined;
 
-    // Build a map: varName → className for all observed variables
-    const varTypes: Map<string, string> = new Map();
+    // Build scope-aware map: "funcName:varName" → className
+    const scopedVarTypes: Map<string, string> = new Map();
     for (const [, observations] of lineMap) {
       for (const obs of observations) {
         const cls = resolveClassName(obs.type);
-        if (cls) varTypes.set(obs.varName, cls);
+        if (cls) {
+          const scopeKey = `${obs.funcName || ''}:${obs.varName}`;
+          scopedVarTypes.set(scopeKey, cls);
+        }
       }
     }
-    if (varTypes.size === 0) return undefined;
+    if (scopedVarTypes.size === 0) return undefined;
 
     const builder = new vscode.SemanticTokensBuilder(
       new vscode.SemanticTokensLegend(
@@ -4029,9 +4064,15 @@ class TrickleSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
       ),
     );
 
-    // Scan document for `varName.attr` patterns
+    // Build a set of all variable names that have ANY observation
+    const allVarNames = new Set<string>();
+    for (const key of scopedVarTypes.keys()) {
+      allVarNames.add(key.split(':')[1]);
+    }
+    if (allVarNames.size === 0) return undefined;
+
     const varPattern = new RegExp(
-      `\\b(${[...varTypes.keys()].map(escapeRegex).join('|')})\\.(\\w+)`,
+      `\\b(${[...allVarNames].map(escapeRegex).join('|')})\\.(\\w+)`,
       'g',
     );
 
@@ -4042,14 +4083,18 @@ class TrickleSemanticTokensProvider implements vscode.DocumentSemanticTokensProv
       while ((match = varPattern.exec(lineText)) !== null) {
         const varName = match[1];
         const attrName = match[2];
-        const cls = varTypes.get(varName);
+
+        // Resolve class using function scope
+        const funcName = findEnclosingFunction(document, lineIdx);
+        const scopeKey = `${funcName || ''}:${varName}`;
+        const cls = scopedVarTypes.get(scopeKey)
+          || (!funcName ? scopedVarTypes.get(`:${varName}`) : undefined);
         if (!cls) continue;
 
         const known = KNOWN_TYPE_MEMBERS[cls];
         if (!known) continue;
 
-        // Determine token type
-        const attrStart = match.index + varName.length + 1; // skip "varName."
+        const attrStart = match.index + varName.length + 1;
         if (known.methods.includes(attrName)) {
           builder.push(lineIdx, attrStart, attrName.length, TOKEN_TYPE_METHOD);
         } else if (known.props.includes(attrName)) {

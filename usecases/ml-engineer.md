@@ -1144,3 +1144,117 @@ Sampled at call #20 by trickle
 ```
 
 **How it works:** `trickle.auto` patches `torch.nn.functional.softmax`. When softmax is called on a 4-D tensor with shape `(B, H, T, T)` — the signature of self-attention weights — the hook captures the result. It computes per-head entropy (`H = -Σ p·log(p)`), classifies heads as dead (entropy > 95% of log(T)) or sharp (entropy < 10% of log(T)), and records mean max-attended position and diagonal attention fraction. Rate-limited to every 20 calls per line (`TRICKLE_ATT_EVERY` to tune). Works with any attention implementation that uses `F.softmax`: nanoGPT, custom transformers, nn.MultiheadAttention.
+
+---
+
+## Use Case 28: Error Mode in Notebooks
+
+When your code crashes in a Jupyter cell, trickle captures all variables at the moment of the crash and shows them as inlay hints on their original assignment lines — not stacked on the error line. This means you see each variable's value right where it was defined, making it immediately obvious which assignment introduced the bad data.
+
+**Cell 1:**
+```python
+%load_ext trickle
+```
+
+**Cell 2:**
+```python
+import pandas as pd
+
+file_path = "demographics.txt"
+patient_gait_data = open(file_path).readlines()[:3]
+ages = [int(line.split(",")[1]) for line in patient_gait_data]
+mean_age = sum(ages) / len(ages)
+```
+
+If the cell crashes (say, a malformed line causes `int()` to fail), trickle captures every variable at crash time and pins hints to their assignment lines:
+
+```python
+file_path = "demographics.txt"                       # → "demographics.txt"
+patient_gait_data = open(file_path).readlines()[:3]  # → ["Name,Age,Stride\n", "Alice,34,1.2\n", "Bob,NA,1.1\n"]
+ages = [int(line.split(",")[1]) for line in patient_gait_data]  # ✗ ValueError
+```
+
+Variables from list comprehension scopes are captured too — you can see the value of `line` at the time of the crash, not just the outer locals.
+
+**How it works:** The `%load_ext trickle` magic installs a custom exception handler on the IPython shell. When any cell raises an unhandled exception, trickle walks the traceback frames, captures all local variables (including comprehension scope variables like loop iterators), and writes error snapshot records to `.trickle/variables.jsonl` keyed by file and line. The VSCode extension reads these and renders each variable as an inlay hint on the line where it was originally assigned — not on the line that threw the error.
+
+---
+
+## Use Case 29: Error Mode for Scripts (CLI)
+
+For debugging script crashes outside of notebooks, the CLI provides `trickle hints --errors`. When a script fails, trickle captures the variable state at the crash site and displays it in your terminal with source context.
+
+```bash
+trickle hints --errors
+```
+
+Output:
+```
+train.py:47
+~~~~~~~~~~~
+  45 │ batch_size = x.shape[0]         batch_size: 32
+  46 │ hidden_dim = 512                 hidden_dim: 512
+  47 │ logits = model(x)               x: Tensor[32, 512]  model: MLP(512 params)
+     │ ✗ RuntimeError: mat1 and mat2 shapes cannot be multiplied (32x512 and 784x10)
+  48 │ loss = criterion(logits, y)
+  49 │ loss.backward()
+```
+
+The `~~~` underline marks the file and line where the crash occurred. Variable values appear to the right of each source line, showing exactly what state existed when the error was thrown.
+
+**Display modes:**
+
+- `trickle hints --errors --show types` — show only the inferred types (e.g. `Tensor[32, 512] float32`, `integer`)
+- `trickle hints --errors --show values` — show only the runtime values (e.g. `32`, `512`, `"demographics.txt"`)
+- `trickle hints --errors --show both` — show types and values together
+
+This gives you a debugger-like experience for post-mortem analysis without needing to reproduce the crash interactively.
+
+---
+
+## Use Case 30: Runtime Autocomplete
+
+When trickle knows the runtime type of a variable, it provides autocomplete suggestions scoped to that type. For example, if `t` is a `torch.Tensor`, typing `t.` in VSCode triggers completions for `shape`, `dtype`, `view`, `reshape`, `unsqueeze`, `permute`, `contiguous`, and other Tensor methods — based on the actual observed type, not static analysis guesses.
+
+```python
+import trickle.auto
+
+t = torch.randn(32, 784)
+# trickle knows t is Tensor[32, 784] float32
+
+t.  # autocomplete shows: shape, dtype, view, reshape, unsqueeze, permute, ...
+```
+
+**Function-scoped:** Autocomplete is scoped to the function context where the variable was observed. If you have a variable called `t` in `train_step()` that is a Tensor, and another `t` in `preprocess()` that is a string, each function gets the correct completions for its own `t`. They do not interfere with each other.
+
+```python
+def train_step(model, x):
+    t = model(x)       # t is Tensor — autocomplete shows .shape, .view, .reshape, ...
+
+def preprocess(path):
+    t = open(path).read()  # t is str — autocomplete shows .split, .strip, .upper, ...
+```
+
+**How it works:** The variable tracer records each variable's type along with its function scope (module + qualified function name). The VSCode extension registers a `CompletionItemProvider` that looks up the most recent type observation for the variable at the cursor position, filtered by the enclosing function. If a match is found, it returns method and attribute completions for that type.
+
+---
+
+## Use Case 31: Union Type Support
+
+When an array contains tensors with different shapes, trickle now correctly infers the element type as `Tensor` and shows the array as `Tensor[]` instead of falling back to `unknown[]`.
+
+```python
+import trickle.auto
+import torch
+
+layers = [
+    torch.randn(128, 64),    # Tensor[128, 64]
+    torch.randn(64, 32),     # Tensor[64, 32]
+    torch.randn(32, 10),     # Tensor[32, 10]
+]
+# → layers: Tensor[]
+```
+
+Previously, because each element had a different shape (`Tensor[128, 64]` vs `Tensor[64, 32]` vs `Tensor[32, 10]`), the type inferrer could not unify them and fell back to `unknown[]`. Now, trickle recognizes that all elements share the same base type (`Tensor`) and collapses the union to `Tensor[]`.
+
+This applies to any list of same-class objects with differing type parameters — not just tensors. For example, a list of `ndarray` objects with different shapes also shows as `ndarray[]` instead of `unknown[]`.

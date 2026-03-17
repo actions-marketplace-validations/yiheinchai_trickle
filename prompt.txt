@@ -1,12 +1,12 @@
-/loop 10min think of a feature that will improve this project and make it   
-  more useful for developers, and provide real value. the vision is that      
-  with minimal setup (one-liners changes) developers can turn their codebase  
-  to start recording runtime types and bring those runtime types to compile   
-  time so they get types information when they are programming (without       
-  having to explicitly spend time writing the types), so they can develop     
-  code faster because they know exactly the data they are manipulating. Once  
-  you have a feature that you think will be useful to add, implement it in  
-  full, test it e2e in full, and then commit and push (do not coauthor      
+/loop 10min think of a feature that will improve this project and make it
+  more useful for developers, and provide real value. the vision is that
+  with minimal setup (one-liners changes) developers can turn their codebase
+  to start recording runtime types and bring those runtime types to compile
+  time so they get types information when they are programming (without
+  having to explicitly spend time writing the types), so they can develop
+  code faster because they know exactly the data they are manipulating. Once
+  you have a feature that you think will be useful to add, implement it in
+  full, test it e2e in full, and then commit and push (do not coauthor
   claude).
 
 
@@ -33,15 +33,10 @@
   6. Do NOT add features that sound impressive but aren't tested against
      reality. One working feature > ten broken ones.
 
-  The project currently has broken: multi-word command parsing in `trickle run`,
-
-  vitest/vite plugin integration, TypeScript annotate with sample data, and
-  npm publishing setup. Fix these before adding anything new.
-
 
   /loop 10min Think of 1 item to work on that will allow trickle to be used effectively and
   working in the repos in the /dev directory (/Users/yihein.chai/Documents/dev/*), for example for repayment-service/scripts/cpaE2eHappyPath.test.ts.
-  my key goal is not just to capture API types but rather to capture the type of any variable 
+  my key goal is not just to capture API types but rather to capture the type of any variable
   within any piece of code that i am running in that repo so that i can effectively debug.
  currently, i have to either add a bunch of log statements, or use a debugger to step through each line of the code and
  inspect what each variable value is to know where it is failing and which code logic / or which data is not what i expect.
@@ -60,15 +55,15 @@
  please commit and push once that piece of work is completed and fully working.
 
 
-   /loop 5min Think of 1 item to work on ML engineer user case to improve the developer experience. For example, when 
-   the ML engineer first runs the cell in the jupyter notebook, the inline types should appear immediately, rather than 
+   /loop 5min Think of 1 item to work on ML engineer user case to improve the developer experience. For example, when
+   the ML engineer first runs the cell in the jupyter notebook, the inline types should appear immediately, rather than
    the user having to close the notebook, reopen for the inline types to appear. when the engineer changes the code,
    eg. changing the input/output dims of a linear layer, and runs the code, the inline types should update immediately after
    the code is run, basically real time updates. the goal is to allow the ML engineer to iterate quickly to know the shapes
    they are manipulating at any time, and when there is an error, the engineer should be able to trace the shapes,
-   by viewing at the inline hints to quickly know where it is going wrong. this is just an example, please look at usecases directory for the customer journey and add 
-   to it as required by empathising with the user / audience. before you start work, please pull from remote. Once  
-  you have a feature that you think will be useful to add, implement it in  
+   by viewing at the inline hints to quickly know where it is going wrong. this is just an example, please look at usecases directory for the customer journey and add
+   to it as required by empathising with the user / audience. before you start work, please pull from remote. Once
+  you have a feature that you think will be useful to add, implement it in
   full, please test on real code in the ML repos you can find online. for example test on karpathy's gpt-2 implementation.
  please commit and push once that piece of work is completed and fully working. then, please use the publish-skill to publish
 
@@ -79,3 +74,24 @@
 /loop 20min You are the project director of trickle, you goal is too maximise the value trickle provides to the world.
 analyse the current state of the project, do market resesearch, and come up with a vision, direction and focus points for the project.
 edit the mission.md file to reflect that. only edit within the <higher directive> and <focus point> tags, do not change anything outside of those tags. the focus points should follow the general directive, and keep the rest of mission.md the same.
+
+
+/loop 30min REAL-WORLD TESTING WORKFLOW — This is the most valuable type of work.
+  The pattern that produces the best results:
+  1. Pick a REAL codebase (user's own code, or clone an open-source project)
+  2. Run trickle against it: `trickle run python script.py` or `%load_ext trickle` in a notebook
+  3. Look at what trickle actually outputs — are the types right? Are values useful? Is the error mode helpful?
+  4. Find bugs and gaps through real usage (e.g., "union types show as unknown[]", "error snapshots only show on error line not assignment lines", "autocomplete suggests Tensor methods for str variables")
+  5. Fix each issue, test it works, publish and push
+
+  Recent examples of high-value real-world-testing fixes:
+  - Error snapshots captured IPython builtins instead of user variables (list comprehension scope bug)
+  - Error hints stacked on error line instead of showing on each variable's assignment line
+  - union types rendered as "unknown[]" because Python uses "members" not "elements"
+  - Autocomplete/highlighting leaked across function scopes
+  - Script error snapshots didn't work (importing notebook.py failed in script mode)
+  - Line numbers were wrong due to AST unparse reformatting
+  - Serializing lists of tensors was slow (str() prints all tensor values)
+
+  These are the bugs that ONLY get found through real-world usage. Synthetic tests miss them.
+  When you find and fix these issues, update usecases/ docs and ML_DEBUGGING.md.

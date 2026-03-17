@@ -254,6 +254,86 @@ The VSCode extension reads `.trickle/variables.jsonl` and displays the data as i
 | `TRICKLE_OBSERVE_EXCLUDE` | (none) | Comma-separated module patterns to skip |
 | `TRICKLE_DEBUG` | `0` | Set to `1` for verbose debug output |
 
+## Error Mode
+
+When your code crashes, trickle switches to error mode. Instead of stacking all variable info on the error line, it shows crash-time variable values inline on each variable's **assignment line** — so you can see exactly what each variable held when things went wrong.
+
+```python
+x = torch.randn(4, 8)          # → Tensor[4, 8] float32
+w = torch.randn(16, 32)        # → Tensor[16, 32] float32    ← wrong shape
+b = torch.zeros(16)            # → Tensor[16] float32
+out = x @ w.T + b              # RuntimeError: mat1 and mat2 shapes cannot be multiplied (4x8 and 32x16)
+```
+
+Each variable's last-known value before the crash appears on the line where it was assigned, making shape mismatches immediately visible without scrolling or hovering.
+
+To clear error mode annotations and return to normal display, run **Cmd+Shift+P** and select `Trickle: Clear Variables`.
+
+## Error Mode for AI Agents (CLI)
+
+The `trickle hints --errors` command outputs your source code with inline type annotations showing crash-time values, formatted for AI agents and LLMs. The error line is underlined with `~~~` for easy identification.
+
+```bash
+trickle hints --errors
+```
+
+Example output:
+
+```
+train.py
+
+x = torch.randn(4, 8)                          # x: Tensor[4, 8] float32
+w = torch.randn(16, 32)                         # w: Tensor[16, 32] float32
+b = torch.zeros(16)                             # b: Tensor[16] float32
+out = x @ w.T + b                               # RuntimeError: mat1 and mat2 shapes cannot be multiplied (4x8 and 32x16)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+```
+
+You can control what information is shown with the `--show` flag:
+
+- `--show types` — show only type annotations (e.g., `Tensor[4, 8] float32`)
+- `--show values` — show only runtime values (e.g., `tensor([[0.3, -1.2, ...]])`)
+- `--show both` — show types and values together
+
+## Runtime-aware Autocomplete
+
+When trickle knows a variable's runtime type, VSCode provides context-aware autocomplete based on observed types. For example, if trickle has seen that `t` is a `torch.Tensor`, typing `t.` offers completions for `shape`, `dtype`, `view`, `reshape`, `permute`, `unsqueeze`, and other tensor methods — without needing type stubs or static analysis.
+
+Trickle also applies semantic highlighting to distinguish properties from methods:
+
+- **Properties** are highlighted in blue (e.g., `t.shape`, `t.dtype`, `t.device`)
+- **Methods** are highlighted in yellow (e.g., `t.view()`, `t.reshape()`, `t.permute()`)
+
+This works for any type trickle has observed at runtime, not just tensors.
+
+## trickle hints
+
+The `trickle hints` command outputs source code with inline type annotations, designed for AI agents and CLI workflows where VSCode is not available.
+
+```bash
+# Show types for a specific file
+trickle hints train.py
+
+# Show runtime values alongside types
+trickle hints --values
+
+# Show error-mode output (crash-time variable values with error underline)
+trickle hints --errors
+```
+
+Example output for `trickle hints train.py`:
+
+```
+train.py
+
+x = torch.randn(4, 8)                          # x: Tensor[4, 8] float32
+w = torch.randn(16, 8)                          # w: Tensor[16, 8] float32
+h = x @ w.T                                     # h: Tensor[4, 16] float32
+loss = criterion(h, targets)                     # loss: Tensor[] float32
+```
+
+This gives AI coding agents full visibility into runtime types without needing editor integration.
+
 ## Troubleshooting
 
 ### No inline hints in VSCode

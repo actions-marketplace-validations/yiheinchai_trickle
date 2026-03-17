@@ -234,6 +234,73 @@ Each heal plan includes: detected issue, relevant context (queries, call trace, 
 
 ---
 
+## Use Case 9: Runtime Types in Terminal (for AI Agents)
+
+```bash
+trickle hints file.py
+```
+
+Outputs the original source code with inline type annotations derived from runtime observations — no type stubs, no guessing. AI agents can read this directly to understand what every variable actually is at runtime.
+
+**Basic usage — show inferred types inline:**
+
+```bash
+trickle hints app.py
+```
+
+```
+# app.py (3 functions observed)
+
+def get_user(user_id: int) -> dict:
+    db: sqlite3.Connection = ...
+    row: tuple | None = db.execute("SELECT ...", (user_id,)).fetchone()
+    return {"id": row[0], "name": row[1]}
+```
+
+**Error mode — show crash-time values with underline markers:**
+
+```bash
+trickle hints --errors
+```
+
+```
+# main.py — ERROR
+# ValueError: could not convert string to float: 'ID' (line 20)
+# Variables at crash time:
+
+data_dir: PosixPath = "../data/gaitpdb/1.0.0" = Path(...)
+file_path: string = "demographics.txt"
+    [float(d) for d in time.split("\t")] for time in patient_gait_data
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  <- ValueError: could not convert string to float: 'ID'
+```
+
+The `~~~` underline points directly at the expression that raised. The agent sees exactly which value caused the crash without reading logs or adding print statements.
+
+**Configurable display — types, values, or both:**
+
+```bash
+trickle hints app.py --show types    # only type annotations
+trickle hints app.py --show values   # only runtime values
+trickle hints app.py --show both     # types + values (default)
+```
+
+**Typical agent workflow:**
+
+```bash
+# 1. Run the program with trickle instrumentation
+trickle run python app.py
+
+# 2. If it crashes, inspect errors with inline context
+trickle hints --errors
+
+# 3. If it succeeds, inspect any file for runtime types
+trickle hints app.py
+```
+
+This replaces the pattern of reading error logs, grepping for variable names, and manually correlating stack traces to source lines. One command gives the agent a fully annotated view of the source at the moment of failure.
+
+---
+
 ## MCP Server Integration
 
 `trickle init` auto-creates `.claude/settings.json`:

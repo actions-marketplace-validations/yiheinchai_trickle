@@ -4,6 +4,10 @@ Runtime context for every variable in your code — types, shapes, values, error
 
 It's for the development process: when you're working with unfamiliar data, iterating on code, and need to understand what's actually flowing through each line.
 
+For example: Pytorch tensor shape annotations from runtime
+
+![Pytorch tensor shape annotations from runtime](image.png)
+
 ```bash
 pip install trickle-observe
 npm install -g trickle-cli
@@ -35,6 +39,19 @@ for file_path: string = "demographics.txt" in data_file_paths:
 ```
 
 `file_path` is `"demographics.txt"`. `patient_gait_data` is `string[]` — headers, not numbers. Bug found in seconds.
+
+## Try it
+
+There's a demo project in `demo/` you can run immediately:
+
+```bash
+# Script
+trickle run python demo/demo.py
+trickle hints demo/demo.py
+
+# Jupyter notebook
+# Open demo/demo.ipynb in VSCode, run the cells
+```
 
 ## Setup
 

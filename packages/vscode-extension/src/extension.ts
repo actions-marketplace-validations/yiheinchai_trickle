@@ -3776,6 +3776,10 @@ function typeNodeToPretty(node: TypeNode, indent: number = 0, dimLabels?: string
  */
 function isComplexType(node: TypeNode): boolean {
   if (node.kind === 'array' && node.element) return isComplexType(node.element);
+  if (node.kind === 'union') {
+    const members = node.elements || node.members;
+    return !!members && members.length > 1;
+  }
   if (node.kind !== 'object' || !node.properties) return false;
   const entries = Object.entries(node.properties);
   if (entries.length > 4) return true;

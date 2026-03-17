@@ -424,6 +424,19 @@ def _write_error_snapshots(exc: BaseException) -> None:
 
     error_msg = f"{type(exc).__name__}: {exc}"
 
+    # Resolve temp file path back to original source file.
+    # _entry_transform writes to .trickle_XXXXX.py in the same dir as the original.
+    import re
+    base = os.path.basename(user_filename)
+    if re.match(r'\.trickle_\w+\.py$', base):
+        # The original file is sys.argv[0] (set by _entry_transform)
+        original = sys.argv[0] if len(sys.argv) > 0 else user_filename
+        if os.path.exists(original):
+            user_filename = os.path.abspath(original)
+        # Correct line number for the preamble offset
+        preamble = int(os.environ.get("TRICKLE_PREAMBLE_LINES", "0"))
+        user_lineno = max(1, user_lineno - preamble)
+
     # Find the vars file
     trickle_dir = os.path.join(os.getcwd(), ".trickle")
     vars_file = os.path.join(trickle_dir, "variables.jsonl")

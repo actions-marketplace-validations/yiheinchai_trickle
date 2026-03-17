@@ -1,99 +1,64 @@
-BEFORE DOING ANYTHING, read principles.md. It governs all work on this project. Every principle exists because past AI agents drifted into building unused features. Follow it strictly.
+BEFORE DOING ANYTHING, read principles.md. It governs all work on this project.
 
-/loop 10min think of a feature that will improve this project and make it
-  more useful for developers, and provide real value. the vision is that
-  with minimal setup (one-liners changes) developers can turn their codebase
-  to start recording runtime types and bring those runtime types to compile
-  time so they get types information when they are programming (without
-  having to explicitly spend time writing the types), so they can develop
-  code faster because they know exactly the data they are manipulating. Once
-  you have a feature that you think will be useful to add, implement it in
-  full, test it e2e in full, and then commit and push (do not coauthor
-  claude).
+/loop 30min BUILD SOMETHING REAL, USE TRICKLE, FIX WHAT'S BROKEN.
 
+  You are not building trickle features. You are a developer working on a
+  real project, and trickle is your tool. The only way to improve trickle
+  is to use it and fix what doesn't work.
 
+  WORKFLOW:
+  1. Pick a real coding task on an UNFAMILIAR codebase or dataset. Examples:
+     - Clone a Python ML project and try to get it working with new data
+     - Pick a repo from ~/Documents/dev/ and try to fix a bug or add a feature
+     - Download a dataset you've never seen and write code to process it
+     - Clone an open-source project and try to understand how it works
 
-  /loop 10min Think of a feature that will improve this project for real-world developer
-  use. The vision: with one-liner setup, developers can record runtime types
-  and see them at compile time (hover in VSCode, auto-generated .d.ts/.pyi).
+  2. Use trickle throughout your development:
+     - `trickle run python your_script.py` to run your code
+     - `trickle hints` to see runtime types of every variable
+     - `trickle hints --errors` when something crashes — read the output
+       and use it to understand what went wrong
+     - `trickle vars` to inspect captured variables
 
-  CRITICAL RULES:
-  1. Before building ANYTHING, test the EXISTING features against a REAL
-     external project (not a synthetic test file you create). Clone a small
-     open-source TypeScript project, install trickle from npm, and try to
-     use it. Fix whatever breaks FIRST.
-  2. Only build a new feature after existing features work end-to-end in a
-     real project.
-  3. Test your new feature in that same real external project, not just
-     in-repo synthetic tests.
-  4. Your e2e test must: install from npm (not local path), run against
-     TypeScript (not plain JS), use a real test runner (vitest/jest), and
-     verify the output is actually useful (hover works in an editor, types
-     are correct).
-  5. Before publishing, verify: package name is available, exports resolve
-     correctly after npm install, binary works after global install.
-  6. Do NOT add features that sound impressive but aren't tested against
-     reality. One working feature > ten broken ones.
+  3. Pay attention to where trickle FAILS YOU:
+     - Did a type show as "unknown" when you know what it should be?
+     - Did the error output give you enough context to fix the bug?
+     - Was the error line number correct?
+     - Were the sample values helpful or truncated/useless?
+     - Was any output slow?
+     - Did you have to fall back to print() because trickle didn't capture
+       something you needed?
 
+  4. Fix what failed. This is the only way to add trickle features.
+     The gap between "what trickle showed me" and "what I needed to see"
+     IS the feature to build.
 
-  /loop 10min Think of 1 item to work on that will allow trickle to be used effectively and
-  working in the repos in the /dev directory (/Users/yihein.chai/Documents/dev/*), for example for repayment-service/scripts/cpaE2eHappyPath.test.ts.
-  my key goal is not just to capture API types but rather to capture the type of any variable
-  within any piece of code that i am running in that repo so that i can effectively debug.
- currently, i have to either add a bunch of log statements, or use a debugger to step through each line of the code and
- inspect what each variable value is to know where it is failing and which code logic / or which data is not what i expect.
- with trickle, i want to be able to run the code, either with test file or for real, and be able to see
- the cached types and example data by simply hovering over any variable in vs code.
- please test on real code in the repos in the dev directory. most important ones to test on are repayment-service, transaction-service, account-service, etc.
- please commit and push once that piece of work is completed and fully working.
+  5. After fixing, re-run your project to verify the output is now useful.
+     Commit and push. Publish affected packages.
+
+  DO NOT:
+  - "Think of a feature" — features come from usage, not imagination
+  - Build integrations nobody asked for (webhooks, compliance, RBAC)
+  - Add CLI commands without first using the existing ones on real code
+  - Mark anything as done without showing the before/after output
+
+  The goal is NOT to improve trickle. The goal is to build something real
+  and let trickle's gaps reveal themselves naturally.
 
 
-   /loop 10min Think of 1 item to work on python pytorch machine learning repos within any piece of code that i am running in that repo so that i can effectively debug.
- currently, i have to either add a bunch of print statements, or use a debugger to step through each line of the code and
- inspect what the shape is at everyline is to know where it is failing and which code logic / or which data is not what i expect.
- with trickle, i want to be able to run the code, and be able to see
- the cached types/shapes at each part of the code, simply hovering over each, and also has the shapes inline
- please test on real code in the ML repos you can find online. for example test on karpathy's gpt-2 implementation.
- please commit and push once that piece of work is completed and fully working.
+/loop 20min DIRECTOR: Read principles.md, then review the current state.
 
+  Your job is to set direction based on OBSERVED gaps, not market research.
 
-   /loop 5min Think of 1 item to work on ML engineer user case to improve the developer experience. For example, when
-   the ML engineer first runs the cell in the jupyter notebook, the inline types should appear immediately, rather than
-   the user having to close the notebook, reopen for the inline types to appear. when the engineer changes the code,
-   eg. changing the input/output dims of a linear layer, and runs the code, the inline types should update immediately after
-   the code is run, basically real time updates. the goal is to allow the ML engineer to iterate quickly to know the shapes
-   they are manipulating at any time, and when there is an error, the engineer should be able to trace the shapes,
-   by viewing at the inline hints to quickly know where it is going wrong. this is just an example, please look at usecases directory for the customer journey and add
-   to it as required by empathising with the user / audience. before you start work, please pull from remote. Once
-  you have a feature that you think will be useful to add, implement it in
-  full, please test on real code in the ML repos you can find online. for example test on karpathy's gpt-2 implementation.
- please commit and push once that piece of work is completed and fully working. then, please use the publish-skill to publish
+  1. Run `trickle hints` and `trickle hints --errors` on a real codebase
+  2. Look at the output — what's wrong, missing, or unhelpful?
+  3. Update the focus points in mission.md (max 3) based on what you found
+  4. Only edit within <focus point> tags
+  5. Keep <higher directive> the same unless the user asks you to change it
 
+  Focus points must be concrete and testable:
+    GOOD: "trickle hints shows 'unknown' for pandas DataFrames — fix type inference"
+    BAD:  "improve Python API completeness"
 
-/loop 5min please refer to mission.md for your latest instructions.
-
-
-/loop 20min You are the project director of trickle, you goal is too maximise the value trickle provides to the world.
-analyse the current state of the project, do market resesearch, and come up with a vision, direction and focus points for the project.
-edit the mission.md file to reflect that. only edit within the <higher directive> and <focus point> tags, do not change anything outside of those tags. the focus points should follow the general directive, and keep the rest of mission.md the same.
-
-
-/loop 30min REAL-WORLD TESTING WORKFLOW — This is the most valuable type of work.
-  The pattern that produces the best results:
-  1. Pick a REAL codebase (user's own code, or clone an open-source project)
-  2. Run trickle against it: `trickle run python script.py` or `%load_ext trickle` in a notebook
-  3. Look at what trickle actually outputs — are the types right? Are values useful? Is the error mode helpful?
-  4. Find bugs and gaps through real usage (e.g., "union types show as unknown[]", "error snapshots only show on error line not assignment lines", "autocomplete suggests Tensor methods for str variables")
-  5. Fix each issue, test it works, publish and push
-
-  Recent examples of high-value real-world-testing fixes:
-  - Error snapshots captured IPython builtins instead of user variables (list comprehension scope bug)
-  - Error hints stacked on error line instead of showing on each variable's assignment line
-  - union types rendered as "unknown[]" because Python uses "members" not "elements"
-  - Autocomplete/highlighting leaked across function scopes
-  - Script error snapshots didn't work (importing notebook.py failed in script mode)
-  - Line numbers were wrong due to AST unparse reformatting
-  - Serializing lists of tensors was slow (str() prints all tensor values)
-
-  These are the bugs that ONLY get found through real-world usage. Synthetic tests miss them.
-  When you find and fix these issues, update usecases/ docs and ML_DEBUGGING.md.
+  If all focus points are done, run trickle on a new codebase to find new ones.
+  Do NOT invent focus points from imagination.

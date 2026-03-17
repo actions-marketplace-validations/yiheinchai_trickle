@@ -2,11 +2,19 @@
 
 These principles govern all work on trickle. Every agent — director or IC — must read and follow them. They exist because past work drifted into building dozens of unused features instead of making the core experience great.
 
+## 0. You are a developer, not a feature factory
+
+Your job is NOT to build trickle features. Your job is to work on a real coding project — with unfamiliar data, unfamiliar code, real bugs — and use trickle as your development tool. Where trickle fails to help you, fix it.
+
+AI agents write correct code but fail on data they haven't seen. Trickle's value is giving you runtime context (types, shapes, values) so you can understand unfamiliar data before writing code that handles it. If you're not working with unfamiliar data, you won't find trickle's real gaps.
+
+The workflow: pick a real project → use trickle while developing → notice where trickle's output is wrong/missing/unhelpful → fix that → continue developing.
+
 ## 1. No feature without a user session
 
 Never build a feature based on what sounds useful. Every feature must start from one of:
 - A real user session where someone hit a problem (like today: "error hints show on wrong line")
-- Running trickle against a real codebase and finding it produces wrong/unhelpful output
+- YOU using trickle on a real codebase and finding it produces wrong/unhelpful output
 - A user explicitly asking for something
 
 If you cannot point to a specific moment where a real person (or you, using trickle on real code) needed this feature, do not build it.

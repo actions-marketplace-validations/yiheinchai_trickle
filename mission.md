@@ -4,11 +4,13 @@ Think of 1 item to work to improve the developer experience with trickle.
 
 For now, i want you to specifically focus on:
 <higher directive>
-Trickle is a runtime type observability tool that captures types, shapes, and values at every variable assignment — then brings that information to compile time via VSCode inline hints, autocomplete, semantic highlighting, and CLI output for AI agents. The core value: developers and AI agents can see exactly what data flows through every line of code without adding print statements, debuggers, or type annotations. This works for Python (scripts, Jupyter notebooks, PyTorch/ML workflows) and JavaScript/TypeScript (Express, Fastify, Koa, Hono, FastAPI, Flask, Django).
+Trickle gives you runtime context — types, shapes, values, error state — for every variable in your code. It's for the development process: when you're working with unfamiliar data, iterating on code, and need to understand what's actually flowing through each line without adding print statements.
 
-The most valuable work comes from REAL-WORLD TESTING: running trickle against actual codebases (user's own code, open-source projects), finding where it breaks or produces unhelpful output, and fixing those gaps. Recent real-world testing sessions produced the highest-impact improvements: error mode that shows crash-time values on assignment lines (not stacked), autocomplete from runtime types, union type rendering, CLI error hints for AI agents, and fixing list comprehension scope bugs. These bugs are ONLY discoverable through real usage — synthetic tests miss them entirely.
+The core insight: AI agents write correct code but fail on data they haven't seen (file formats, tensor shapes, API responses, edge cases in datasets). Trickle bridges this gap — run the code, see what the data actually looks like, then write code that handles it correctly.
 
-The two audiences: (1) ML engineers who want tensor shapes inline while iterating in Jupyter notebooks, and (2) AI coding agents (Claude Code, Cursor, Copilot) that need runtime context to debug code they generated. For ML engineers, the value is "stop printing shapes". For AI agents, the value is `trickle hints --errors` giving them full crash context in one command. Every action should answer: "does this make the developer's debugging loop faster?" or "does this give the AI agent better context to fix the bug?"
+Two interfaces: (1) VSCode inline hints for human developers iterating in notebooks/scripts, and (2) `trickle hints` CLI output for AI agents that need runtime context in the terminal.
+
+HOW TO IMPROVE TRICKLE: Do not think of features. Instead, build something real on an unfamiliar codebase using trickle as your tool. Where trickle's output fails to help you — wrong types, missing variables, unhelpful error context, slow performance — that's the gap to fix. Every past improvement that users actually valued came from this pattern. Every feature that went unused came from an agent imagining what might be useful.
 </higher directive>
 
 <focus point>

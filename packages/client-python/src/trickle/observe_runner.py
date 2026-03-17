@@ -426,16 +426,56 @@ def _write_error_snapshots(exc: BaseException) -> None:
 
     # Resolve temp file path back to original source file.
     # _entry_transform writes to .trickle_XXXXX.py in the same dir as the original.
-    import re
+    import re as _re
     base = os.path.basename(user_filename)
-    if re.match(r'\.trickle_\w+\.py$', base):
+    if _re.match(r'\.trickle_\w+\.py$', base):
         # The original file is sys.argv[0] (set by _entry_transform)
         original = sys.argv[0] if len(sys.argv) > 0 else user_filename
         if os.path.exists(original):
             user_filename = os.path.abspath(original)
-        # Correct line number for the preamble offset
+
+        # ast.unparse reformats code, so preamble subtraction doesn't give
+        # correct original line numbers. Instead, extract the error line's
+        # source text from the temp file and search for it in the original.
         preamble = int(os.environ.get("TRICKLE_PREAMBLE_LINES", "0"))
-        user_lineno = max(1, user_lineno - preamble)
+        try:
+            # Get the source line from the innermost user frame
+            err_source = user_frames[-1].f_code.co_filename
+            import linecache
+            err_line_text = linecache.getline(err_source, user_lineno).strip()
+            if err_line_text:
+                # ast.unparse may join multi-line statements into one line.
+                # Extract distinctive tokens to search in the original source.
+                # Use the shortest unique segment (e.g., function call that errored).
+                orig_lines = open(user_filename).readlines()
+                found = False
+                # Try full line match first
+                for i, line in enumerate(orig_lines):
+                    if err_line_text == line.strip():
+                        user_lineno = i + 1
+                        found = True
+                        break
+                # Try substring matches — split on operators/delimiters for tokens
+                if not found:
+                    # Extract meaningful fragments (function calls, variable refs)
+                    import re as _re2
+                    fragments = _re2.findall(r'[\w.]+\([^)]*\)', err_line_text)
+                    if not fragments:
+                        fragments = [err_line_text[:40]]
+                    for frag in fragments:
+                        for i, line in enumerate(orig_lines):
+                            if frag in line:
+                                user_lineno = i + 1
+                                found = True
+                                break
+                        if found:
+                            break
+                if not found:
+                    user_lineno = max(1, user_lineno - preamble)
+            else:
+                user_lineno = max(1, user_lineno - preamble)
+        except Exception:
+            user_lineno = max(1, user_lineno - preamble)
 
     # Find the vars file
     trickle_dir = os.path.join(os.getcwd(), ".trickle")

@@ -312,6 +312,12 @@ export async function hintsCommand(
 
       if (!obs || obs.size === 0) {
         console.log(src);
+        // Show error underline on the error line
+        if (opts.errors && errLine && lineNo === errLine) {
+          const indent = src.match(/^(\s*)/)?.[1] || "";
+          const contentLen = src.trimEnd().length - indent.length;
+          console.log(indent + "~".repeat(Math.max(contentLen, 1)) + `  ← ${errMsg}`);
+        }
         continue;
       }
 
@@ -371,6 +377,12 @@ export async function hintsCommand(
       }
 
       console.log(annotated);
+      // Show error underline on the error line
+      if (opts.errors && errLine && lineNo === errLine) {
+        const indent = src.match(/^(\s*)/)?.[1] || "";
+        const contentLen = src.trimEnd().length - indent.length;
+        console.log(indent + "~".repeat(Math.max(contentLen, 1)) + `  ← ${errMsg}`);
+      }
     }
 
     console.log("```");

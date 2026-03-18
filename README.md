@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">trickle</h1>
   <p align="center">
-    Runtime type annotations for Python — see tensor shapes, variable types, and crash-time values as you code.
+    Runtime type annotations for Python, Javascript/Typescript — see tensor shapes, variable types, and crash-time values as you code.
   </p>
   <p align="center">
     <a href="https://pypi.org/project/trickle-observe/"><img src="https://img.shields.io/pypi/v/trickle-observe?label=pypi&color=blue" alt="PyPI"></a>
@@ -76,12 +76,12 @@ trickle run python -m pytest tests/
 trickle run python manage.py runserver
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--include <patterns>` | Only observe matching modules |
-| `--exclude <patterns>` | Skip matching modules |
-| `--stubs <dir>` | Auto-generate .pyi type stubs after run |
-| `-w, --watch` | Watch and re-run on changes |
+| Flag                   | Description                             |
+| ---------------------- | --------------------------------------- |
+| `--include <patterns>` | Only observe matching modules           |
+| `--exclude <patterns>` | Skip matching modules                   |
+| `--stubs <dir>`        | Auto-generate .pyi type stubs after run |
+| `-w, --watch`          | Watch and re-run on changes             |
 
 ### `trickle hints`
 

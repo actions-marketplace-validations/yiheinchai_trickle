@@ -48,10 +48,19 @@ import { hintsCommand } from "./commands/hints";
 
 const program = new Command();
 
+// Only these commands show in --help. All others still work but are hidden.
+const VISIBLE_COMMANDS = new Set(["run", "hints", "vars", "init", "help"]);
+
 program
   .name("trickle")
-  .description("CLI for trickle runtime type observability")
-  .version("0.1.0");
+  .description("Runtime type annotations for Python — see tensor shapes, variable types, and crash-time values as you code")
+  .version((() => { try { return require("../package.json").version; } catch { return "0.0.0"; } })())
+  .configureHelp({
+    visibleCommands: (cmd: Command) => {
+      return cmd.commands.filter(c => VISIBLE_COMMANDS.has(c.name()));
+    },
+  })
+  .addHelpText("after", "\nAll other commands are available but hidden from this list. Run `trickle <command> --help` for any command.");
 
 // trickle init
 program
@@ -1090,24 +1099,6 @@ if (
   process.argv.splice(2, 0, "run");
 }
 
-// Custom help: show curated commands first, then full list
-program.addHelpText('before', `
-  ${chalk.bold('Quick Start')}
-    trickle init                Set up trickle in your project
-    trickle run <command>       Run with observability (zero code changes)
-    trickle test [command]      Run tests with structured results
-
-  ${chalk.bold('Analyze')}
-    trickle summary             Full overview: errors, queries, root causes
-    trickle explain <file>      Understand a file: functions, call graph, data flow
-    trickle flamegraph          Performance hotspots visualization
-    trickle doctor              Health check with recommended actions
-
-  ${chalk.bold('Fix & Verify')}
-    trickle verify --baseline   Save metrics before fixing
-    trickle verify              Compare after fixing
-
-  ${chalk.bold('All Commands')}
-`);
+// Help text removed — visibleCommands filter handles it
 
 program.parse();

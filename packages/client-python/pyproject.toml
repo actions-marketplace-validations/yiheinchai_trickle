@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trickle-observe"
-version = "0.2.61"
+version = "0.2.62"
 description = "Runtime type annotations for Python — see tensor shapes, variable types, and crash-time values as you code."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Software Development :: Debuggers",
     "Framework :: Jupyter",
 ]
-dependencies = ["requests>=2.28.0"]
+dependencies = ["requests>=2.28.0", "lovely-tensors>=0.1.16"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]

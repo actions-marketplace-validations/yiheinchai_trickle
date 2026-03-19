@@ -245,10 +245,7 @@ def _sanitize(value: Any, depth: int = 2) -> Any:
                 v = value.item() if hasattr(value, "item") else float(value)
                 return v
             if not hasattr(shape, '__len__') or len(shape) > 0:
-                parts = [f"shape={list(shape)}", f"dtype={value.dtype}"]
-                if hasattr(value, "device"):
-                    parts.append(f"device={value.device}")
-                return f"{tname}({', '.join(parts)})"
+                return str(value)[:200]
         except Exception:
             pass
 
@@ -589,9 +586,7 @@ def _generate_setup_code(filename: str, module_name: str, trace_vars: bool) -> s
             "            if hasattr(_sh, '__len__') and len(_sh) == 0:",
             "                _s = _val.item() if hasattr(_val, 'item') else float(_val)",
             "            else:",
-            "                _parts = [f'shape={list(_sh)}', f'dtype={_val.dtype}']",
-            "                if hasattr(_val, 'device'): _parts.append(f'device={_val.device}')",
-            "                _s = f'{type(_val).__name__}({\", \".join(_parts)})'",
+            "                _s = str(_val)[:200]",
             "        elif isinstance(_val, bool):",
             "            _s = _val",
             "        elif isinstance(_val, (int, float)):",

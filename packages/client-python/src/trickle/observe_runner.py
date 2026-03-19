@@ -61,6 +61,13 @@ def main() -> None:
         print("All exported functions in user modules are auto-wrapped.")
         sys.exit(1)
 
+    # Enable lovely-tensors for better tensor display (optional dependency)
+    try:
+        import lovely_tensors as _lt
+        _lt.monkey_patch()
+    except ImportError:
+        pass
+
     # Clear previous trace data so only the latest run's results show
     _local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
     _vars_file = os.path.join(_local_dir, "variables.jsonl")

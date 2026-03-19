@@ -111,10 +111,8 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
                 # Scalar tensor/numpy scalar — show actual value
                 sample = value.item() if hasattr(value, "item") else float(value)
             else:
-                parts = [f"shape={list(shape)}", f"dtype={value.dtype}"]
-                if hasattr(value, "device"):
-                    parts.append(f"device={value.device}")
-                sample = f'{type(value).__name__}({", ".join(parts)})'
+                # Use str(value) which picks up lovely-tensors formatting if installed
+                sample = str(value)[:200]
         elif isinstance(value, (int, float, bool)):
             sample = value
         elif isinstance(value, str):
@@ -924,6 +922,13 @@ def activate() -> None:
         return
 
     _active = True
+
+    # Enable lovely-tensors for better tensor display (optional dependency)
+    try:
+        import lovely_tensors as _lt
+        _lt.monkey_patch()
+    except ImportError:
+        pass
 
     # Inject the tracer function into the user namespace
     ip.user_ns["_trickle_tv"] = _trickle_tv

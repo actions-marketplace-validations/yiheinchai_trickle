@@ -209,9 +209,7 @@ def _trickle_tv(_val, _name, _line, _func=None):
             if hasattr(_sh, '__len__') and len(_sh) == 0:
                 _s = _val.item() if hasattr(_val, 'item') else float(_val)
             else:
-                _parts = [f'shape={{list(_sh)}}', f'dtype={{_val.dtype}}']
-                if hasattr(_val, 'device'): _parts.append(f'device={{_val.device}}')
-                _s = f'{{type(_val).__name__}}({{", ".join(_parts)}})'
+                _s = str(_val)[:200]
         elif isinstance(_val, bool):
             _s = _val
         elif isinstance(_val, (int, float)):

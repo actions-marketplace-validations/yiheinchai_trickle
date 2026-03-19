@@ -128,6 +128,12 @@ def _trickle_tv(value: Any, var_name: str, line_no: int, cell_id: str, cell_idx:
                         items.append(item)
                     elif isinstance(item, str):
                         items.append(item[:80])
+                    elif hasattr(item, "shape") and hasattr(item, "dtype"):
+                        # Tensor/ndarray — use attribute-based summary (avoids lovely-tensors repr)
+                        p = [f"shape={list(item.shape)}", f"dtype={item.dtype}"]
+                        if hasattr(item, "device"):
+                            p.append(f"device={item.device}")
+                        items.append(f"{type(item).__name__}({', '.join(p)})")
                     else:
                         items.append(str(item)[:80])
                 sample = items
@@ -738,6 +744,11 @@ def _quick_type_and_sample(val: Any) -> tuple:
                 items.append(item)
             elif isinstance(item, str):
                 items.append(item[:80])
+            elif hasattr(item, "shape") and hasattr(item, "dtype"):
+                p = [f"shape={list(item.shape)}", f"dtype={item.dtype}"]
+                if hasattr(item, "device"):
+                    p.append(f"device={item.device}")
+                items.append(f"{type(item).__name__}({', '.join(p)})")
             else:
                 items.append(str(item)[:80])
         if len(val) > 20:

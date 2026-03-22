@@ -1,6 +1,6 @@
 import * as path from "path";
 import * as fs from "fs";
-import { spawn, ChildProcess } from "child_process";
+import { spawn, execSync, ChildProcess } from "child_process";
 import chalk from "chalk";
 import { getBackendUrl } from "../config";
 import {
@@ -153,7 +153,7 @@ function detectSingleFile(command: string): string | null {
 
 function autoDetectCommand(input: string): string {
   // If it already starts with a known runtime, return as-is
-  if (/^(node|ts-node|tsx|nodemon|bun|deno|python3?|python3?\.\d+|vitest|jest|mocha|npx|bunx|pytest|uvicorn|gunicorn|flask|django-admin)\b/.test(input)) {
+  if (/^((?:[\w./~-]+\/)?(node|ts-node|tsx|nodemon|bun|deno|python3?(?:\.\d+)?|vitest|jest|mocha|npx|bunx|pytest|uvicorn|gunicorn|flask|django-admin))\b/.test(input)) {
     return input;
   }
 
@@ -1328,7 +1328,7 @@ function injectObservation(
     return { instrumentedCommand: command, env };
   }
 
-  const pyMatch = command.match(/^(python3?|python3?\.\d+)\s/);
+  const pyMatch = command.match(/^((?:[\w./~-]+\/)?python3?(?:\.\d+)?)\s/);
   if (pyMatch) {
     const python = pyMatch[1];
     const rest = command.slice(pyMatch[0].length);
@@ -1336,6 +1336,9 @@ function injectObservation(
     if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
     // Auto-enable terminal type summary when running via trickle run
     if (!process.env.TRICKLE_SUMMARY) env.TRICKLE_SUMMARY = "1";
+    // Ensure trickle is importable even if the target Python is a venv without it.
+    // Find trickle's install location from any available system Python and inject via PYTHONPATH.
+    ensureTricklePythonPath(python, env);
     return {
       instrumentedCommand: `${python} -c "from trickle.observe_runner import main; main()" ${rest}`,
       env,
@@ -1345,6 +1348,7 @@ function injectObservation(
   if (/^(pytest|uvicorn|gunicorn|flask|django-admin)\b/.test(command)) {
     if (opts.include) env.TRICKLE_OBSERVE_INCLUDE = opts.include;
     if (opts.exclude) env.TRICKLE_OBSERVE_EXCLUDE = opts.exclude;
+    ensureTricklePythonPath("python", env);
     return {
       instrumentedCommand: `python -c "from trickle.observe_runner import main; main()" -m ${command}`,
       env,
@@ -1359,6 +1363,46 @@ function injectObservation(
   const existing = process.env.NODE_OPTIONS || "";
   env.NODE_OPTIONS = `${existing} -r ${observePath}`.trim();
   return { instrumentedCommand: command, env };
+}
+
+/**
+ * Ensure the target Python can import trickle by adding the trickle package's
+ * site-packages to PYTHONPATH. This handles the case where the user runs a venv
+ * Python that doesn't have trickle-observe installed — we find it from the system
+ * Python (or any Python that has it) and inject the path.
+ */
+function ensureTricklePythonPath(
+  targetPython: string,
+  env: Record<string, string>,
+): void {
+  // First check if the target Python already has trickle
+  try {
+    execSync(
+      `${targetPython} -c "import trickle" 2>/dev/null`,
+      { stdio: "ignore", timeout: 5000 },
+    );
+    return; // trickle is already importable
+  } catch {
+    // Not available in target Python — find it elsewhere
+  }
+
+  // Try common Python commands to find where trickle is installed
+  const candidates = ["python3", "python", "python3.11", "python3.12", "python3.13", "python3.10"];
+  for (const py of candidates) {
+    try {
+      const sitePath = execSync(
+        `${py} -c "import trickle, os; print(os.path.dirname(os.path.dirname(trickle.__file__)))"`,
+        { encoding: "utf-8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
+      if (sitePath) {
+        const existing = env.PYTHONPATH || process.env.PYTHONPATH || "";
+        env.PYTHONPATH = existing ? `${sitePath}:${existing}` : sitePath;
+        return;
+      }
+    } catch {
+      continue;
+    }
+  }
 }
 
 function resolveObservePath(): string {

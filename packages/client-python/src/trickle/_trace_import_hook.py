@@ -804,6 +804,20 @@ class _TrickleTraceLoader:
         """Return None to use default module creation semantics."""
         return None
 
+    def get_code(self, fullname: str) -> Any:
+        """Return compiled code for the module (required by runpy.run_module)."""
+        filepath = os.path.realpath(self.spec.origin)
+        module_name = fullname.rsplit(".", 1)[-1]
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                source = f.read()
+            transformed = _transform_module_source(source, filepath, module_name)
+            return compile(transformed, filepath, "exec")
+        except Exception:
+            with open(filepath, "r", encoding="utf-8") as f:
+                source = f.read()
+            return compile(source, filepath, "exec")
+
     def exec_module(self, module: types.ModuleType) -> None:
         """Execute the transformed module source in the module's namespace."""
         fullname = module.__name__

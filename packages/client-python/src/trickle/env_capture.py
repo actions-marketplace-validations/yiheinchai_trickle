@@ -34,7 +34,13 @@ def _redact(name: str, value: str) -> str:
 
 
 def capture_environment() -> None:
-    """Capture environment snapshot to .trickle/environment.json."""
+    """Capture environment snapshot to .trickle/environment.json.
+
+    Only runs when TRICKLE_CAPTURE_ENV=1 is set (opt-in).
+    """
+    if os.environ.get("TRICKLE_CAPTURE_ENV") != "1":
+        return
+
     local_dir = os.environ.get("TRICKLE_LOCAL_DIR") or os.path.join(os.getcwd(), ".trickle")
     os.makedirs(local_dir, exist_ok=True)
     env_file = os.path.join(local_dir, "environment.json")

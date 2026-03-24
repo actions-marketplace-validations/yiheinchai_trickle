@@ -875,7 +875,7 @@ async function handleRequest(req: JsonRpcRequest): Promise<JsonRpcResponse> {
           case "get_environment": {
             const envFile = path.join(findTrickleDir(), "environment.json");
             if (!fs.existsSync(envFile)) {
-              result = { environment: "No environment snapshot. Run the app with trickle first." };
+              result = { environment: "No environment snapshot. Set TRICKLE_CAPTURE_ENV=1 and run the app with trickle to capture." };
             } else {
               try { result = JSON.parse(fs.readFileSync(envFile, "utf-8")); } catch { result = { environment: "Failed to read environment snapshot." }; }
             }

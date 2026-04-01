@@ -55,6 +55,10 @@ _SKIP_TOP_LEVEL = frozenset({
     "numpy", "pandas", "scipy", "sklearn", "matplotlib",
     "torch", "torchvision", "torchaudio", "transformers",
     "tensorflow", "tf", "keras", "jax", "flax",
+    # Experiment tracking / logging
+    "wandb", "mlflow", "tensorboard", "tensorboardX",
+    # Protobuf / gRPC
+    "google", "protobuf", "grpc", "grpcio",
     # Serialization / utils
     "dill", "cloudpickle", "multiprocess", "six", "tqdm", "packaging",
     "PIL", "cv2", "skimage",
@@ -279,6 +283,14 @@ def _trickle_dl(_val, _names, _var, _line, _func=None):
             _f.write(_trickle_json.dumps(_r) + '\\n')
     except Exception:
         pass
+# Make trickle tracer functions opaque to torch.compile / dynamo
+try:
+    import torch._dynamo as _trickle_dynamo
+    _trickle_tv = _trickle_dynamo.disable(_trickle_tv)
+    _trickle_dl = _trickle_dynamo.disable(_trickle_dl)
+    _trickle_wrap = _trickle_dynamo.disable(_trickle_wrap)
+except (ImportError, AttributeError):
+    pass
 # --- end trickle variable tracer ---
 """
 

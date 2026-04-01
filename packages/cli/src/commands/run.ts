@@ -460,6 +460,9 @@ async function executeSingleRun(
 
   const { generateLocalStubs, generateFromJsonl, readObservations } = await import("../local-codegen");
 
+  // Snapshot JSONL file sizes before the run so we only show new data in summary
+  const obsOffsetBefore = fs.existsSync(jsonlPath) ? fs.statSync(jsonlPath).size : 0;
+
   // Check if stub generation is enabled (opt-in: TRICKLE_STUBS=1 enables .pyi/.d.ts files)
   const stubsEnabled = (env.TRICKLE_STUBS || process.env.TRICKLE_STUBS || "0").toLowerCase() !== "0";
 
@@ -492,8 +495,31 @@ async function executeSingleRun(
     generateLocalStubs(singleFile, jsonlPath);
   }
 
-  // Show local summary with function signatures
-  const observations = readObservations(jsonlPath);
+  // Show local summary with only NEW function signatures from this run.
+  // Read only bytes appended after the pre-run snapshot to avoid showing stale data.
+  let observations = readObservations(jsonlPath);
+  if (obsOffsetBefore > 0 && fs.existsSync(jsonlPath)) {
+    const tmpPath = jsonlPath + ".run-delta";
+    try {
+      const fd = fs.openSync(jsonlPath, "r");
+      const totalSize = fs.fstatSync(fd).size;
+      const newSize = totalSize - obsOffsetBefore;
+      if (newSize > 0) {
+        const buf = Buffer.alloc(newSize);
+        fs.readSync(fd, buf, 0, newSize, obsOffsetBefore);
+        fs.closeSync(fd);
+        fs.writeFileSync(tmpPath, buf);
+        observations = readObservations(tmpPath);
+      } else {
+        fs.closeSync(fd);
+        observations = [];
+      }
+    } catch {
+      // Fall back to showing all observations
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch {}
+    }
+  }
   const totalFunctions = observations.length;
 
   console.log("");
@@ -1410,6 +1436,14 @@ function ensureTricklePythonPath(
       continue;
     }
   }
+
+  // trickle not found anywhere — warn the user
+  console.error(
+    chalk.yellow(
+      "\n  ⚠ trickle Python package not found. Install it with:\n\n" +
+      "    pip install trickle-observe\n",
+    ),
+  );
 }
 
 function resolveObservePath(): string {

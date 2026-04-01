@@ -94,6 +94,7 @@ program
   .option("--annotate <path>", "Auto-annotate this file or directory with types after the run")
   .option("-w, --watch", "Watch source files and re-run on changes")
   .allowUnknownOption()
+  .passThroughOptions()
   .action(async (commandParts: string[], opts) => {
     const command = commandParts.length > 0 ? commandParts.join(" ") : undefined;
     await runCommand(command, opts);

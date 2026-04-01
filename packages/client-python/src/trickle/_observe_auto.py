@@ -63,6 +63,10 @@ def _should_observe(fullname: str) -> bool:
         "torch", "torchvision", "torchaudio", "transformers",
         "tensorflow", "tf", "keras", "jax", "flax",
         "mlx", "sentencepiece",
+        # Experiment tracking / logging
+        "wandb", "mlflow", "tensorboard", "tensorboardX",
+        # Protobuf / gRPC
+        "google", "protobuf", "grpc", "grpcio",
         # Typing
         "typing", "typing_extensions",
         # Stdlib categories
